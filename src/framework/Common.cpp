@@ -734,6 +734,9 @@ int				time_gameFrame;
 int				time_gameDraw;
 int				time_frontend;			// renderSystem frontend time
 int				time_backend;			// renderSystem backend time
+int				time_sessionFrame;		// session->Frame() total
+int				time_preFrame;			// events + config + command loop before session->Frame()
+int				time_eventsCfg;			// events + settings + config write
 int				time_draw;				// session Draw() time (game draw + frontend)
 int				time_endframe;			// renderSystem EndFrame time (backend submit + swap)
 
@@ -6546,6 +6549,7 @@ void idCommonLocal::Frame( void ) {
 		Common_PresentationStallProbe();
 		Common_MarkFrameWork(openq4::FrameWorkPhase::Wait);
 
+		const int speedsT0 = Sys_Milliseconds();
 		// pump all the events
 		Sys_GenerateEvents();
 		Common_MarkFrameWork(openq4::FrameWorkPhase::Events);
@@ -6562,6 +6566,7 @@ void idCommonLocal::Frame( void ) {
 		}
 		Common_MarkFrameWork(openq4::FrameWorkPhase::Configuration);
 
+		const int speedsT1 = Sys_Milliseconds();
 		eventLoop->RunEventLoop();
 
 		com_frameTime = GetUserCmdTime( com_ticNumber );
@@ -6589,7 +6594,11 @@ void idCommonLocal::Frame( void ) {
 			Common_MarkFrameWork(openq4::FrameWorkPhase::Session);
 		}
 	} else {
+			const int speedsT2 = Sys_Milliseconds();
 			session->Frame();
+			time_sessionFrame = Sys_Milliseconds() - speedsT2;
+			time_preFrame = speedsT2 - speedsT0;
+			time_eventsCfg = speedsT1 - speedsT0;
 			Common_MarkFrameWork(openq4::FrameWorkPhase::Session);
 
 			// normal, in-sequence screen update
@@ -6603,7 +6612,7 @@ void idCommonLocal::Frame( void ) {
 			int		nowTime = Sys_Milliseconds();
 			int		com_frameMsec = nowTime - lastTime;
 			lastTime = nowTime;
-			Printf( "frame:%i all:%3i gfr:%3i rf:%3i bk:%3i draw:%3i end:%3i\n", com_frameNumber, com_frameMsec, time_gameFrame, time_frontend, time_backend, time_draw, time_endframe );
+			Printf( "frame:%i all:%3i gfr:%3i rf:%3i bk:%3i draw:%3i end:%3i ses:%3i pre:%3i ev:%3i\n", com_frameNumber, com_frameMsec, time_gameFrame, time_frontend, time_backend, time_draw, time_endframe, time_sessionFrame, time_preFrame, time_eventsCfg );
 			time_gameFrame = 0;
 			time_gameDraw = 0;
 		}	

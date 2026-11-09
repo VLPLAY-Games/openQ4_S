@@ -3,7 +3,11 @@
 
 #ifdef ID_SIMD_SSE2_AVAILABLE
 
+#if defined( __aarch64__ )
+#include "Simd_neon_shim.h"
+#else
 #include <emmintrin.h>
+#endif
 
 //===============================================================
 //
@@ -17,7 +21,11 @@ idSIMD_SSE2::GetName
 ============
 */
 const char * VPCALL idSIMD_SSE2::GetName( void ) const {
+#if defined( __aarch64__ )
+	return "NEON";
+#else
 	return "SSE2";
+#endif
 }
 
 /*

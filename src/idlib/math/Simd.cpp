@@ -34,6 +34,106 @@ void idSIMD::Init( void ) {
 	SIMDProcessor = generic;
 }
 
+
+#if defined( __aarch64__ )
+/*
+============
+SIMD_NEONSelfTest
+
+Runs the NEON routines against the generic ones on pseudo-random data. The
+NEON layer cannot be tested on the machines the code is written on, so a
+mismatch here (reported in the log) falls back to the generic processor
+instead of corrupting animation or shadows.
+============
+*/
+static bool SIMD_NEONSelfTest( idSIMDProcessor *neon, idSIMDProcessor *ref ) {
+	const int N = 67;	// not a multiple of 4 or 16, so the scalar tails run too
+	static idDrawVert verts[N];
+	static idPlane planes[N];
+	static idVec3 points[N];
+	static float a[N], b[N];
+	static byte c0[N], c1[N];
+	static int indexes[60 * 3];
+
+	unsigned int seed = 12345u;
+	#define NEON_RND() ( seed = seed * 1664525u + 1013904223u, ( ( seed >> 8 ) & 0xFFFF ) / 65535.0f * 20.0f - 10.0f )
+	memset( verts, 0, sizeof( verts ) );
+	for ( int i = 0; i < N; i++ ) {
+		verts[i].xyz.Set( NEON_RND(), NEON_RND(), NEON_RND() );
+		planes[i] = idPlane( NEON_RND(), NEON_RND(), NEON_RND(), NEON_RND() );
+		points[i].Set( NEON_RND(), NEON_RND(), NEON_RND() );
+	}
+	for ( int i = 0; i < 60 * 3; i++ ) {
+		seed = seed * 1664525u + 1013904223u;
+		indexes[i] = ( seed >> 8 ) % N;
+	}
+	const idVec3 k( NEON_RND(), NEON_RND(), NEON_RND() );
+	const idPlane kp( NEON_RND(), NEON_RND(), NEON_RND(), NEON_RND() );
+	#undef NEON_RND
+
+	bool ok = true;
+	#define NEON_CLOSE( x, y ) ( idMath::Fabs( ( x ) - ( y ) ) <= 1e-3f * ( 1.0f + idMath::Fabs( y ) ) )
+	#define NEON_CHECK_ARRAY( what ) \
+		for ( int i = 0; i < N; i++ ) { \
+			if ( !NEON_CLOSE( a[i], b[i] ) ) { \
+				idLib::common->Printf( "NEON self test: %s mismatch at %d (%f vs %f)\n", what, i, a[i], b[i] ); \
+				ok = false; \
+				break; \
+			} \
+		}
+
+	neon->Dot( a, k, planes, N );	ref->Dot( b, k, planes, N );	NEON_CHECK_ARRAY( "Dot(vec3, plane)" )
+	neon->Dot( a, k, verts, N );	ref->Dot( b, k, verts, N );		NEON_CHECK_ARRAY( "Dot(vec3, drawVert)" )
+	neon->Dot( a, kp, points, N );	ref->Dot( b, kp, points, N );	NEON_CHECK_ARRAY( "Dot(plane, vec3)" )
+	neon->Dot( a, kp, verts, N );	ref->Dot( b, kp, verts, N );	NEON_CHECK_ARRAY( "Dot(plane, drawVert)" )
+
+	{
+		idVec3 mn0, mx0, mn1, mx1;
+		neon->MinMax( mn0, mx0, verts, N );	ref->MinMax( mn1, mx1, verts, N );
+		if ( !( mn0 == mn1 ) || !( mx0 == mx1 ) ) {
+			idLib::common->Printf( "NEON self test: MinMax mismatch\n" );
+			ok = false;
+		}
+		neon->MinMax( mn0, mx0, verts, indexes, 60 * 3 );	ref->MinMax( mn1, mx1, verts, indexes, 60 * 3 );
+		if ( !( mn0 == mn1 ) || !( mx0 == mx1 ) ) {
+			idLib::common->Printf( "NEON self test: MinMax(indexes) mismatch\n" );
+			ok = false;
+		}
+	}
+
+	{
+		static idPlane p0[60], p1[60];
+		neon->DeriveTriPlanes( p0, verts, N, indexes, 60 * 3 );
+		ref->DeriveTriPlanes( p1, verts, N, indexes, 60 * 3 );
+		for ( int i = 0; i < 60; i++ ) {
+			for ( int j = 0; j < 4; j++ ) {
+				if ( !NEON_CLOSE( p0[i][j], p1[i][j] ) ) {
+					idLib::common->Printf( "NEON self test: DeriveTriPlanes mismatch at %d\n", i );
+					ok = false;
+					i = 60;
+					break;
+				}
+			}
+		}
+	}
+
+	for ( int i = 0; i < N; i++ ) {
+		a[i] = planes[i][0];
+	}
+	memset( c0, 0, sizeof( c0 ) );
+	memset( c1, 0, sizeof( c1 ) );
+	neon->CmpGT( c0, 2, a, 1.5f, N );	ref->CmpGT( c1, 2, a, 1.5f, N );
+	neon->CmpLE( c0, a, -0.5f, N );		ref->CmpLE( c1, a, -0.5f, N );
+	if ( memcmp( c0, c1, sizeof( c0 ) ) != 0 ) {
+		idLib::common->Printf( "NEON self test: Cmp mismatch\n" );
+		ok = false;
+	}
+	#undef NEON_CLOSE
+	#undef NEON_CHECK_ARRAY
+	return ok;
+}
+#endif
+
 /*
 ============
 idSIMD::InitProcessor
@@ -49,8 +149,8 @@ void idSIMD::InitProcessor( const char *module, bool forceGeneric ) {
 		newProcessor = generic;
 	} else {
 		if ( processor == NULL ) {
-#if defined( ID_SIMD_SSE2_AVAILABLE ) && ( defined( _M_X64 ) || defined( __x86_64__ ) )
-			// SSE2 is architecturally guaranteed on x86-64
+#if defined( ID_SIMD_SSE2_AVAILABLE ) && ( defined( _M_X64 ) || defined( __x86_64__ ) || defined( __aarch64__ ) )
+			// SSE2 is architecturally guaranteed on x86-64, and NEON on AArch64
 			processor = new idSIMD_SSE2;
 #elif defined( ID_SIMD_SSE2_AVAILABLE )
 			if ( ( cpuid & CPUID_SSE2 ) != 0 ) {
@@ -64,6 +164,15 @@ void idSIMD::InitProcessor( const char *module, bool forceGeneric ) {
 			if ( processor != generic ) {
 				processor->cpuid = cpuid;
 			}
+#if defined( __aarch64__ )
+			if ( processor != generic && !SIMD_NEONSelfTest( processor, generic ) ) {
+				idLib::common->Printf( "NEON SIMD failed its self test; using the generic processor\n" );
+				delete processor;
+				processor = generic;
+			} else if ( processor != generic ) {
+				idLib::common->Printf( "NEON SIMD self test passed\n" );
+			}
+#endif
 		}
 		newProcessor = processor;
 	}

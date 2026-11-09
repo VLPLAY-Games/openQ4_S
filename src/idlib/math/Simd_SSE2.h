@@ -5,7 +5,8 @@
 /*
 ===============================================================================
 
-	SSE2 implementation of idSIMDProcessor
+	SSE2 implementation of idSIMDProcessor (also built for AArch64, where
+	Simd_neon_shim.h expresses the same intrinsics with NEON)
 
 	Intrinsics based, so it compiles on MSVC x64 (where the original inline
 	assembly SIMD implementations could not). Only the renderer and animation
@@ -20,7 +21,7 @@
 
 #include "Simd_generic.h"
 
-#if !defined( _XENON ) && ( defined( _M_X64 ) || defined( __x86_64__ ) || defined( _M_IX86 ) || defined( __i386__ ) )
+#if !defined( _XENON ) && ( defined( _M_X64 ) || defined( __x86_64__ ) || defined( _M_IX86 ) || defined( __i386__ ) || defined( __aarch64__ ) )
 
 #define ID_SIMD_SSE2_AVAILABLE 1
 
