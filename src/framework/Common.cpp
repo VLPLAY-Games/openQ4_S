@@ -152,7 +152,7 @@ idCVar com_productionMode("com_productionMode", "0", CVAR_SYSTEM | CVAR_BOOL, "0
 idCVar com_forceGenericSIMD( "com_forceGenericSIMD", "0", CVAR_BOOL | CVAR_SYSTEM | CVAR_NOCHEAT, "force generic platform independent SIMD" );
 idCVar com_developer( "developer", "0", CVAR_BOOL|CVAR_SYSTEM|CVAR_NOCHEAT, "developer mode" );
 idCVar con_allowConsole( "con_allowConsole", "1", CVAR_BOOL | CVAR_SYSTEM | CVAR_ARCHIVE | CVAR_NOCHEAT, "allow toggling the console with the tilde key; set to 0 to require Ctrl+Alt+Tilde" );
-idCVar com_speeds( "com_speeds", "0", CVAR_BOOL|CVAR_SYSTEM|CVAR_NOCHEAT, "show engine timings" );
+idCVar com_speeds( "com_speeds", "0", CVAR_BOOL|CVAR_SYSTEM|CVAR_NOCHEAT|CVAR_ARCHIVE, "show engine timings" );
 idCVar com_showFPS( "com_showFPS", "0", CVAR_INTEGER | CVAR_SYSTEM | CVAR_ARCHIVE | CVAR_NOCHEAT, "show frames rendered per second: 1 = in-game only, 2 = legacy always on", 0, 2, idCmdSystem::ArgCompletion_Integer<0,2> );
 idCVar com_maxfps( "com_maxfps", "240", CVAR_INTEGER | CVAR_SYSTEM | CVAR_ARCHIVE | CVAR_NOCHEAT, "presentation frame cap, 0 = uncapped", 0, 1000, idCmdSystem::ArgCompletion_Integer<0,1000> );
 static idCVar com_preciseFrameWait( "com_preciseFrameWait", "1", CVAR_BOOL | CVAR_SYSTEM | CVAR_NOCHEAT, "frame cap wait: 1 = sleep on the high-resolution timer and spin only its measured wake-up error, 0 = whole-millisecond sleeps and a fixed spin" );

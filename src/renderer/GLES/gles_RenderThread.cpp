@@ -201,7 +201,9 @@ void R_RenderThread_SyncFrontEnd( const char *reason ) {
 }
 
 bool R_RenderThread_Begin( const emptyCommand_t *cmds ) {
-	if ( !r_glRenderThread.GetBool() || r_skipBackEnd.GetBool() || !R_RenderThread_FrameQualifies() ) {
+	// Only gameplay frames run threaded. Start-up, loading and menu frames draw from client memory
+	// the main thread is still rewriting (vertex cache temps, GUI quads): keep them inline.
+	if ( !r_glRenderThread.GetBool() || r_skipBackEnd.GetBool() || tr.primaryWorld == NULL || !R_RenderThread_FrameQualifies() ) {
 		rt_framesInline++;
 		return false;
 	}
