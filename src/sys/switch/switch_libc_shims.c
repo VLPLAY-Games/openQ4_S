@@ -202,8 +202,16 @@ static void __attribute__(( constructor( 101 ) )) switch_first_ctor( void ) {
 }
 
 #include <pthread.h>
+/* Horizon gives applications cores 0-2. Without a mask the kernel moves threads between them,
+   and two busy threads on one core time-slice in 10 ms steps. Pin the busy ones apart:
+   main on 0, render thread on 1, audio and light helpers on 2. */
+void switch_pin_current_thread( int core ) {
+	svcSetThreadCoreMask( CUR_THREAD_HANDLE, core, 1u << core );
+}
+
 static void *switch_log_flusher( void *arg ) {
 	(void)arg;
+	switch_pin_current_thread( 2 );
 	for ( ;; ) {
 		svcSleepThread( 2000000000ULL );	// 2 s
 		fflush( stdout );
@@ -211,8 +219,36 @@ static void *switch_log_flusher( void *arg ) {
 	return NULL;
 }
 
+/* Optional CPU clock request: sdmc:/switch/openQ4/cpu_clock.txt holding a frequency in MHz
+   (for example 1785). Absent file: leave the clock to the system or to an overclock sysmodule. */
+static void switch_apply_cpu_clock( void ) {
+	FILE *f = fopen( SWITCH_DATA_DIR "/cpu_clock.txt", "r" );
+	int mhz = 0;
+	if ( !f ) {
+		return;
+	}
+	if ( fscanf( f, "%d", &mhz ) != 1 ) {
+		mhz = 0;
+	}
+	fclose( f );
+	if ( mhz < 500 || mhz > 2400 ) {
+		return;
+	}
+	// ask the system for its CPU boost mode first, then set the rate itself
+	appletSetCpuBoostMode( ApmCpuBoostMode_FastLoad );
+	if ( hosversionAtLeast( 8, 0, 0 ) ) {
+		static ClkrstSession session;
+		if ( R_SUCCEEDED( clkrstInitialize() ) && R_SUCCEEDED( clkrstOpenSession( &session, PcvModuleId_CpuBus, 3 ) ) ) {
+			clkrstSetClockRate( &session, (u32)mhz * 1000000u );
+		}
+	} else if ( R_SUCCEEDED( pcvInitialize() ) ) {
+		pcvSetClockRate( PcvModule_CpuBus, (u32)mhz * 1000000u );
+	}
+}
+
 void userAppInit( void ) {
 	switch_mark( "userAppInit" );
+	switch_pin_current_thread( 0 );
 	// OpenAL Soft settings (output format, buffering) live next to the game.
 	setenv( "ALSOFT_CONF", SWITCH_DATA_DIR "/alsoft.conf", 1 );
 	// Networking for multiplayer and for nxlink log streaming (`nxlink -s`).
@@ -220,6 +256,7 @@ void userAppInit( void ) {
 	int nxlinkFd = nxlinkStdio();
 	// Quake 4 data (q4base/) lives next to the NRO; relative paths resolve from here.
 	chdir( SWITCH_DATA_DIR );
+	switch_apply_cpu_clock();
 	switch_mark( "userAppInit done" );
 	// Without a nxlink listener, keep the log on the SD card instead (unbuffered, so it survives a crash).
 	if ( nxlinkFd < 0 ) {

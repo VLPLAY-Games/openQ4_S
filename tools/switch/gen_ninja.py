@@ -32,6 +32,13 @@ GROUPS = {
 }
 
 # Files the Switch build replaces; they are listed in switch_overrides.txt.
+# GL entry points the renderer group's profiling wrappers (gles_RenderThread.cpp) intercept.
+GL_WRAP = ["glDrawElements", "glDrawArrays", "glUseProgram", "glBindTexture", "glActiveTexture", "glTexParameteri",
+           "glUniform1f", "glUniform1i", "glUniform2f", "glUniform3f", "glUniform4f", "glUniform1fv", "glUniform2fv",
+           "glUniform3fv", "glUniform4fv", "glUniformMatrix4fv", "glVertexAttribPointer", "glEnableVertexAttribArray",
+           "glDisableVertexAttribArray", "glEnable", "glDisable", "glBlendFunc", "glDepthFunc", "glDepthMask",
+           "glColorMask", "glStencilFunc", "glStencilOp", "glCullFace", "glScissor", "glViewport", "glPolygonOffset",
+           "glLinkProgram", "glDeleteProgram", "glBindBuffer", "glBufferSubData", "glBindVertexArray", "glBindFramebuffer", "glClear"]
 ARCH_FLAGS = ["-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-mtp=soft", "-fPIE", "-ftls-model=local-exec"]
 # Third-party trees the Switch build does not use (SDL3 and GLEW are replaced by
 # src/sys/switch and the GLES loader).
@@ -208,10 +215,10 @@ def main():
         "",
         "rule cxx", "  command = $cxx $flags -MD -MF $out.d -c $in -o $out", "  depfile = $out.d", "  deps = gcc", "  description = CXX $out",
         "rule cc", "  command = $cc $flags -MD -MF $out.d -c $in -o $out", "  depfile = $out.d", "  deps = gcc", "  description = CC $out",
-        "rule partial", "  command = $ld -r -nostdlib -o $out $in", "  description = PARTIAL $out",
+        "rule partial", "  command = $ld -r -nostdlib $wrap -o $out $in", "  description = PARTIAL $out",
         # Module groups own private copies of inline/vtable/typeinfo code: dissolve COMDAT groups
         # so the linker cannot discard one module's copy in favour of another's local symbol.
-        "rule partial_private", "  command = $ld -r -nostdlib -Wl,--force-group-allocation -o $out $in", "  description = PARTIAL(private) $out",
+        "rule partial_private", "  command = $ld -r -nostdlib -Wl,--force-group-allocation $wrap -o $out $in", "  description = PARTIAL(private) $out",
         "rule localize", "  command = $objcopy $keep $in $out", "  description = LOCALIZE $out",
         "rule link", "  command = $ld -specs=" + DKP + "/libnx/switch.specs " + " ".join(ARCH_FLAGS) + " -Wl,-Map,$out.map -o $out $in $libs", "  description = LINK $out",
         "rule openal_sdl3", "  command = rm -rf openal_tmp && mkdir openal_tmp && cd openal_tmp && " + BIN + "ar x " + DKP + "/portlibs/switch/lib/libopenal.a sdl2.o && " + BIN + "objcopy " + " ".join(f"--redefine-sym SDL_{n}=SWITCH_SDL2_{n}" for n in ("OpenAudioDevice", "CloseAudioDevice", "PauseAudioDevice", "GetAudioDeviceName", "GetNumAudioDevices", "InitSubSystem")) + " sdl2.o sdl2.o && cp " + DKP + "/portlibs/switch/lib/libopenal.a ../$out && " + BIN + "ar r ../$out sdl2.o && cd .. && rm -rf openal_tmp", "  description = OPENAL(SDL3) $out",
@@ -265,6 +272,8 @@ def main():
                 built.append(obj)
         part = f"{g}.part.o"
         lines += [f"build {part}: {'partial_private' if spec['keep'] else 'partial'} " + " ".join(built)]
+        if g == "renderer":
+            lines.append("  wrap = " + " ".join(f"-Wl,--wrap={n}" for n in GL_WRAP))
         if spec["keep"]:
             keep = f"--redefine-sym {spec['rename']} " + " ".join(f"--keep-global-symbol={k}" for k in spec["keep"])
             lines += [f"build {g}.o: localize {part}", f"  keep = {keep}"]

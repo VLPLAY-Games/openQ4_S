@@ -68,6 +68,12 @@ static bool SWITCHAUDIO_WaitDevice(SDL_AudioDevice *device)
 {
     AudioOutBuffer *released = NULL;
     u32 count = 0;
+    static bool pinned = false;
+    if (!pinned) {
+        // keep the mixer off the cores the main and render threads use
+        svcSetThreadCoreMask(CUR_THREAD_HANDLE, 2, 1u << 2);
+        pinned = true;
+    }
     // Wake regularly so shutdown is noticed.
     while (!SDL_GetAtomicInt(&device->shutdown)) {
         if (R_SUCCEEDED(audoutWaitPlayFinish(&released, &count, 10000000ULL)) && count > 0) {
