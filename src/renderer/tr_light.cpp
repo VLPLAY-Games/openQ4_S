@@ -431,8 +431,9 @@ bool R_CreateLightingCache( const idRenderEntityLocal *ent, const idRenderLightL
 		return true;
 	}
 
-	// not needed if we have vertex programs
-	if ( tr.backEndRendererHasVertexPrograms ) {
+	// not needed if we have vertex programs, or on the GLES back end, whose shaders derive the
+	// light vectors per fragment and never read the cache
+	if ( tr.backEndRendererHasVertexPrograms || tr.backEndRenderer == BE_GLES_D3 ) {
 		return true;
 	}
 
@@ -1196,7 +1197,8 @@ bool R_LinkLightSurf( const drawSurf_t **link, const srfTriangles_t *tri, const 
 		drawSurf->shaderRegisters = R_SetupDrawSurfShaderRegisters( space, NULL, shader );
 
 		// calculate the specular coordinates if we aren't using vertex programs
-		if ( !tr.backEndRendererHasVertexPrograms && !r_skipSpecular.GetBool()  ) {
+		// (the GLES back end computes specular in its shaders and never reads these coordinates)
+		if ( !tr.backEndRendererHasVertexPrograms && tr.backEndRenderer != BE_GLES_D3 && !r_skipSpecular.GetBool()  ) {
 			R_SpecularTexGen( drawSurf, light->globalLightOrigin, tr.viewDef->renderView.vieworg );
 			// if we failed to allocate space for the specular calculations, drop the surface
 			if ( !drawSurf->dynamicTexCoords ) {

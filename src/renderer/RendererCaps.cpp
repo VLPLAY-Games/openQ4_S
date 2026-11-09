@@ -4,6 +4,7 @@
 #include "tr_local.h"
 
 static idStrList		rg_extensionTokens;
+static unsigned int	rg_extensionVersion = 1;	// bumped whenever the token list changes; invalidates the lookup memo
 static idStr			rg_extensionString;
 static rendererDriverQuirkReport_t rg_driverQuirkReport;
 
@@ -1056,6 +1057,7 @@ static void GLCapabilityProbe_AddExtension( const char *extensionName ) {
 	}
 
 	rg_extensionTokens.Append( extensionName );
+	rg_extensionVersion++;
 	if ( rg_extensionString.Length() > 0 ) {
 		rg_extensionString += " ";
 	}
@@ -1075,11 +1077,44 @@ static void GLCapabilityProbe_AddLegacyExtensions( const char *legacyExtensionsS
 	}
 }
 
+/*
+The texture bind path asks about GL_EXT_direct_state_access on every bind. Scanning the extension
+list with case-insensitive compares each time cost ~12% of the render thread on the Switch, so
+answers are memoized by name until the token list changes.
+*/
+struct extensionMemo_t {
+	unsigned int	version;
+	char			name[64];
+	bool			result;
+};
+static extensionMemo_t rg_extensionMemo[256];
+
+static bool GLCapabilityProbe_HasExtensionUncached( const char *name );
+
 bool GLCapabilityProbe_HasExtension( const char *name ) {
 	if ( name == NULL || name[0] == '\0' ) {
 		return false;
 	}
+	const size_t length = strlen( name );
+	if ( length >= sizeof( rg_extensionMemo[0].name ) ) {
+		return GLCapabilityProbe_HasExtensionUncached( name );
+	}
+	unsigned int hash = 2166136261u;
+	for ( size_t i = 0; i < length; ++i ) {
+		hash = ( hash ^ static_cast<unsigned char>( name[i] ) ) * 16777619u;
+	}
+	extensionMemo_t &memo = rg_extensionMemo[hash & 255];
+	if ( memo.version == rg_extensionVersion && strcmp( memo.name, name ) == 0 ) {
+		return memo.result;
+	}
+	const bool result = GLCapabilityProbe_HasExtensionUncached( name );
+	memo.version = rg_extensionVersion;
+	memcpy( memo.name, name, length + 1 );
+	memo.result = result;
+	return result;
+}
 
+static bool GLCapabilityProbe_HasExtensionUncached( const char *name ) {
 	for ( int i = 0; i < rg_extensionTokens.Num(); ++i ) {
 		if ( rg_extensionTokens[i].Icmp( name ) == 0 ) {
 			return true;
@@ -1115,6 +1150,7 @@ static void GLCapabilityProbe_QueryInt( GLenum name, int &value ) {
 void GLCapabilityProbe_Build( renderBackendCaps_t &caps, const char *versionString, const char *legacyExtensionsString ) {
 	memset( &caps, 0, sizeof( caps ) );
 	rg_extensionTokens.Clear();
+	rg_extensionVersion++;
 	rg_extensionString.Clear();
 
 	caps.contextCreated = true;

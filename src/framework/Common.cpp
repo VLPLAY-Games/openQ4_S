@@ -6614,7 +6614,7 @@ void idCommonLocal::Frame( void ) {
 			int		nowTime = Sys_Milliseconds();
 			int		com_frameMsec = nowTime - lastTime;
 			lastTime = nowTime;
-			Printf( "frame:%i all:%3i gfr:%3i rf:%3i bk:%3i draw:%3i end:%3i ses:%3i pre:%3i ev:%3i bf:%3i scr:%3i\n", com_frameNumber, com_frameMsec, time_gameFrame, time_frontend, time_backend, time_draw, time_endframe, time_sessionFrame, time_preFrame, time_eventsCfg, time_beginframe, time_updateScreen );
+			Sys_Printf( "frame:%i all:%3i gfr:%3i rf:%3i bk:%3i draw:%3i end:%3i ses:%3i pre:%3i ev:%3i bf:%3i scr:%3i\n", com_frameNumber, com_frameMsec, time_gameFrame, time_frontend, time_backend, time_draw, time_endframe, time_sessionFrame, time_preFrame, time_eventsCfg, time_beginframe, time_updateScreen );
 			time_gameFrame = 0;
 			time_gameDraw = 0;
 		}	

@@ -536,7 +536,17 @@ void idUploadManager::BeginFrame( int frameCount ) {
 	stats.frameBufferIndex = currentFrameBuffer;
 	frameBuffer_t &frame = frameBuffers[currentFrameBuffer];
 
-	if ( path != UPLOAD_PATH_PERSISTENT ) {
+	// Orphaning (glBufferData with a NULL pointer) every frame protects a ring the GPU might still
+	// read. On the map-range path the slot's frame fence has already been retired by
+	// SelectFrameBufferForFrame, so the GPU is finished with it and the orphan only makes the driver
+	// allocate and clear a fresh 8 MB buffer object per frame (~10% of the main thread on the
+	// Switch's nouveau driver). Keep the orphan whenever a fence timed out or failed.
+	const bool fenceProvenIdle = path == UPLOAD_PATH_MAP_RANGE
+		&& stats.frameFenceTimeouts == 0 && stats.frameFenceFallbacks == 0
+		&& stats.frameFenceWaitFailures == 0 && stats.frameFenceSubmissionFailures == 0;
+	if ( fenceProvenIdle ) {
+		storageReady = true;
+	} else if ( path != UPLOAD_PATH_PERSISTENT ) {
 		storageReady = false;
 		// The modern executor may have rebound GL_ARRAY_BUFFER through its state
 		// cache since the legacy vertex-cache shadow was last updated. Force the

@@ -779,7 +779,7 @@ void GLimp_SwapBuffers(void) {
 	const bool swapped = s_glWindowServices->SwapGLWindow();
 #if defined(__SWITCH__)
 	if (cvarSystem->GetCVarBool("com_speeds")) {
-		common->Printf("swap:%3d\n", Sys_Milliseconds() - switchSwapStart);
+		printf("swap:%3d\n", Sys_Milliseconds() - switchSwapStart);	// log only: the console copies its buffer per print
 	}
 #endif
 	R_RendererMetrics_EndPresentPhase(RENDERER_PRESENT_SWAP, swapBegin);

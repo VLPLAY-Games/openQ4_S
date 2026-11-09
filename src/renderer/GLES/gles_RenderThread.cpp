@@ -287,7 +287,7 @@ static void R_GLW_ReportAndReset( void ) {
 	}
 	n += idStr::snPrintf( line + n, sizeof( line ) - n, " uniSkipped=%u", glw_uniformSkipped );
 	glw_uniformSkipped = 0;
-	common->Printf( "%s\n", line );
+	printf( "%s\n", line );
 }
 #endif
 
@@ -474,7 +474,12 @@ void R_RenderThread_Sync( const char *reason ) {
 	const long long waitedUsec = static_cast<long long>( R_RendererMetrics_CpuClock() - waitStart );
 	rt_syncWaitUsec += waitedUsec;
 	if ( cvarSystem->GetCVarBool( "com_speeds" ) ) {
+#if defined( __SWITCH__ )
+		// straight to the log: the console buffer copies itself on every print
+		printf( "rt: backend=%dms mainWaited=%dus (%s)\n", backEndMsec, (int)waitedUsec, reason );
+#else
 		common->Printf( "rt: backend=%dms mainWaited=%dus (%s)\n", backEndMsec, (int)waitedUsec, reason );
+#endif
 #if defined( __SWITCH__ )
 		R_GLW_ReportAndReset();
 #endif
