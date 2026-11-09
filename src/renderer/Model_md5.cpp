@@ -198,6 +198,10 @@ idRenderModelMD5::idRenderModelMD5
 */
 idRenderModelMD5::idRenderModelMD5() {
 	viewEnt = NULL;
+	boundsMemoNext = 0;
+	for ( int i = 0; i < BOUNDS_MEMO_SIZE; ++i ) {
+		boundsMemo[i].valid = false;
+	}
 }
 
 renderModelCacheType_t idRenderModelMD5::LevelLoadCachePayloadType() const {
@@ -1490,6 +1494,9 @@ Upon exit, the model will absolutely be valid, but possibly as a default model
 ====================
 */
 void idRenderModelMD5::LoadModel() {
+	for ( int i = 0; i < BOUNDS_MEMO_SIZE; ++i ) {
+		boundsMemo[i].valid = false;
+	}
 	int			version;
 	int			i;
 	int			num;
@@ -1707,12 +1714,34 @@ bool idRenderModelMD5::BoundsFromJoints( const idJointMat *entJoints, idBounds &
 		return false;
 	}
 
+	// hash the pose (FNV-1a over the joint matrix words) and reuse a recent answer for the same pose
+	const unsigned int *words = reinterpret_cast<const unsigned int *>( entJoints );
+	const int numWords = joints.Num() * static_cast<int>( sizeof( idJointMat ) / sizeof( unsigned int ) );
+	unsigned long long hash = 1469598103934665603ULL ^ static_cast<unsigned long long>( numWords );
+	for ( int i = 0; i < numWords; ++i ) {
+		hash = ( hash ^ words[i] ) * 1099511628211ULL;
+	}
+	for ( int i = 0; i < BOUNDS_MEMO_SIZE; ++i ) {
+		if ( boundsMemo[i].valid && boundsMemo[i].hash == hash ) {
+			outBounds = boundsMemo[i].bounds;
+			return true;
+		}
+	}
+
 	outBounds.Clear();
 	for ( int i = 0; i < meshes.Num(); ++i ) {
 		outBounds.AddBounds( const_cast<idMD5Mesh &>( meshes[i] ).CalcBounds( entJoints ) );
 	}
 
-	return !outBounds.IsCleared();
+	if ( outBounds.IsCleared() ) {
+		return false;
+	}
+	boundsMemo_t &slot = boundsMemo[boundsMemoNext];
+	boundsMemoNext = ( boundsMemoNext + 1 ) % BOUNDS_MEMO_SIZE;
+	slot.hash = hash;
+	slot.bounds = outBounds;
+	slot.valid = true;
+	return true;
 }
 
 /*
@@ -2079,6 +2108,9 @@ which can regenerate the data with LoadModel()
 ===================
 */
 void idRenderModelMD5::PurgeModel() {
+	for ( int i = 0; i < BOUNDS_MEMO_SIZE; ++i ) {
+		boundsMemo[i].valid = false;
+	}
 	purged = true;
 	joints.Clear();
 	defaultPose.Clear();

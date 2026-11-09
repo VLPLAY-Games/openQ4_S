@@ -492,6 +492,9 @@ void idClipModel::Init( void ) {
 	traceModelIndex = -1;
 	clipLinks = NULL;
 	touchCount = -1;
+	linkedBounds.Zero();
+	linkedContents = 0;
+	linkedValid = false;
 // RAVEN BEGIN
 // ddynerman: SD's clip sector code
 	checked = false;
@@ -566,6 +569,9 @@ idClipModel::idClipModel( const idClipModel *model ) {
 	}
 	renderModelHandle = model->renderModelHandle;
 	clipLinks = NULL;
+	linkedBounds.Zero();
+	linkedContents = 0;
+	linkedValid = false;
 	touchCount = -1;
 // RAVEN BEGIN
 // ddynerman: SD's clip sector code
@@ -688,6 +694,7 @@ void idClipModel::Restore( idRestoreGame *savefile ) {
 	// the render model will be set when the clip model is linked
 	renderModelHandle = -1;
 	clipLinks = NULL;
+	linkedValid = false;
 	touchCount = -1;
 
 	if ( linked ) {
@@ -754,6 +761,8 @@ idClipModel::Unlink
 */
 void idClipModel::Unlink( void ) {
 	clipLink_t *link;
+
+	linkedValid = false;
 
 	for ( link = clipLinks; link; link = clipLinks ) {
 		clipLinks = link->nextLink;
@@ -838,6 +847,9 @@ void idClipModel::Link( void ) {
 		}
 	}
 // RAVEN END
+	linkedBounds = bounds;
+	linkedContents = GetContents();
+	linkedValid = true;
 }
 
 /*
@@ -848,6 +860,13 @@ idClipModel::Link
 // RAVEN BEGIN
 // ddynerman: multiple clip worlds
 void idClipModel::Link( idEntity *ent, int newId, const idVec3 &newOrigin, const idMat3 &newAxis, int renderModelHandle ) {
+	// already linked exactly like this (same entity, id, pose, bounds and contents): nothing to redo.
+	// Unlinking walks every model in each touched sector to rebuild its contents mask.
+	if ( renderModelHandle == -1 && linkedValid && clipLinks != NULL && this->entity == ent && this->id == newId
+			&& this->origin == newOrigin && this->axis == newAxis && linkedContents == GetContents()
+			&& this->bounds == linkedBounds ) {
+		return;
+	}
 	this->entity = ent;
 	this->id = newId;
 	this->origin = newOrigin;

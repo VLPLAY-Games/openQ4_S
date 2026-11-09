@@ -110,6 +110,11 @@ private:
 
 	struct clipLink_s *		clipLinks;				// links into sectors
 	int						touchCount;
+	// what the current links were made from; lets Link( ent, id, origin, axis ) skip an
+	// unlink/relink that would reproduce them (static and parametric physics relink every Evaluate)
+	idBounds				linkedBounds;
+	int						linkedContents;
+	bool					linkedValid;
 
 	void					Init( void );			// initialize
 	void					FreeModel( void );

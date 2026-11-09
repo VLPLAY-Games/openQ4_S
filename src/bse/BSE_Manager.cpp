@@ -28,7 +28,11 @@ idCVar bse_debris("bse_debris", "1", CVAR_BOOL, "disable effect debris");
 idCVar bse_singleEffect("bse_singleEffect", "", 0, "set to the name of the effect that is only played");
 idCVar bse_rateLimit("bse_rateLimit", "6", CVAR_FLOAT, "rate limit for spawned effects");
 idCVar bse_rateCost("bse_rateCost", "1", CVAR_FLOAT, "rate cost multiplier for spawned effects");
+#if defined( __SWITCH__ )
+idCVar bse_scale("bse_scale", "0.6", CVAR_FLOAT | CVAR_ARCHIVE, "effect scalability amount");
+#else
 idCVar bse_scale("bse_scale", "1", CVAR_FLOAT | CVAR_ARCHIVE, "effect scalability amount");
+#endif
 idCVar bse_maxParticles("bse_maxParticles", "2048", CVAR_INTEGER, "maximum per-segment particle allocation");
 
 int bse_frameSpawned = 0;

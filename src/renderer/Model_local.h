@@ -304,6 +304,18 @@ private:
 	idList<idMD5Mesh>			meshes;
 	const struct viewEntity_s *	viewEnt;
 
+	// Exact posed bounds skin every vertex of every mesh. The same pose is asked for again and again
+	// (resting actors, a tic and the presentation pass sharing a pose), so recent answers are kept,
+	// keyed by a hash of the joint matrices. Main thread only.
+	struct boundsMemo_t {
+		unsigned long long		hash;
+		idBounds				bounds;
+		bool					valid;
+	};
+	static const int			BOUNDS_MEMO_SIZE = 8;
+	mutable boundsMemo_t		boundsMemo[BOUNDS_MEMO_SIZE];
+	mutable int					boundsMemoNext;
+
 	void						CalculateBounds( const idJointMat *joints );
 	void						GetFrameBounds( const renderEntity_t *ent, idBounds &bounds ) const;
 	void						DrawJoints( const renderEntity_t *ent, const struct viewDef_s *view ) const;
