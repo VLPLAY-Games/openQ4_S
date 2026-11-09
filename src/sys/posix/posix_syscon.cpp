@@ -1808,6 +1808,10 @@ void Posix_ConsoleFatalErrorWait( void ) {
 	// SDL window that can block forever when no compositor is available.
 	return;
 #endif
+#if defined( __SWITCH__ )
+	// No window to show it in and no way to dismiss one: the message is in the log.
+	return;
+#endif
 #if defined( USE_SDL3 )
 	if ( !Posix_IsMainThread() ) {
 		// SDL window creation and event pumping are main-thread-only on

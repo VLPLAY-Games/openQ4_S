@@ -475,6 +475,10 @@ static inline bool Session_MoveSaveFileDurably( const std::string &from, const s
 	std::string &durabilityUnconfirmed, std::string &error ) {
 	// fs_savepath may be relative to the working directory.
 	const auto native = []( const std::string &path ) {
+#if defined( __SWITCH__ )
+		// Horizon absolute paths carry a device prefix ("sdmc:/...").
+		if ( path.compare( 0, 6, "sdmc:/" ) == 0 ) return path;
+#endif
 		std::error_code code;
 		const auto absolute = std::filesystem::absolute( std::filesystem::u8path( path ), code );
 		if ( code ) return path;

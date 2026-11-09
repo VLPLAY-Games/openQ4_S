@@ -21,6 +21,14 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#if defined(__SWITCH__)
+// Horizon has no openable directories; shims emulate directory descriptors.
+extern "C" int switch_dirfd_open(const char *path);
+extern "C" int switch_close(int fd);
+extern "C" int switch_fsync(int fd);
+#define close(fd) switch_close(fd)
+#define fsync(fd) switch_fsync(fd)
+#endif
 #if defined(__linux__) && !defined(__ANDROID__)
 #include <sys/syscall.h>
 #endif
@@ -103,6 +111,10 @@ bool ParsePath(const std::string& input, Path& path, std::string& error) {
     const bool unc = normalized.size() > 4 && normalized[0] == '/' && normalized[1] == '/';
     if (!drive && !unc) return Error(error,"Path must be absolute");
     root = drive ? 3 : 2;
+#elif defined(__SWITCH__)
+    // Horizon absolute paths carry a device prefix ("sdmc:/...").
+    if (normalized.compare(0,6,"sdmc:/") == 0) root = 6;
+    else if (normalized[0] != '/') return Error(error,"Path must be absolute");
 #else
     if (normalized[0] != '/') return Error(error,"Path must be absolute");
 #endif
@@ -145,6 +157,9 @@ bool ParsePath(const std::string& input, Path& path, std::string& error) {
     path.full = normalized;
     const auto split = normalized.rfind('/');
     path.parent = split == 0 ? "/" : normalized.substr(0,split);
+#if defined(__SWITCH__)
+    if (split == 5 && normalized.compare(0,6,"sdmc:/") == 0) path.parent = "sdmc:/";
+#endif
     path.leaf = normalized.substr(split + 1);
 #endif
     return true;
@@ -283,7 +298,11 @@ std::string TempLeaf() {
 
 #ifndef _WIN32
 bool OpenParent(const Path& path, Handle& parent, std::string& error, bool* missing = nullptr) {
+#if defined(__SWITCH__)
+    parent.value = switch_dirfd_open(path.parent.c_str());
+#else
     parent.value = open(path.parent.c_str(),O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+#endif
     if (parent.value == Invalid) {
         const auto code = errno;
         if (missing) *missing = code == ENOENT;

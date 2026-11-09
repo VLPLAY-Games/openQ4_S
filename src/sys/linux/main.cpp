@@ -1051,7 +1051,14 @@ static void Sys_HandlePendingQuitSignal( void ) {
 main
 ===============
 */
+#if defined( __SWITCH__ )
+extern "C" void switch_mark( const char *stage );
+#endif
+
 int main(int argc, const char **argv) {
+#if defined( __SWITCH__ )
+	switch_mark( "main" );
+#endif
 #ifdef ID_MCHECK
 	// must have -lmcheck linkage
 	mcheck( abrt_func );
@@ -1059,6 +1066,9 @@ int main(int argc, const char **argv) {
 #endif
 	
 	Posix_EarlyInit( );
+#if defined( __SWITCH__ )
+	switch_mark( "Posix_EarlyInit done" );
+#endif
 #ifndef ID_DEDICATED
 	Sys_ReportWaylandRuntime();
 #endif

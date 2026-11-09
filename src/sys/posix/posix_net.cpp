@@ -805,6 +805,11 @@ void Sys_InitNetworking(void)
 	ifc.ifc_buf = buf;
 	if ( ioctl( s, SIOCGIFCONF, &ifc ) < 0 ) {
 		close( s );
+#if defined( __SWITCH__ )
+		// Horizon has no interface enumeration; play without local interface addresses.
+		common->Printf( "Sys_InitNetworking: SIOCGIFCONF unsupported - %s\n", strerror( errno ) );
+		return;
+#endif
 		common->FatalError( "InitNetworking: SIOCGIFCONF error - %s\n", strerror( errno ) );
 		return;
 	}

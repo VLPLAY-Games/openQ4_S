@@ -2623,6 +2623,10 @@ static bool Common_SettingsSaveDirectory( std::string& directory, std::string& e
 		const size_t share = root.find( '/', 2 );
 		if ( share != std::string::npos && share + 1 < root.size() ) prefix = 2;
 	}
+#elif defined( __SWITCH__ )
+	// Horizon absolute paths carry a device prefix ("sdmc:/...").
+	if ( root.compare( 0, 6, "sdmc:/" ) == 0 ) prefix = 6;
+	else if ( root[0] == '/' ) prefix = 1;
 #else
 	if ( root[0] == '/' ) prefix = 1;
 #endif

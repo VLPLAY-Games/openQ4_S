@@ -27,7 +27,7 @@
 // every build shape, including module-only clients that shed the static
 // renderer sources
 static const char *r_renderApiArgs[] = { "best", "gl", "vulkan", "gl-module", "gles", NULL };
-#ifdef __ANDROID__
+#if defined( __ANDROID__ ) || defined( __SWITCH__ )
 // Android has no desktop GL at all; the ES module is the only renderer built.
 #define OPENQ4_DEFAULT_RENDER_API	"gles"
 static const rendererModuleApi_t rm_platformDefaultApi = RENDER_MODULE_API_GLES;
@@ -418,7 +418,7 @@ int R_RendererModule_BuildFallbackLadder( rendererModuleApi_t requested, rendere
 	if ( maxEntries <= 0 ) {
 		return 0;
 	}
-#ifdef __ANDROID__
+#if defined( __ANDROID__ ) || defined( __SWITCH__ )
 	// No desktop GL module is built, so falling back onto it would only trade a
 	// clear "gles module failed" for a misleading "renderer-gl not found".
 	outLadder[ numEntries++ ] = RENDER_MODULE_API_GLES;

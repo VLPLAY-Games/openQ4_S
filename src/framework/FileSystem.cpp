@@ -1750,7 +1750,8 @@ idCVar idFileSystemLocal::fs_awakeningpath( "fs_awakeningpath", "", CVAR_SYSTEM 
 idCVar	idFileSystemLocal::fs_cdpath( "fs_cdpath", "", CVAR_SYSTEM | CVAR_INIT, "" );
 idCVar	idFileSystemLocal::fs_game( "fs_game", OPENQ4_GAMEDIR, CVAR_SYSTEM | CVAR_INIT | CVAR_SERVERINFO, "mod path" );
 idCVar  idFileSystemLocal::fs_game_base( "fs_game_base", "", CVAR_SYSTEM | CVAR_INIT | CVAR_SERVERINFO, "alternate mod path, searched after the main fs_game path, before the basedir" );
-#ifdef WIN32
+#if defined( WIN32 ) || defined( __SWITCH__ )
+// The Switch SD card is FAT/exFAT: case-insensitive, and a directory listing per failed open is far too slow.
 idCVar	idFileSystemLocal::fs_caseSensitiveOS( "fs_caseSensitiveOS", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
 #else
 idCVar	idFileSystemLocal::fs_caseSensitiveOS( "fs_caseSensitiveOS", "1", CVAR_SYSTEM | CVAR_BOOL, "" );
@@ -1952,6 +1953,10 @@ void idFileSystemLocal::SetLooseDirectoryCacheActive( bool active ) {
 	looseDirectoryExists.clear();
 	looseDirectoryChecks = 0;
 	looseDirectorySkips = 0;
+#if defined( __SWITCH__ )
+	// Failed opens on the SD card are expensive; keep the memo on outside level loads too.
+	active = true;
+#endif
 	looseDirectoryCacheActive = active && fs_cacheLooseDirectories.GetBool() && !fs_caseSensitiveOS.GetBool();
 }
 
@@ -2478,12 +2483,23 @@ bool idFileSystemLocal::ResolveCaseInsensitiveOSPath( const char *path, idStr &r
 		normalized.CapLength( normalized.Length() - 1 );
 	}
 
+#if defined( __SWITCH__ )
+	// Horizon absolute paths carry a device prefix ("sdmc:/...").
+	const bool devicePath = ( idStr::Icmpn( normalized.c_str(), "sdmc:/", 6 ) == 0 );
+	const bool absolutePath = ( normalized[0] == '/' ) || devicePath;
+	const int pathLength = normalized.Length();
+	int index = devicePath ? 6 : ( absolutePath ? 1 : 0 );
+	bool changed = false;
+
+	resolvedPath = devicePath ? "sdmc:/" : ( absolutePath ? "/" : "" );
+#else
 	const bool absolutePath = ( normalized[0] == '/' );
 	const int pathLength = normalized.Length();
 	int index = absolutePath ? 1 : 0;
 	bool changed = false;
 
 	resolvedPath = absolutePath ? "/" : "";
+#endif
 
 	while ( index < pathLength ) {
 		while ( index < pathLength && normalized[index] == '/' ) {
@@ -7079,6 +7095,9 @@ is resetting due to a game change
 */
 void idFileSystemLocal::Init( void ) {
 	fileSystemMainThread = std::this_thread::get_id();
+#if defined( __SWITCH__ )
+	SetLooseDirectoryCacheActive( true );
+#endif
 	// allow command line parms to override our defaults
 	// we have to specially handle this, because normal command
 	// line variable sets don't happen until after the filesystem
@@ -8679,6 +8698,22 @@ void idFileSystemLocal::FindDLL( const char *name, char _dllPath[ MAX_OSPATH ], 
 		}
 	}
 
+#if defined( __SWITCH__ )
+	// The game modules are linked into the executable (Sys_DLL_Load resolves them by
+	// name), so there is no file to find; hand back the conventional module path.
+	if ( !dllFile ) {
+		dllPath = moduleGameDir;
+		dllPath.AppendPath( dllName );
+		resolvedOrigin = GAME_MODULE_ORIGIN_BASE_GAME;
+		if ( updateChecksum ) {
+			gameDLLChecksum = 0;
+			gameModuleOrigin = resolvedOrigin;
+			gamePakChecksum = OPENQ4_Q4_142_GAME300_PAK_CHECKSUM;
+		}
+		idStr::snPrintf( _dllPath, MAX_OSPATH, "%s", dllPath.c_str() );
+		return;
+	}
+#endif
 	if ( updateChecksum ) {
 		if ( dllFile ) {
 			gameDLLChecksum = GetFileChecksum( dllFile );
