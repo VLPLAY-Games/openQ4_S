@@ -141,6 +141,8 @@ extern int			time_gameFrame;			// game logic time
 extern int			time_gameDraw;			// game present time
 extern int			time_frontend;			// renderer frontend time
 extern int			time_backend;			// renderer backend time
+extern int			time_draw;				// session Draw() time
+extern int			time_endframe;			// renderSystem EndFrame time
 
 extern int			com_frameTime;			// simulation time for the current frame in milliseconds
 extern int			com_frameRealTime;		// presentation time for the current frame in milliseconds

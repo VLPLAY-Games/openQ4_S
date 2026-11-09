@@ -102,12 +102,13 @@ static bool SWITCH_JoystickSetSensorsEnabled(SDL_Joystick *joystick, bool enable
 
 static bool SWITCH_JoystickGetGamepadMapping(int device_index, SDL_GamepadMapping *out)
 {
-    // Nintendo layout: SDL's south/east buttons are the console's B/A.
+    // Map by label, as every Switch port does: A confirms and B cancels, like the
+    // console's own menus (the physical positions are mirrored on a Nintendo pad).
     *out = (SDL_GamepadMapping){
-        .a = { EMappingKind_Button, SW_BTN_B },
-        .b = { EMappingKind_Button, SW_BTN_A },
-        .x = { EMappingKind_Button, SW_BTN_Y },
-        .y = { EMappingKind_Button, SW_BTN_X },
+        .a = { EMappingKind_Button, SW_BTN_A },
+        .b = { EMappingKind_Button, SW_BTN_B },
+        .x = { EMappingKind_Button, SW_BTN_X },
+        .y = { EMappingKind_Button, SW_BTN_Y },
         .back = { EMappingKind_Button, SW_BTN_MINUS },
         .guide = { EMappingKind_None, 255 },
         .start = { EMappingKind_Button, SW_BTN_PLUS },

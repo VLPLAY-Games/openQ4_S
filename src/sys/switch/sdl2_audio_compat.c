@@ -51,13 +51,20 @@ static void SDLCALL Pull(void *userdata, SDL_AudioStream *stream, int additional
     Compat *c = (Compat *)userdata;
     (void)total;
     while (additional > 0) {
-        const int chunk = additional < c->scratchSize ? additional : c->scratchSize;
+        int chunk = additional < c->scratchSize ? additional : c->scratchSize;
+        chunk -= chunk % c->frameBytes;	// a partial frame would swap channels/samples
+        if (chunk <= 0) {
+            break;
+        }
         memset(c->scratch, 0, chunk);
         c->callback(c->userdata, c->scratch, chunk);
         SDL_PutAudioStreamData(stream, c->scratch, chunk);
         additional -= chunk;
     }
 }
+
+/* SDL2 returns 0 on success; SDL3 returns true. OpenAL tests for != 0. */
+int SWITCH_SDL2_InitSubSystem(Uint32 flags) { return SDL_InitSubSystem(flags) ? 0 : -1; }
 
 int SWITCH_SDL2_GetNumAudioDevices(int iscapture) { return iscapture ? 0 : 1; }
 
@@ -85,6 +92,8 @@ Uint32 SWITCH_SDL2_OpenAudioDevice(const char *device, int iscapture, const SDL2
     if (!s_dev.scratch) {
         return 0;
     }
+    // Deeper device buffers ride out mixer hiccups while the CPU is busy with the game.
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "2048");
     s_dev.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, Pull, &s_dev);
     if (!s_dev.stream) {
         free(s_dev.scratch);

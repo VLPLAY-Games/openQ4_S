@@ -71,6 +71,16 @@ static bool SWITCHAUDIO_WaitDevice(SDL_AudioDevice *device)
     // Wake regularly so shutdown is noticed.
     while (!SDL_GetAtomicInt(&device->shutdown)) {
         if (R_SUCCEEDED(audoutWaitPlayFinish(&released, &count, 10000000ULL)) && count > 0) {
+            // After a stall several buffers come back at once. PlayDevice refills one;
+            // refill the rest with silence so the queue keeps its depth (otherwise it
+            // shrinks to a single buffer and every later hiccup is audible).
+            for (u32 k = 1; k < count; ++k) {
+                const int i = device->hidden->next;
+                device->hidden->next = (i + 1) % SWITCH_NUM_BUFFERS;
+                SDL_memset(device->hidden->mem[i], 0, device->hidden->aligned);
+                device->hidden->out[i].data_size = (u64)device->buffer_size;
+                audoutAppendAudioOutBuffer(&device->hidden->out[i]);
+            }
             return true;
         }
     }

@@ -714,7 +714,7 @@ void *R_GetCommandBuffer( int bytes );
 	mutations always call R_RenderThread_Sync first. Other modules run the backend on the calling
 	thread, so these are no-ops there.
 */
-#if defined( OPENQ4_RENDERER_VK_MODULE )
+#if defined( OPENQ4_RENDERER_VK_MODULE ) || defined( OPENQ4_RENDERER_GLES_MODULE )
 // Backend failures retire on the main thread before common error/teardown.
 void	R_RenderThread_Error( const char *message, bool fatal = false );
 void	R_RenderThread_Init( void );

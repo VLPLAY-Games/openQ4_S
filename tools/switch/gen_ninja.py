@@ -214,7 +214,7 @@ def main():
         "rule partial_private", "  command = $ld -r -nostdlib -Wl,--force-group-allocation -o $out $in", "  description = PARTIAL(private) $out",
         "rule localize", "  command = $objcopy $keep $in $out", "  description = LOCALIZE $out",
         "rule link", "  command = $ld -specs=" + DKP + "/libnx/switch.specs " + " ".join(ARCH_FLAGS) + " -Wl,-Map,$out.map -o $out $in $libs", "  description = LINK $out",
-        "rule openal_sdl3", "  command = rm -rf openal_tmp && mkdir openal_tmp && cd openal_tmp && " + BIN + "ar x " + DKP + "/portlibs/switch/lib/libopenal.a sdl2.o && " + BIN + "objcopy " + " ".join(f"--redefine-sym SDL_{n}=SWITCH_SDL2_{n}" for n in ("OpenAudioDevice", "CloseAudioDevice", "PauseAudioDevice", "GetAudioDeviceName", "GetNumAudioDevices")) + " sdl2.o sdl2.o && cp " + DKP + "/portlibs/switch/lib/libopenal.a ../$out && " + BIN + "ar r ../$out sdl2.o && cd .. && rm -rf openal_tmp", "  description = OPENAL(SDL3) $out",
+        "rule openal_sdl3", "  command = rm -rf openal_tmp && mkdir openal_tmp && cd openal_tmp && " + BIN + "ar x " + DKP + "/portlibs/switch/lib/libopenal.a sdl2.o && " + BIN + "objcopy " + " ".join(f"--redefine-sym SDL_{n}=SWITCH_SDL2_{n}" for n in ("OpenAudioDevice", "CloseAudioDevice", "PauseAudioDevice", "GetAudioDeviceName", "GetNumAudioDevices", "InitSubSystem")) + " sdl2.o sdl2.o && cp " + DKP + "/portlibs/switch/lib/libopenal.a ../$out && " + BIN + "ar r ../$out sdl2.o && cd .. && rm -rf openal_tmp", "  description = OPENAL(SDL3) $out",
         "rule nro", "  command = " + DKP + "/tools/bin/elf2nro $in $out", "  description = NRO $out",
         "",
     ]

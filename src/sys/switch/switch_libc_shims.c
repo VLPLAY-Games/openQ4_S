@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -186,7 +187,17 @@ unsigned int switch_mem_used_mb( void ) {
 	return (unsigned int)( used >> 20 );
 }
 
+/* Flush denormals to zero (FPCR.FZ): subnormal floats are slow on Cortex-A57 and show up in
+   physics/audio math. FPCR is per thread, so worker threads call this too if they matter. */
+void switch_set_ftz( void ) {
+	unsigned long fpcr;
+	__asm__ volatile( "mrs %0, fpcr" : "=r"( fpcr ) );
+	fpcr |= ( 1UL << 24 );
+	__asm__ volatile( "msr fpcr, %0" : : "r"( fpcr ) );
+}
+
 static void __attribute__(( constructor( 101 ) )) switch_first_ctor( void ) {
+	switch_set_ftz();
 	switch_mark( "static constructors start" );
 }
 
@@ -202,6 +213,8 @@ static void *switch_log_flusher( void *arg ) {
 
 void userAppInit( void ) {
 	switch_mark( "userAppInit" );
+	// OpenAL Soft settings (output format, buffering) live next to the game.
+	setenv( "ALSOFT_CONF", SWITCH_DATA_DIR "/alsoft.conf", 1 );
 	// Networking for multiplayer and for nxlink log streaming (`nxlink -s`).
 	socketInitializeDefault();
 	int nxlinkFd = nxlinkStdio();

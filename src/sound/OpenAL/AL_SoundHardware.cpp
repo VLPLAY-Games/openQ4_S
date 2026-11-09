@@ -41,7 +41,13 @@ idCVar s_meterPosition( "s_meterPosition", "100 100 20 200", CVAR_ARCHIVE, "VU m
 idCVar s_device( "s_device", "-1", CVAR_INTEGER | CVAR_ARCHIVE, "Which audio device to use (listDevices to list, -1 for default)" );
 idCVar s_showPerfData( "s_showPerfData", "0", CVAR_BOOL, "Show sound backend performance data" );
 idCVar s_outputLimiter( "s_outputLimiter", "1", CVAR_ARCHIVE | CVAR_BOOL, "soft-limit the final mix so loud scenes compress instead of clipping" );
-idCVar s_resampler( "s_resampler", "auto", CVAR_ARCHIVE, "OpenAL resampler for every voice: auto (an 11th order sinc when the runtime has one), default (the runtime's own), or a name or number from listResamplers; takes effect on s_restart" );
+#if defined( __SWITCH__ )
+// The 11th order sinc is too heavy for the Switch's CPU budget and the mixer starves, which crackles.
+#define OPENQ4_DEFAULT_RESAMPLER "default"
+#else
+#define OPENQ4_DEFAULT_RESAMPLER "auto"
+#endif
+idCVar s_resampler( "s_resampler", OPENQ4_DEFAULT_RESAMPLER, CVAR_ARCHIVE, "OpenAL resampler for every voice: auto (an 11th order sinc when the runtime has one), default (the runtime's own), or a name or number from listResamplers; takes effect on s_restart" );
 extern idCVar s_useEAXReverb;
 extern idCVar s_deviceName;
 extern idCVar s_openALHRTF;

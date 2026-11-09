@@ -10134,12 +10134,16 @@ void idSessionLocal::UpdateScreen( bool outOfSequence ) {
 	renderSystem->BeginFrame( renderSystem->GetScreenWidth(), renderSystem->GetScreenHeight() );
 
 	// draw everything
+	const int speedsDrawStart = Sys_Milliseconds();
 	Draw();
 	vrSystem->DrawMenuPointer();
 
 	settingsFrame.Submitting();
 	if ( com_speeds.GetBool() ) {
+		const int speedsEndStart = Sys_Milliseconds();
+		time_draw = speedsEndStart - speedsDrawStart;
 		renderSystem->EndFrame( &time_frontend, &time_backend );
+		time_endframe = Sys_Milliseconds() - speedsEndStart;
 	} else {
 		renderSystem->EndFrame( NULL, NULL );
 	}

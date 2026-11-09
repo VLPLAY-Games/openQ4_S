@@ -773,7 +773,15 @@ void GLimp_SwapBuffers(void) {
 		return;
 	}
 	const unsigned long long swapBegin = R_RendererMetrics_CpuClock();
+#if defined(__SWITCH__)
+	const int switchSwapStart = Sys_Milliseconds();
+#endif
 	const bool swapped = s_glWindowServices->SwapGLWindow();
+#if defined(__SWITCH__)
+	if (cvarSystem->GetCVarBool("com_speeds")) {
+		common->Printf("swap:%3d\n", Sys_Milliseconds() - switchSwapStart);
+	}
+#endif
 	R_RendererMetrics_EndPresentPhase(RENDERER_PRESENT_SWAP, swapBegin);
 	if (!swapped) {
 		common->Printf("SDL3: failed to swap window buffers: %s\n", R_GLVideoError());
@@ -795,6 +803,18 @@ void GLimp_ActivateContext(void) {
 
 bool GLimp_EnsureActiveContext(const char *operation) {
 	return SDL3_EnsureGLContextCurrent(operation);
+}
+
+// Hands the context to another thread: no glFinish, the GPU keeps working.
+void GLimp_ReleaseContextNoFinish(void) {
+	if (!s_glWindow || !s_glContext || !s_glWindowServices->IsGLContextCurrent(s_glContext)) {
+		return;
+	}
+	if (!s_glWindowServices->MakeGLContextCurrent(NULL)) {
+		if (s_glWindowServices->CountContextError != NULL) {
+			s_glWindowServices->CountContextError();
+		}
+	}
 }
 
 void GLimp_DeactivateContext(void) {
