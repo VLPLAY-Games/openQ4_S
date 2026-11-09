@@ -219,6 +219,124 @@ static void *switch_log_flusher( void *arg ) {
 	return NULL;
 }
 
+
+/*
+===============================================================================
+
+	Sampling profiler (bring-up). With sdmc:/switch/openQ4/profile.txt present, a helper thread
+	pauses the main thread and the render thread 500 times a second, reads where each one is
+	(pc, link register and the frame-pointer chain), resumes it and appends the sample to
+	sdmc:/switch/openQ4/prof.bin. tools/switch/analyze_prof.py turns that into per-function self and
+	inclusive time. While a thread is paused the sampler makes no libc calls (a paused thread may
+	hold the allocator lock), only svc calls and plain memory reads.
+
+===============================================================================
+*/
+#define PROF_MAX_THREADS	4
+#define PROF_MAX_DEPTH		16
+#define PROF_BUF_SIZE		( 1 << 18 )
+
+static Handle			prof_handle[ PROF_MAX_THREADS ];
+static volatile int		prof_threads = 0;
+static volatile int		prof_phase = 0;
+static volatile int		prof_enabled = 0;
+static unsigned char	prof_buf[ PROF_BUF_SIZE ];
+static unsigned int		prof_len = 0;
+static int				prof_fd = -1;
+
+extern int main( int argc, char **argv );
+
+void switch_prof_set_phase( int phase ) {
+	prof_phase = phase;
+}
+
+/* Called by the render thread on itself (slot 1). */
+void switch_prof_register_render( void ) {
+	if ( prof_enabled ) {
+		Thread *t = threadGetSelf();
+		if ( t && t->handle ) {
+			prof_handle[ 1 ] = t->handle;
+			if ( prof_threads < 2 ) {
+				prof_threads = 2;
+			}
+		}
+	}
+}
+
+static void prof_sample( int slot ) {
+	Handle h = prof_handle[ slot ];
+	ThreadContext ctx;
+	unsigned long long pcs[ PROF_MAX_DEPTH ];
+	int n = 0;
+	if ( h == 0 || R_FAILED( svcSetThreadActivity( h, ThreadActivity_Paused ) ) ) {
+		return;
+	}
+	if ( R_SUCCEEDED( svcGetThreadContext3( &ctx, h ) ) ) {
+		unsigned long long fp = ctx.fp;
+		const unsigned long long sp = ctx.sp;
+		pcs[ n++ ] = ctx.pc.x;
+		pcs[ n++ ] = ctx.lr;
+		// walk the AArch64 frame records: [fp] = previous fp, [fp + 8] = return address
+		while ( n < PROF_MAX_DEPTH && fp != 0 && ( fp & 15 ) == 0 && fp >= sp && fp - sp < 0x20000ULL ) {
+			const unsigned long long prev = ( (const unsigned long long *)fp )[ 0 ];
+			const unsigned long long ret = ( (const unsigned long long *)fp )[ 1 ];
+			if ( ret == 0 ) {
+				break;
+			}
+			pcs[ n++ ] = ret;
+			if ( prev <= fp || prev - fp > 0x20000ULL ) {
+				break;
+			}
+			fp = prev;
+		}
+	}
+	svcSetThreadActivity( h, ThreadActivity_Runnable );
+	if ( n > 0 && prof_len + 3 + (unsigned int)n * 8 <= PROF_BUF_SIZE ) {
+		prof_buf[ prof_len++ ] = (unsigned char)slot;
+		prof_buf[ prof_len++ ] = (unsigned char)prof_phase;
+		prof_buf[ prof_len++ ] = (unsigned char)n;
+		memcpy( prof_buf + prof_len, pcs, (size_t)n * 8 );
+		prof_len += (unsigned int)n * 8;
+	}
+}
+
+static void *switch_prof_thread( void *arg ) {
+	unsigned long long lastFlush = armGetSystemTick();
+	(void)arg;
+	switch_pin_current_thread( 2 );
+	prof_fd = open( SWITCH_DATA_DIR "/prof.bin", O_WRONLY | O_CREAT | O_TRUNC, 0644 );
+	if ( prof_fd >= 0 ) {
+		// header: magic and the address of main(), so offsets can be recovered from the ELF symbols
+		const unsigned long long header[ 2 ] = { 0x31464f5251344f51ULL, (unsigned long long)(uintptr_t)&main };
+		write( prof_fd, header, sizeof( header ) );
+	}
+	for ( ;; ) {
+		svcSleepThread( 2000000ULL );	// 2 ms
+		for ( int t = 0; t < prof_threads; t++ ) {
+			prof_sample( t );
+		}
+		if ( prof_fd >= 0 && ( prof_len > PROF_BUF_SIZE - 1024 || armGetSystemTick() - lastFlush > 4ULL * 19200000ULL ) ) {
+			write( prof_fd, prof_buf, prof_len );
+			prof_len = 0;
+			lastFlush = armGetSystemTick();
+		}
+	}
+	return NULL;
+}
+
+static void switch_prof_start( void ) {
+	FILE *f = fopen( SWITCH_DATA_DIR "/profile.txt", "r" );
+	pthread_t thread;
+	if ( !f ) {
+		return;
+	}
+	fclose( f );
+	prof_handle[ 0 ] = envGetMainThreadHandle();
+	prof_threads = 1;
+	prof_enabled = 1;
+	pthread_create( &thread, NULL, switch_prof_thread, NULL );
+}
+
 void userAppInit( void ) {
 	switch_mark( "userAppInit" );
 	switch_pin_current_thread( 0 );
@@ -229,6 +347,7 @@ void userAppInit( void ) {
 	int nxlinkFd = nxlinkStdio();
 	// Quake 4 data (q4base/) lives next to the NRO; relative paths resolve from here.
 	chdir( SWITCH_DATA_DIR );
+	switch_prof_start();
 	switch_mark( "userAppInit done" );
 	// Without a nxlink listener, keep the log on the SD card instead (unbuffered, so it survives a crash).
 	if ( nxlinkFd < 0 ) {

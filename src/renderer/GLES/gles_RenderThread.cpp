@@ -292,6 +292,8 @@ static void R_GLW_ReportAndReset( void ) {
 #endif
 
 #if defined( __SWITCH__ )
+extern "C" void switch_prof_register_render( void );
+extern "C" void switch_prof_set_phase( int phase );
 extern "C" unsigned int svcSetThreadCoreMask( unsigned int handle, int preferredCore, unsigned int affinityMask );
 #endif
 
@@ -300,6 +302,7 @@ static void R_RenderThread_Main( void ) {
 	{
 		// core 1: the main thread is pinned to 0 and the audio mixer to 2
 		svcSetThreadCoreMask( 0xFFFF8000u, 1, 1u << 1 );
+		switch_prof_register_render();
 	}
 	{
 		// Denormals are slow on Cortex-A57; FPCR is per thread.
@@ -412,6 +415,9 @@ void R_RenderThread_SyncFrontEnd( const char *reason ) {
 bool R_RenderThread_Begin( const emptyCommand_t *cmds ) {
 	// Only gameplay frames run threaded. Start-up, loading and menu frames draw from client memory
 	// the main thread is still rewriting (vertex cache temps, GUI quads): keep them inline.
+#if defined( __SWITCH__ )
+	switch_prof_set_phase( tr.primaryWorld != NULL ? 1 : 0 );
+#endif
 	if ( !r_glRenderThread.GetBool() || r_skipBackEnd.GetBool() || tr.primaryWorld == NULL || !R_RenderThread_FrameQualifies() ) {
 		rt_framesInline++;
 		return false;
