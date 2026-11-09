@@ -164,9 +164,13 @@ void Posix_ClearSigs( ) {
 sig_handler
 ================
 */
+#if defined( __SWITCH__ )
+static void sig_handler( int signum ) {
+#else
 static void sig_handler( int signum, siginfo_t *info, void *context ) {
 	(void)info;
 	(void)context;
+#endif
 
 	const posixSignalRoute_t *route = Posix_FindSignalRoute( signum );
 	if ( route != NULL && route->graceful ) {
@@ -252,9 +256,16 @@ void Posix_InitSigs( ) {
 	activeFatalSignal = 0;
 	
 	/* Set up the structure */
+#if defined( __SWITCH__ )
+	// newlib's sigaction has no SA_SIGINFO; the handler only needs the number.
+	action.sa_handler = sig_handler;
+	sigemptyset( &action.sa_mask );
+	action.sa_flags = 0;
+#else
 	action.sa_sigaction = sig_handler;
 	sigemptyset( &action.sa_mask );
 	action.sa_flags = SA_SIGINFO;
+#endif
 
 	for ( int i = 0; signalRoutes[ i ].signum != -1; ++i ) {
 #if defined( __ANDROID__ )

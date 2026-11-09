@@ -146,7 +146,14 @@ public:
 	#undef _XBOX
 	#undef _CONSOLE
 	#define _OPENGL
+	#if defined( __SWITCH__ )
+		// newlib defines _LITTLE_ENDIAN as 1234 in <machine/endian.h>; an empty
+		// redefinition breaks every later system header.
+		#include <sys/types.h>
+		#undef quad
+	#else
 	#define _LITTLE_ENDIAN
+	#endif
 	#define _CASE_SENSITIVE_FILESYSTEM
 	#define _USE_OPENAL
 	#ifndef Q4SDK
@@ -201,6 +208,9 @@ public:
 	#define _OPENGL
 	#ifdef __ppc__
 	#undef _LITTLE_ENDIAN
+	#elif defined( __SWITCH__ )
+	#include <sys/types.h>
+	#undef quad
 	#else
 	#define _LITTLE_ENDIAN
 	#endif

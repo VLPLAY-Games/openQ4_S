@@ -815,6 +815,52 @@ Sys_DLL_Load
 TODO: OSX - use the native API instead? NSModule
 =================
 */
+#if defined( __SWITCH__ )
+// Horizon homebrew has no dynamic loader. The renderer and single-player game
+// are linked into the NRO as private partial links (tools/switch/gen_ninja.py)
+// that export only these entry points; "loading" a module picks its table.
+extern "C" {
+	void *GetGameAPI( void * );
+	void *GetRenderAPI( void * );
+	void openQ4_Mem_GetModuleStats_game( void );
+	void openQ4_Mem_GetModuleStats_renderer( void );
+}
+
+enum { SWITCH_MODULE_GAME = 1, SWITCH_MODULE_RENDERER = 2 };
+
+intptr_t Sys_DLL_Load( const char *path ) {
+	if ( path == NULL || path[0] == '\0' ) {
+		return 0;
+	}
+	// The file name carries the module kind; the directory and arch suffix do not matter.
+	if ( strstr( path, "game-sp" ) != NULL ) {
+		return SWITCH_MODULE_GAME;
+	}
+	if ( strstr( path, "renderer-gles" ) != NULL ) {
+		return SWITCH_MODULE_RENDERER;
+	}
+	Sys_Printf( "module '%s' is not linked into this build\n", path );
+	return 0;
+}
+
+void* Sys_DLL_GetProcAddress( intptr_t handle, const char *sym ) {
+	if ( handle == 0 || sym == NULL || sym[0] == '\0' ) {
+		return NULL;
+	}
+	if ( handle == SWITCH_MODULE_GAME ) {
+		if ( strcmp( sym, "GetGameAPI" ) == 0 ) return (void *)&GetGameAPI;
+		if ( strcmp( sym, MEM_MODULE_STATS_ENTRY_POINT ) == 0 ) return (void *)&openQ4_Mem_GetModuleStats_game;
+	} else if ( handle == SWITCH_MODULE_RENDERER ) {
+		if ( strcmp( sym, "GetRenderAPI" ) == 0 ) return (void *)&GetRenderAPI;
+		if ( strcmp( sym, MEM_MODULE_STATS_ENTRY_POINT ) == 0 ) return (void *)&openQ4_Mem_GetModuleStats_renderer;
+	}
+	return NULL;
+}
+
+void Sys_DLL_Unload( intptr_t handle ) {
+	(void)handle;	// statically linked: nothing to release
+}
+#else
 intptr_t Sys_DLL_Load( const char *path ) {
 	if ( path == NULL || path[0] == '\0' ) {
 		Sys_Printf( "dlopen failed: empty path\n" );
@@ -869,6 +915,7 @@ void Sys_DLL_Unload( intptr_t handle ) {
 	}
 	dlclose( (void *)handle );
 }
+#endif // __SWITCH__
 
 // ---------------------------------------------------------------------------
 
