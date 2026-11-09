@@ -737,6 +737,8 @@ int				time_backend;			// renderSystem backend time
 int				time_sessionFrame;		// session->Frame() total
 int				time_preFrame;			// events + config + command loop before session->Frame()
 int				time_eventsCfg;			// events + settings + config write
+int				time_beginframe;		// renderSystem BeginFrame (includes the wait for the render thread)
+int				time_updateScreen;		// whole UpdateScreen
 int				time_draw;				// session Draw() time (game draw + frontend)
 int				time_endframe;			// renderSystem EndFrame time (backend submit + swap)
 
@@ -6612,7 +6614,7 @@ void idCommonLocal::Frame( void ) {
 			int		nowTime = Sys_Milliseconds();
 			int		com_frameMsec = nowTime - lastTime;
 			lastTime = nowTime;
-			Printf( "frame:%i all:%3i gfr:%3i rf:%3i bk:%3i draw:%3i end:%3i ses:%3i pre:%3i ev:%3i\n", com_frameNumber, com_frameMsec, time_gameFrame, time_frontend, time_backend, time_draw, time_endframe, time_sessionFrame, time_preFrame, time_eventsCfg );
+			Printf( "frame:%i all:%3i gfr:%3i rf:%3i bk:%3i draw:%3i end:%3i ses:%3i pre:%3i ev:%3i bf:%3i scr:%3i\n", com_frameNumber, com_frameMsec, time_gameFrame, time_frontend, time_backend, time_draw, time_endframe, time_sessionFrame, time_preFrame, time_eventsCfg, time_beginframe, time_updateScreen );
 			time_gameFrame = 0;
 			time_gameDraw = 0;
 		}	

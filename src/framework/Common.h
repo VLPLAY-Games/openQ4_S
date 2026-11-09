@@ -144,6 +144,8 @@ extern int			time_backend;			// renderer backend time
 extern int			time_sessionFrame;
 extern int			time_preFrame;
 extern int			time_eventsCfg;
+extern int			time_beginframe;
+extern int			time_updateScreen;
 extern int			time_draw;				// session Draw() time
 extern int			time_endframe;			// renderSystem EndFrame time
 

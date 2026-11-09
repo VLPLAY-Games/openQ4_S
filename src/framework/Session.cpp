@@ -10130,8 +10130,10 @@ void idSessionLocal::UpdateScreen( bool outOfSequence ) {
 	UI_SettingsRenderFrame settingsFrame;
 	// a running VR session paces this update on the headset and hands the
 	// renderer this frame's swapchain images
+	const int speedsScrStart = Sys_Milliseconds();
 	vrSystem->BeginFrame();
 	renderSystem->BeginFrame( renderSystem->GetScreenWidth(), renderSystem->GetScreenHeight() );
+	time_beginframe = Sys_Milliseconds() - speedsScrStart;
 
 	// draw everything
 	const int speedsDrawStart = Sys_Milliseconds();
@@ -10150,6 +10152,7 @@ void idSessionLocal::UpdateScreen( bool outOfSequence ) {
 	settingsFrame.Presented();
 	RetainedUI_FrameSubmitted();
 	vrSystem->EndFrame();
+	time_updateScreen = Sys_Milliseconds() - speedsScrStart;
 
 	insideUpdateScreen = false;
 }
