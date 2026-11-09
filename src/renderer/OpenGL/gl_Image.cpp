@@ -55,6 +55,10 @@ GLES module through the same branches rather than duplicating them.
 #include "../GLPixelTransferScope.h"
 
 bool idImage::ReadPixelsRGBA8( idList<byte> &pixels ) {
+#if defined( OPENQ4_RENDERER_GLES_MODULE )
+	// direct GL on this thread: the render thread must have given the context back
+	R_RenderThread_Sync( "image GL" );
+#endif
 	pixels.Clear();
 	if ( !IsLoaded() || opts.textureType != TT_2D || opts.format != FMT_RGBA8
 			|| opts.numMSAASamples != 0 || opts.width < 1 || opts.height < 1
@@ -133,6 +137,10 @@ idImage::SubImageUpload
 ========================
 */
 void idImage::SubImageUpload( int mipLevel, int x, int y, int z, int width, int height, const void * pic, int pixelPitch ) const {
+#if defined( OPENQ4_RENDERER_GLES_MODULE )
+	// direct GL on this thread: the render thread must have given the context back
+	R_RenderThread_Sync( "image GL" );
+#endif
 	renderImageOperation_t imageOperation( this, true, mipLevel, z, x == 0 && y == 0 ? width : 0, height );
 	if ( !imageOperation.Allowed() ) return;
 
@@ -260,6 +268,10 @@ idImage::SetPixel
 ========================
 */
 void idImage::SetPixel( int mipLevel, int x, int y, const void * data, int dataSize ) {
+#if defined( OPENQ4_RENDERER_GLES_MODULE )
+	// direct GL on this thread: the render thread must have given the context back
+	R_RenderThread_Sync( "image GL" );
+#endif
 	SubImageUpload( mipLevel, x, y, 0, 1, 1, data );
 }
 
@@ -269,6 +281,10 @@ idImage::SetTexParameters
 ========================
 */
 void idImage::SetTexParameters() {
+#if defined( OPENQ4_RENDERER_GLES_MODULE )
+	// direct GL on this thread: the render thread must have given the context back
+	R_RenderThread_Sync( "image GL" );
+#endif
 	int target = GL_TEXTURE_2D;
 	switch ( opts.textureType ) {
 		case TT_2D:
@@ -446,6 +462,10 @@ void idImage::SetTexParameters() {
 }
 
 void idImage::RefreshSamplerState() {
+#if defined( OPENQ4_RENDERER_GLES_MODULE )
+	// direct GL on this thread: the render thread must have given the context back
+	R_RenderThread_Sync( "image GL" );
+#endif
 	if ( !IsLoaded() ) {
 		return;
 	}
@@ -464,6 +484,10 @@ This should not be done during normal game-play, if you can avoid it.
 ========================
 */
 void idImage::AllocImage() {
+#if defined( OPENQ4_RENDERER_GLES_MODULE )
+	// direct GL on this thread: the render thread must have given the context back
+	R_RenderThread_Sync( "image GL" );
+#endif
 	renderImageOperation_t imageOperation( this );
 	if ( !imageOperation.Allowed() ) return;
 
@@ -787,6 +811,10 @@ idImage::PurgeImage
 ========================
 */
 void idImage::PurgeImage() {
+#if defined( OPENQ4_RENDERER_GLES_MODULE )
+	// direct GL on this thread: the render thread must have given the context back
+	R_RenderThread_Sync( "image GL" );
+#endif
 	if ( !R_ImagePolicyContentMutation() ) return;
 	InvalidateConsumedPolicy();
 	if ( texnum != TEXTURE_NOT_LOADED ) {
@@ -806,6 +834,10 @@ idImage::Resize
 ========================
 */
 void idImage::Resize( int width, int height ) {
+#if defined( OPENQ4_RENDERER_GLES_MODULE )
+	// direct GL on this thread: the render thread must have given the context back
+	R_RenderThread_Sync( "image GL" );
+#endif
 	if ( opts.width == width && opts.height == height ) {
 		return;
 	}
@@ -824,6 +856,10 @@ so the copy target gets a new texture object instead of a glTexImage2D.
 ========================
 */
 void idImage::RespecifyColorCopyTarget( int width, int height ) {
+#if defined( OPENQ4_RENDERER_GLES_MODULE )
+	// direct GL on this thread: the render thread must have given the context back
+	R_RenderThread_Sync( "image GL" );
+#endif
 	if ( width <= 0 || height <= 0 || !R_ImagePolicyContentMutation() ) return;
 	opts.format = FMT_RGBA8;
 	opts.numLevels = 1;

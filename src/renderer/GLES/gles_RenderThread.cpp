@@ -254,7 +254,11 @@ void R_RenderThread_Sync( const char *reason ) {
 	}
 	rt_inFlight.store( false, std::memory_order_release );
 	rt_framesCompleted++;
-	rt_syncWaitUsec += static_cast<long long>( R_RendererMetrics_CpuClock() - waitStart );
+	const long long waitedUsec = static_cast<long long>( R_RendererMetrics_CpuClock() - waitStart );
+	rt_syncWaitUsec += waitedUsec;
+	if ( cvarSystem->GetCVarBool( "com_speeds" ) ) {
+		common->Printf( "rt: backend=%dms mainWaited=%dus (%s)\n", backEndMsec, (int)waitedUsec, reason );
+	}
 
 	// Take the context back before anything on this thread touches GL.
 	GLimp_ActivateContext();
