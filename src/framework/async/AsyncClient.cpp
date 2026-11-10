@@ -2840,6 +2840,16 @@ idAsyncClient::SendVersionCheck
 ==================
 */
 void idAsyncClient::SendVersionCheck( bool fromMenu ) {
+#if defined( __SWITCH__ )
+	// The legacy check asks the original master server and never reaches a project that is published
+	// on GitHub. The console cannot open a browser either, so the Updates entry names the release page.
+	if ( fromMenu ) {
+		session->MessageBox( MSG_OK,
+			va( "openQ4 %s\n\nNew versions are published at\n%s", PROJECT_VERSION, PROJECT_RELEASES_URL ),
+			"Updates", true );
+	}
+	return;
+#endif
 	idBitMsg	msg;
 	byte		msgBuf[MAX_MESSAGE_SIZE];
 

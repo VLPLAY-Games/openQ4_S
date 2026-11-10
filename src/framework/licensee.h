@@ -12,13 +12,12 @@
 // RAVEN BEGIN
 // rjohnson: this is the name of the game we are making
 #define PROJECT_NAME					"openQ4"
-#define PROJECT_AUTHOR					"themuffinator"
-#define PROJECT_COMPANY				"DarkMatter Productions"
+#define PROJECT_AUTHOR					"VLPLAY Games"
+#define PROJECT_COMPANY				"VLPLAY Games"
 #define PROJECT_VERSION				OPENQ4_VERSION_SHORT
 #define PROJECT_VERSION_FULL			OPENQ4_VERSION
 #define PROJECT_VERSION_DATE			OPENQ4_VERSION_DATE
-#define PROJECT_WEBSITE				"www.darkmatter-quake.com"
-#define PROJECT_REPO					"https://github.com/themuffinator/openQ4"
+#define PROJECT_REPO					"https://github.com/VLPLAY-Games/openQ4_S"
 #define PROJECT_RELEASES_URL			PROJECT_REPO "/releases"
 
 #define GAME_NAME						PROJECT_NAME			// appears on errors and secondary windows
@@ -53,23 +52,11 @@
 #define	DEMO_GAMEDIR					"demo"
 
 // filenames
-#if defined( _M_X64 ) || defined( __x86_64__ )
-	#define OPENQ4_BINARY_ARCH			"x64"
-#elif defined( _M_IX86 ) || defined( __i386__ )
-	#define OPENQ4_BINARY_ARCH			"x86"
-#elif defined( _M_ARM64 ) || defined( __aarch64__ )
-	#define OPENQ4_BINARY_ARCH			"arm64"
-#else
-	#define OPENQ4_BINARY_ARCH			"unknown"
-#endif
-#define	CD_EXE							PROJECT_NAME "-client_" OPENQ4_BINARY_ARCH ".exe"
+// the Switch is an AArch64 target
+#define OPENQ4_BINARY_ARCH				"arm64"
 
 #define CONFIG_FILE						"openQ4Config.cfg"
 
-// base folder where the source code lives
-#define SOURCE_CODE_BASE_FOLDER			"code"
-
-#define DEVELOPER_DOMAIN				"darkmatter-quake.com"
 // RAVEN END
 
 
@@ -129,14 +116,6 @@
 #define LEGACY_OPENQ4_SAVEGAME_VERSION			0
 #define LEGACY_OPENQ4_SAVEGAME_VERSION_ALT		1
 
-// editor info
-#define EDITOR_WINDOWTEXT				"QuakeEdit"
-
-// win32 info
-#define WIN32_CONSOLE_CLASS				"openQ4 WinConsole"
-#define WIN32_SPLASH_CLASS				"openQ4 Splash"
-#define	WIN32_WINDOW_CLASS_NAME			"openQ4"
-#define	WIN32_FAKE_WINDOW_CLASS_NAME	"OPENQ4_WGL_FAKE"
 
 #ifdef __linux__
 	#define DEFAULT_BASE_PATH				"/usr/local/games/openq4"

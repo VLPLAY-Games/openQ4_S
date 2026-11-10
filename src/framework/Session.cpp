@@ -9367,6 +9367,24 @@ bool idSessionLocal::ProcessEvent( const sysEvent_t *event ) {
 		return true;
 	}
 
+	// A message box is a mouse-driven GUI. Let the keyboard and the gamepad answer it as well: confirm
+	// (Enter, or the gamepad's confirm button) takes the OK / Yes button, back (Escape, or the
+	// gamepad's back button) the Cancel / No button, or OK when that is all there is.
+	if ( guiActive != NULL && guiActive == guiMsg && event->evType == SE_KEY && event->evValue2 == 1 ) {
+		const bool hasMid = guiMsg->State().GetBool( "visible_mid" );
+		const bool hasRight = guiMsg->State().GetBool( "visible_right" );
+		if ( hasMid || hasRight ) {
+			if ( event->evValue == K_ENTER || event->evValue == K_KP_ENTER || event->evValue == K_JOY3 ) {
+				HandleMsgCommands( hasMid ? "mid" : "left" );
+				return true;
+			}
+			if ( event->evValue == K_ESCAPE || event->evValue == K_JOY4 ) {
+				HandleMsgCommands( hasRight ? "right" : "mid" );
+				return true;
+			}
+		}
+	}
+
 	// menus / etc
 	if ( guiActive ) {
 		MenuEvent( event );
