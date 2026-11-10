@@ -4371,7 +4371,7 @@ void idGameLocal::MenuFrame( void ) { }
 
 	assert( !isClient );
 
-#if defined( __SWITCH__ )
+#if defined( __SWITCH__ ) && defined( OPENQ4_SWITCH_DIAG )
 	{
 		// memory growth diagnostics: what the game is holding, every 30 s of game time
 		static int nextCountsTime = 0;

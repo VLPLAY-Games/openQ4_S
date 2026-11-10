@@ -216,6 +216,7 @@ static void *switch_log_flusher( void *arg ) {
 	int tick = 0;
 	for ( ;; ) {
 		svcSleepThread( 2000000000ULL );	// 2 s
+#ifdef OPENQ4_SWITCH_DIAG
 		if ( ++tick >= 60 ) {
 			// every 2 min: process memory in use and the malloc heap, to spot growth or fragmentation.
 			// mallinfo() walks the whole heap under the allocator lock (about 100 ms with a 1.8 GB heap),
@@ -229,6 +230,9 @@ static void *switch_log_flusher( void *arg ) {
 					(unsigned long long)( used >> 20 ), (unsigned long long)( total >> 20 ),
 					(unsigned int)( mi.arena >> 20 ), (unsigned int)( mi.uordblks >> 20 ), (unsigned int)( mi.fordblks >> 20 ) );
 		}
+#else
+		(void)tick;
+#endif
 		fflush( stdout );
 	}
 	return NULL;

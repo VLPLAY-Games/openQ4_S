@@ -2776,6 +2776,7 @@ static void R_BSEDiag_EndFrame( void ) {
 		bseDiagFrames = 0;
 	}
 
+#ifdef OPENQ4_SWITCH_DIAG
 	// memory growth diagnostics: roughly once a minute
 	static int memFrames = 0;
 	if ( ++memFrames < 1800 ) {
@@ -2799,6 +2800,7 @@ static void R_BSEDiag_EndFrame( void ) {
 	}
 	common->Printf( "memdiag: images=%d loaded=%d storage=%.0fMB liveDefs entity=%d light=%d effect=%d\n",
 		numImages, numLoaded, imageMB, liveEntityDefs, liveLightDefs, liveEffectDefs );
+#endif
 }
 #endif
 

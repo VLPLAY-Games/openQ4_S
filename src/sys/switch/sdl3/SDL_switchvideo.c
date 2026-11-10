@@ -30,6 +30,13 @@ static void SWITCH_VideoQuit(SDL_VideoDevice *_this);
 static bool SWITCH_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_PropertiesID create_props);
 static void SWITCH_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window);
 static void SWITCH_PumpEvents(SDL_VideoDevice *_this);
+static bool SWITCH_StartTextInput(SDL_VideoDevice *_this, SDL_Window *window, SDL_PropertiesID props);
+static bool SWITCH_StopTextInput(SDL_VideoDevice *_this, SDL_Window *window);
+
+// The engine asks for text input while a text field (save name, player name) has focus. The Switch
+// has no keyboard, so the system software keyboard applet is opened from the event pump, and what
+// was typed is delivered as text input.
+static volatile bool s_keyboardRequested = false;
 
 static bool SWITCH_GLES_LoadLibrary(SDL_VideoDevice *_this, const char *path)
 {
@@ -58,6 +65,8 @@ static SDL_VideoDevice *SWITCH_Create(void)
     device->CreateSDLWindow = SWITCH_CreateWindow;
     device->DestroyWindow = SWITCH_DestroyWindow;
     device->PumpEvents = SWITCH_PumpEvents;
+    device->StartTextInput = SWITCH_StartTextInput;
+    device->StopTextInput = SWITCH_StopTextInput;
 
     device->GL_LoadLibrary = SWITCH_GLES_LoadLibrary;
     device->GL_GetProcAddress = SDL_EGL_GetProcAddressInternal;
@@ -155,8 +164,45 @@ static void SWITCH_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
     }
 }
 
+static bool SWITCH_StartTextInput(SDL_VideoDevice *_this, SDL_Window *window, SDL_PropertiesID props)
+{
+    s_keyboardRequested = true;
+    return true;
+}
+
+static bool SWITCH_StopTextInput(SDL_VideoDevice *_this, SDL_Window *window)
+{
+    s_keyboardRequested = false;
+    return true;
+}
+
+static void SWITCH_ShowKeyboard(void)
+{
+    SwkbdConfig kbd;
+    char text[256];
+
+    SDL_memset(text, 0, sizeof(text));
+    if (R_FAILED(swkbdCreate(&kbd, 0))) {
+        return;
+    }
+    swkbdConfigMakePresetDefault(&kbd);
+    swkbdConfigSetHeaderText(&kbd, "openQ4");
+    swkbdConfigSetGuideText(&kbd, "Type the text and confirm");
+    swkbdConfigSetStringLenMax(&kbd, 64);
+    swkbdConfigSetStringLenMin(&kbd, 0);
+    if (R_SUCCEEDED(swkbdShow(&kbd, text, sizeof(text))) && text[0]) {
+        SDL_SendKeyboardText(text);
+    }
+    swkbdClose(&kbd);
+}
+
 static void SWITCH_PumpEvents(SDL_VideoDevice *_this)
 {
+    if (s_keyboardRequested) {
+        // once per request: asking again needs the field to lose and regain focus
+        s_keyboardRequested = false;
+        SWITCH_ShowKeyboard();
+    }
     // appletMainLoop services HOME/sleep messages and returns false once the
     // system asks the application to exit.
     if (!appletMainLoop()) {
