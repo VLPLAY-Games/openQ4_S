@@ -56,7 +56,7 @@ static SDL_JoystickID SWITCH_JoystickGetDeviceInstanceID(int device_index) { ret
    second, so the rates are mapped to that here. The Switch reports the angular velocity in turns per
    second and the acceleration in G. A controller's frame has X forward, Y to the left and Z out of the
    face; the console's own sensor reads Y toward the bottom edge and X to the right. Yaw is the turn
-   about the direction the accelerometer reports as up, so it works held upright (handheld) or flat
+   about the vertical the accelerometer shows (it reports gravity's direction), so it works held upright (handheld) or flat
    (controller); pitch is the turn about the left-right axis of whichever frame it is. */
 #define SW_NUM_SENSOR_HANDLES 4
 static HidSixAxisSensorHandle s_sensorHandles[SW_NUM_SENSOR_HANDLES];
@@ -72,6 +72,7 @@ static void SWITCH_StartSensors(void)
         return;
     }
     Result rc[SW_NUM_SENSOR_HANDLES], rcStart[SW_NUM_SENSOR_HANDLES];
+    (void)rc; (void)rcStart;
     rc[0] = hidGetSixAxisSensorHandles(&s_sensorHandles[0], 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
     rc[1] = hidGetSixAxisSensorHandles(&s_sensorHandles[1], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
     rc[2] = hidGetSixAxisSensorHandles(&s_sensorHandles[2], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadJoyDual);
@@ -80,8 +81,6 @@ static void SWITCH_StartSensors(void)
         rcStart[i] = hidStartSixAxisSensor(s_sensorHandles[i]);
         s_sensorLastSample[i] = 0;
     }
-    printf("gyro: handles rc=%x %x %x %x start rc=%x %x %x %x\n", (unsigned)rc[0], (unsigned)rc[1], (unsigned)rc[2], (unsigned)rc[3],
-           (unsigned)rcStart[0], (unsigned)rcStart[1], (unsigned)rcStart[2], (unsigned)rcStart[3]);
     s_sensorsStarted = true;
 }
 
@@ -99,23 +98,8 @@ static void SWITCH_StopSensors(void)
 static void SWITCH_SendMotion(Uint64 timestamp, SDL_Joystick *joystick)
 {
     HidSixAxisSensorState states[8];
-    static Uint64 lastReport;
-    static float peak[3];
-    static int sentSamples;
-    const bool report = timestamp - lastReport > 3000000000ULL;
     for (int h = 0; h < SW_NUM_SENSOR_HANDLES; ++h) {
         const size_t count = hidGetSixAxisSensorStates(s_sensorHandles[h], states, 8);
-        if (report && h == 0) {
-            lastReport = timestamp;
-            printf("gyro: polling, handles started=%d\n", (int)s_sensorsStarted);
-        }
-        if (report) {
-            printf("gyro: handle %d count=%d attrs=%x sample=%llu gyro=%.3f %.3f %.3f acc=%.2f %.2f %.2f (sent %d, peak %.2f %.2f %.2f)\n", h, (int)count,
-                   count ? states[0].attributes : 0, count ? (unsigned long long)states[0].sampling_number : 0ULL,
-                   count ? states[0].angular_velocity.x : 0.0f, count ? states[0].angular_velocity.y : 0.0f, count ? states[0].angular_velocity.z : 0.0f,
-                   count ? states[0].acceleration.x : 0.0f, count ? states[0].acceleration.y : 0.0f, count ? states[0].acceleration.z : 0.0f,
-                   sentSamples, peak[0], peak[1], peak[2]);
-        }
         if (count == 0 || !(states[0].attributes & HidSixAxisSensorAttribute_IsConnected)) {
             continue;
         }
@@ -152,21 +136,14 @@ static void SWITCH_SendMotion(Uint64 timestamp, SDL_Joystick *joystick)
             float data[3];
             data[0] = (h == 0) ? -gx : gy;                             // tilting the top edge away: looking down (the console's frame differs from a controller's)
             data[1] = 0.0f;
-            data[2] = -(gx * s_upX + gy * s_upY + gz * s_upZ);         // turning right (clockwise seen from above)
+            data[2] = gx * s_upX + gy * s_upY + gz * s_upZ;            // turning right (clockwise seen from above); the sensor reports gravity's direction, not up
             s_sensorTimestamp += st->delta_time;
-            sentSamples++;
-            if (SDL_fabsf(data[0]) > peak[0]) peak[0] = SDL_fabsf(data[0]);
-            if (SDL_fabsf(data[2]) > peak[2]) peak[2] = SDL_fabsf(data[2]);
             SDL_SendJoystickSensor(timestamp, joystick, SDL_SENSOR_GYRO, s_sensorTimestamp, data, 3);
         }
         if (count > 0) {
             s_sensorLastSample[h] = states[0].sampling_number;
         }
         break;      // one source at a time: the first connected one in the list
-    }
-    if (report) {
-        peak[0] = peak[1] = peak[2] = 0.0f;
-        lastReport = timestamp;
     }
 }
 
@@ -231,7 +208,6 @@ static bool SWITCH_JoystickSendEffect(SDL_Joystick *joystick, const void *data, 
 static bool SWITCH_JoystickSetSensorsEnabled(SDL_Joystick *joystick, bool enabled)
 {
     s_sensorsWanted = enabled;
-    printf("gyro: sensors %s\n", enabled ? "enabled" : "disabled");
     if (!enabled) {
         SWITCH_StopSensors();
     }
