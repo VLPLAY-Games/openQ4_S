@@ -55,6 +55,7 @@ static bool SWITCHAUDIO_OpenDevice(SDL_AudioDevice *device)
             return SDL_OutOfMemory();
         }
         SDL_memset(mem, 0, device->hidden->aligned);
+        armDCacheFlush(mem, device->hidden->aligned);
         device->hidden->mem[i] = mem;
         device->hidden->out[i].next = NULL;
         device->hidden->out[i].buffer = mem;
@@ -88,6 +89,7 @@ static bool SWITCHAUDIO_WaitDevice(SDL_AudioDevice *device)
                 const int i = device->hidden->next;
                 device->hidden->next = (i + 1) % SWITCH_NUM_BUFFERS;
                 SDL_memset(device->hidden->mem[i], 0, device->hidden->aligned);
+                armDCacheFlush(device->hidden->mem[i], device->hidden->aligned);
                 device->hidden->out[i].data_size = (u64)device->buffer_size;
                 audoutAppendAudioOutBuffer(&device->hidden->out[i]);
             }
@@ -104,6 +106,8 @@ static bool SWITCHAUDIO_PlayDevice(SDL_AudioDevice *device, const Uint8 *buffer,
     device->hidden->next = (i + 1) % SWITCH_NUM_BUFFERS;
     switch_audio_diag_s16((const short *)buffer, buflen / 4);
     SDL_memcpy(device->hidden->mem[i], buffer, buflen);
+    // The audio service reads the buffer by DMA, not through the CPU cache.
+    armDCacheFlush(device->hidden->mem[i], device->hidden->aligned);
     device->hidden->out[i].data_size = (u64)buflen;
     audoutAppendAudioOutBuffer(&device->hidden->out[i]);
     return true;
