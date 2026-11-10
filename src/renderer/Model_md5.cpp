@@ -1349,11 +1349,54 @@ void idMD5Mesh::UpdateSurface( const struct renderEntity_s *ent, const idJointMa
 idMD5Mesh::CalcBounds
 ====================
 */
+#if defined( __aarch64__ )
+#include <arm_neon.h>
+/*
+Row-by-vector products of a 3x4 joint matrix, one result per lane (row0, row1, row2, row2): three
+multiplies and three pairwise adds, instead of the transpose-and-add the SSE-shaped kernel does.
+Only the bounds use this, where a last-bit difference in the summation order does not matter.
+*/
+static inline float32x4_t MD5_JointDot( const float *m, float32x4_t b ) {
+	const float32x4_t t0 = vmulq_f32( vld1q_f32( m ), b );
+	const float32x4_t t1 = vmulq_f32( vld1q_f32( m + 4 ), b );
+	const float32x4_t t2 = vmulq_f32( vld1q_f32( m + 8 ), b );
+	return vpaddq_f32( vpaddq_f32( t0, t1 ), vpaddq_f32( t2, t2 ) );
+}
+
+// Posed bounds without writing the skinned vertices anywhere (TransformVertsNew stores every one).
+static void MD5_BoundsNEON( idBounds &bounds, int numVerts, const idJointMat *joints, const idVec4 *base, const jointWeight_t *weights ) {
+	const byte *jointsPtr = reinterpret_cast<const byte *>( joints );
+	// starts at the origin, like TransformVertsNew: the bounds always contain it
+	float32x4_t minAcc = vdupq_n_f32( 0.0f );
+	float32x4_t maxAcc = vdupq_n_f32( 0.0f );
+	for ( int j = 0, i = 0; i < numVerts; i++, j++ ) {
+		float32x4_t v = MD5_JointDot( reinterpret_cast<const float *>( jointsPtr + weights[j].jointMatOffset ), vld1q_f32( base[j].ToFloatPtr() ) );
+		while ( weights[j].nextVertexOffset != JOINTWEIGHT_SIZE ) {
+			j++;
+			v = vaddq_f32( v, MD5_JointDot( reinterpret_cast<const float *>( jointsPtr + weights[j].jointMatOffset ), vld1q_f32( base[j].ToFloatPtr() ) ) );
+		}
+		minAcc = vminq_f32( minAcc, v );
+		maxAcc = vmaxq_f32( maxAcc, v );
+	}
+	float lo[4], hi[4];
+	vst1q_f32( lo, minAcc );
+	vst1q_f32( hi, maxAcc );
+	bounds[0].Set( lo[0], lo[1], lo[2] );
+	bounds[1].Set( hi[0], hi[1], hi[2] );
+}
+#endif
+
 idBounds idMD5Mesh::CalcBounds( const idJointMat *entJoints ) {
 	idBounds	bounds;
 	// Both scratch buffers are sized by the mesh's vertex count, the same count
 	// that overflowed the stack in ParseMesh. This runs per frame for animated
 	// models, so the small case stays on the stack.
+#if defined( __aarch64__ )
+	if ( scaledBaseVectors != NULL && weights != NULL ) {
+		MD5_BoundsNEON( bounds, deformInfo->numOutputVerts, entJoints, scaledBaseVectors, weights );
+		return bounds;
+	}
+#endif
 	if ( scaledBaseVectors != NULL && weights != NULL ) {
 		OPENQ4_ALLOC16_SCRATCH( idDrawVert, verts, deformInfo->numOutputVerts );
 		SIMDProcessor->TransformVertsNew( verts, deformInfo->numOutputVerts, bounds, entJoints, scaledBaseVectors, weights, numWeights );

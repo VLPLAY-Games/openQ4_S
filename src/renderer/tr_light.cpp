@@ -112,7 +112,11 @@ idCVar bse_useAreaCull(
 	"if 1, cull BSE render surfaces when the effect is outside the current portal-visible area set");
 idCVar bse_skipCulledLoopService(
 	"bse_skipCulledLoopService",
+#if defined( __SWITCH__ )
+	"1",	// looping effects the portals prove invisible are not simulated (refreshed every bse_culledLoopServiceMaxMsec)
+#else
 	"0",
+#endif
 	CVAR_RENDERER | CVAR_BOOL,
 	"if 1, experimental: defer service for looping BSE effects while portal/PVS culling proves they are invisible");
 idCVar bse_culledLoopServiceMaxMsec(
@@ -132,7 +136,11 @@ idCVar bse_useFrustumCull(
 	"if 1, cull BSE render surfaces by expanded effect bounds before emitting draw surfaces");
 idCVar bse_useCachedFrustumCull(
 	"bse_useCachedFrustumCull",
+#if defined( __SWITCH__ )
+	"1",	// cached effect bounds for the frustum test: cheaper, slightly less conservative for growing effects
+#else
 	"0",
+#endif
 	CVAR_RENDERER | CVAR_BOOL,
 	"if 1, use cached BSE effect bounds for pre-render frustum culling; faster but less conservative for growing effects");
 idCVar bse_useSurfaceFrustumCull(
@@ -2657,6 +2665,14 @@ static bool R_EffectBoundsAreaVisible( const idRenderWorldLocal *world, const rv
 			// Area culling is only an optimization, so keep large sky/smoke effects visible.
 			return true;
 		}
+	}
+
+	// Snap the box outward to a 64 unit grid. A drifting particle cloud changes its exact bounds every
+	// frame, which defeats the BoundsInAreas memo and re-walks the BSP tree each time; the snapped box
+	// is a superset (never culls anything the exact one would keep) and repeats for many frames.
+	for ( int axis = 0; axis < 3; ++axis ) {
+		worldBounds[0][axis] = idMath::Floor( worldBounds[0][axis] * ( 1.0f / 64.0f ) ) * 64.0f;
+		worldBounds[1][axis] = idMath::Ceil( worldBounds[1][axis] * ( 1.0f / 64.0f ) ) * 64.0f;
 	}
 
 	int areas[32];

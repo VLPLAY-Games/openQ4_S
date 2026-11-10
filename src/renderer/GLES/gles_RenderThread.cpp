@@ -466,6 +466,9 @@ GLW( GLW_BUFFER, glBufferSubData, ( GLenum a, GLintptr b, GLsizeiptr c, const vo
 GLW( GLW_FBO, glBindFramebuffer, ( GLenum a, GLuint b ), ( a, b ) )
 GLW( GLW_FBO, glClear, ( GLbitfield a ), ( a ) )
 
+extern unsigned int rb_glesLightsTotal;
+extern unsigned int rb_glesLightsSkipped;
+
 // Prints and clears the totals; call with the render thread idle.
 static void R_GLW_ReportAndReset( void ) {
 	char line[256];
@@ -476,6 +479,9 @@ static void R_GLW_ReportAndReset( void ) {
 		glw_calls[i] = 0;
 	}
 	n += idStr::snPrintf( line + n, sizeof( line ) - n, " uniSkipped=%u bindSkipped=%u", glw_uniformSkipped, glw_bindsSkipped );
+	n += idStr::snPrintf( line + n, sizeof( line ) - n, " lights=%u skipped=%u", rb_glesLightsTotal, rb_glesLightsSkipped );
+	rb_glesLightsTotal = 0;
+	rb_glesLightsSkipped = 0;
 	glw_uniformSkipped = 0;
 	glw_bindsSkipped = 0;
 	printf( "%s\n", line );

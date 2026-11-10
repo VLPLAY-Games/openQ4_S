@@ -32,6 +32,8 @@
 #include "gles_d3_local.h"
 #include "gles_program.h"
 
+#include <algorithm>
+
 // texture units, 1:1 with the Vulkan descriptor sets so the two shaders stay
 // diffable (Vulkan/shaders/interaction.frag:19-24)
 static const int GLESD3_TMU_SPECULAR_TABLE = 0;
@@ -504,6 +506,42 @@ void RB_GLESD3_DetermineLightScale( void ) {
 
 /*
 ====================
+Light budget
+
+Every light that reaches a surface costs one draw call per lit surface (about 10 us each in the
+Switch's driver), and a busy view can have dozens of lights. When more than r_glesMaxLights lights
+would draw interactions in a view, the ones that cover the fewest pixels are dropped: they
+contribute the least to the picture. Ambient lights, fog and blend lights and any light the viewer
+stands inside are never dropped. 0 draws every light.
+====================
+*/
+#if defined( __SWITCH__ )
+idCVar r_glesMaxLights( "r_glesMaxLights", "24", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER,
+		"most lights drawn per view on the GLES back end; the ones covering the fewest pixels are skipped (0 = no limit)", 0, 256 );
+#else
+idCVar r_glesMaxLights( "r_glesMaxLights", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER,
+		"most lights drawn per view on the GLES back end; the ones covering the fewest pixels are skipped (0 = no limit)", 0, 256 );
+#endif
+unsigned int rb_glesLightsTotal = 0;	// lights that had interactions, summed since the last report
+unsigned int rb_glesLightsSkipped = 0;	// of which skipped by the budget
+
+static int GLESD3_LightScreenArea( const viewLight_t *vLight ) {
+	const idScreenRect &r = vLight->scissorRect;
+	if ( r.IsEmpty() ) {
+		return 0;
+	}
+	return ( (int)r.x2 - (int)r.x1 + 1 ) * ( (int)r.y2 - (int)r.y1 + 1 );
+}
+
+static bool GLESD3_LightHasInteractions( const viewLight_t *vLight ) {
+	if ( vLight->lightShader->IsFogLight() || vLight->lightShader->IsBlendLight() ) {
+		return false;
+	}
+	return vLight->localInteractions || vLight->globalInteractions || vLight->translucentInteractions;
+}
+
+/*
+====================
 RB_GLESD3_DrawInteractions
 ====================
 */
@@ -541,6 +579,30 @@ void RB_GLESD3_DrawInteractions( void ) {
 
 	backEnd.currentSpace = NULL;
 
+	// work out the pixel area below which lights are dropped (see the light budget above)
+	int minLightArea = 0;
+	{
+		const int budget = r_glesMaxLights.GetInteger();
+		int areas[256];
+		int numCandidates = 0;
+		for ( const viewLight_t *vLight = viewDef->viewLights; vLight; vLight = vLight->next ) {
+			if ( !GLESD3_LightHasInteractions( vLight ) ) {
+				continue;
+			}
+			rb_glesLightsTotal++;
+			if ( vLight->lightShader->IsAmbientLight() || vLight->viewInsideLight ) {
+				continue;
+			}
+			if ( numCandidates < 256 ) {
+				areas[numCandidates++] = GLESD3_LightScreenArea( vLight );
+			}
+		}
+		if ( budget > 0 && numCandidates > budget ) {
+			std::nth_element( areas, areas + ( budget - 1 ), areas + numCandidates, []( int a, int b ) { return a > b; } );
+			minLightArea = areas[budget - 1];
+		}
+	}
+
 	for ( viewLight_t *vLight = viewDef->viewLights; vLight; vLight = vLight->next ) {
 		backEnd.vLight = vLight;
 
@@ -550,6 +612,11 @@ void RB_GLESD3_DrawInteractions( void ) {
 		}
 		if ( !vLight->localInteractions && !vLight->globalInteractions
 				&& !vLight->translucentInteractions ) {
+			continue;
+		}
+		if ( minLightArea > 0 && !vLight->lightShader->IsAmbientLight() && !vLight->viewInsideLight
+				&& GLESD3_LightScreenArea( vLight ) < minLightArea ) {
+			rb_glesLightsSkipped++;
 			continue;
 		}
 
