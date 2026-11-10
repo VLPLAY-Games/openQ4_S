@@ -2749,6 +2749,46 @@ static int R_CompareEffectSubmitDistance( const void *a, const void *b ) {
 	return ( da < db ) - ( da > db );
 }
 
+#if defined( __SWITCH__ )
+idCVar bse_serviceDiag( "bse_serviceDiag", "1", CVAR_RENDERER | CVAR_BOOL, "log how much BSE service time goes to effects that are off-screen, portal-culled, far away, or looping (every 300 frames)" );
+
+// per category: how many effect services ran and how many microseconds they took
+enum { BSEDIAG_ALL, BSEDIAG_FRUSTUM, BSEDIAG_AREA, BSEDIAG_FAR, BSEDIAG_VERYFAR, BSEDIAG_LOOP, BSEDIAG_ONESHOT, BSEDIAG_HIDDEN, BSEDIAG_COUNT };
+static int		bseDiagCount[BSEDIAG_COUNT];
+static double	bseDiagMicros[BSEDIAG_COUNT];
+static int		bseDiagFrames;
+
+static void R_BSEDiag_Add( int cat, double micros ) {
+	bseDiagCount[cat]++;
+	bseDiagMicros[cat] += micros;
+}
+
+static void R_BSEDiag_EndFrame( void ) {
+	if ( ++bseDiagFrames < 300 ) {
+		return;
+	}
+	static const char *names[BSEDIAG_COUNT] = { "all", "frustumCulled", "areaCulled", "far>1024", "far>2048", "loop", "oneShot", "hidden(frustum|area)" };
+	common->Printf( "bsediag: per 300 frames, services (count / ms):" );
+	for ( int i = 0; i < BSEDIAG_COUNT; i++ ) {
+		common->Printf( " %s=%d/%.1f", names[i], bseDiagCount[i], bseDiagMicros[i] * 0.001 );
+		bseDiagCount[i] = 0;
+		bseDiagMicros[i] = 0.0;
+	}
+	common->Printf( "\n" );
+	{
+		int numImages, numLoaded;
+		float imageMB;
+		globalImages->SwitchMemoryTotals( numImages, numLoaded, imageMB );
+		common->Printf( "memdiag: images=%d loaded=%d storage=%.0fMB entityDefs=%d lightDefs=%d effectDefs=%d\n",
+			numImages, numLoaded, imageMB,
+			tr.primaryWorld ? tr.primaryWorld->entityDefs.Num() : 0,
+			tr.primaryWorld ? tr.primaryWorld->lightDefs.Num() : 0,
+			tr.primaryWorld ? tr.primaryWorld->effectsDef.Num() : 0 );
+	}
+	bseDiagFrames = 0;
+}
+#endif
+
 /*
 ===============
 R_AddEffectSurfaces
@@ -2843,7 +2883,32 @@ void R_AddEffectSurfaces(void) {
 			const float ownerTimeSeconds = static_cast<float>(def->gameTime) * 0.001f;
 			const float presentationTimeSeconds = tr.viewDef->floatTime;
 			def->updateFramenum = tr.frameCount;
-			if (bse->ServiceEffect(def, ownerTimeSeconds, presentationTimeSeconds)) {
+#if defined( __SWITCH__ )
+			bool diagFrustum = false, diagArea = false;
+			float diagDist = 0.0f;
+			double diagStart = 0.0;
+			const bool diagOn = bse_serviceDiag.GetBool();
+			if ( diagOn ) {
+				diagFrustum = R_CullEffectByFrustum( def );
+				diagArea = R_CullEffectByArea( world, def, true );
+				diagDist = ( def->parms.origin - tr.viewDef->renderView.vieworg ).Length();
+				diagStart = Sys_GetClockTicks();
+			}
+#endif
+			const bool diagExpired = bse->ServiceEffect(def, ownerTimeSeconds, presentationTimeSeconds);
+#if defined( __SWITCH__ )
+			if ( diagOn ) {
+				const double us = ( Sys_GetClockTicks() - diagStart ) * 1000000.0 / Sys_ClockTicksPerSecond();
+				R_BSEDiag_Add( BSEDIAG_ALL, us );
+				if ( diagFrustum ) R_BSEDiag_Add( BSEDIAG_FRUSTUM, us );
+				if ( diagArea ) R_BSEDiag_Add( BSEDIAG_AREA, us );
+				if ( diagFrustum || diagArea ) R_BSEDiag_Add( BSEDIAG_HIDDEN, us );
+				if ( diagDist > 1024.0f ) R_BSEDiag_Add( BSEDIAG_FAR, us );
+				if ( diagDist > 2048.0f ) R_BSEDiag_Add( BSEDIAG_VERYFAR, us );
+				R_BSEDiag_Add( def->parms.loop ? BSEDIAG_LOOP : BSEDIAG_ONESHOT, us );
+			}
+#endif
+			if (diagExpired) {
 				++expired;
 				if (def->dynamicModel) {
 					delete def->dynamicModel;
@@ -3115,6 +3180,9 @@ void R_AddEffectSurfaces(void) {
 			(serviceGateLagMin == 0x7fffffff) ? 0 : serviceGateLagMin,
 			(serviceGateLagMax == (-0x7fffffff - 1)) ? 0 : serviceGateLagMax);
 	}
+#if defined( __SWITCH__ )
+	R_BSEDiag_EndFrame();
+#endif
 }
 
 /*

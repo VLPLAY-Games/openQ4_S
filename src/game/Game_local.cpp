@@ -4371,6 +4371,18 @@ void idGameLocal::MenuFrame( void ) { }
 
 	assert( !isClient );
 
+#if defined( __SWITCH__ )
+	{
+		// memory growth diagnostics: what the game is holding, every 30 s of game time
+		static int nextCountsTime = 0;
+		if ( time >= nextCountsTime || time + 60000 < nextCountsTime ) {
+			nextCountsTime = time + 30000;
+			common->Printf( "gamediag: time=%ds entities=%d clientEntities=%d debris=%d (faded early %d)\n",
+				time / 1000, num_entities, num_clientEntities, rvClientMoveable::NumLive(), rvClientMoveable::NumCapped() );
+		}
+	}
+#endif
+
 	if (gameRenderWorld) {
 		gameRenderWorld->DebugClear(0);
 	}

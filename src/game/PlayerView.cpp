@@ -822,23 +822,30 @@ is deliberately a bare contents query: it runs once per audible emitter per fram
 ===================
 */
 static bool OpenQ4_SoundPointInLiquid( const idVec3 &point ) {
-	// Emitters mostly stand still and every one asks every frame, which cost ~2.5% of the main thread
-	// on the Switch. Remember recent answers per exact point for 100 ms of game time.
+	// Every audible emitter asks every frame, which cost ~2.5% of the main thread on the Switch, and
+	// moving emitters (projectiles, debris, actors) never repeat an exact point. Liquid volumes are large,
+	// so remember the answer per 16-unit cell for 200 ms of game time; near a surface the flag can be
+	// off by a few units for a few frames, which is inaudible.
 	struct liquidMemo_t {
-		idVec3	point;
+		int		cell[3];
 		int		time;
 		bool	result;
 		bool	valid;
 	};
-	static liquidMemo_t memo[64];
-	const unsigned int *bits = reinterpret_cast<const unsigned int *>( &point.x );
-	const unsigned int hash = ( ( bits[0] * 73856093u ) ^ ( bits[1] * 19349663u ) ^ ( bits[2] * 83492791u ) ) >> 4;
-	liquidMemo_t &entry = memo[hash & 63];
-	if ( entry.valid && gameLocal.time - entry.time < 100 && gameLocal.time >= entry.time && entry.point == point ) {
+	static liquidMemo_t memo[128];
+	const int cx = (int)idMath::Floor( point.x * ( 1.0f / 16.0f ) );
+	const int cy = (int)idMath::Floor( point.y * ( 1.0f / 16.0f ) );
+	const int cz = (int)idMath::Floor( point.z * ( 1.0f / 16.0f ) );
+	const unsigned int hash = ( (unsigned int)cx * 73856093u ) ^ ( (unsigned int)cy * 19349663u ) ^ ( (unsigned int)cz * 83492791u );
+	liquidMemo_t &entry = memo[( hash >> 4 ) & 127];
+	if ( entry.valid && gameLocal.time - entry.time < 200 && gameLocal.time >= entry.time &&
+		 entry.cell[0] == cx && entry.cell[1] == cy && entry.cell[2] == cz ) {
 		return entry.result;
 	}
 	const bool result = gameLocal.LiquidContentsAtPoint( point, NULL ) != 0;
-	entry.point = point;
+	entry.cell[0] = cx;
+	entry.cell[1] = cy;
+	entry.cell[2] = cz;
 	entry.time = gameLocal.time;
 	entry.result = result;
 	entry.valid = true;

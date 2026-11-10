@@ -29,12 +29,32 @@ CLASS_DECLARATION( rvClientEntity, rvClientMoveable )
 END_CLASS
 
 
+#if defined( __SWITCH__ )
+idCVar g_clientDebrisMax( "g_clientDebrisMax", "40", CVAR_GAME | CVAR_INTEGER | CVAR_ARCHIVE, "most physical debris pieces (shell casings, chunks) alive at once; the oldest fade out early beyond this, 0 = unlimited" );
+#else
+idCVar g_clientDebrisMax( "g_clientDebrisMax", "0", CVAR_GAME | CVAR_INTEGER | CVAR_ARCHIVE, "most physical debris pieces (shell casings, chunks) alive at once; the oldest fade out early beyond this, 0 = unlimited" );
+#endif
+
+// every live piece, oldest first (spawn order)
+static idList<rvClientMoveable *>	liveMoveables;
+static int							cappedMoveables = 0;
+
+int rvClientMoveable::NumLive( void ) {
+	return liveMoveables.Num();
+}
+
+int rvClientMoveable::NumCapped( void ) {
+	return cappedMoveables;
+}
+
 /*
 ================
 rvClientMoveable::rvClientMoveable
 ================
 */
 rvClientMoveable::rvClientMoveable ( void ) {
+	capFading = false;
+	liveMoveables.Append( this );
 	memset ( &renderEntity, 0, sizeof(renderEntity) );
 	entityDefHandle = -1;
 	scale.Init( 0, 0, 1.0f, 1.0f );
@@ -53,6 +73,7 @@ rvClientMoveable::~rvClientMoveable
 ================
 */
 rvClientMoveable::~rvClientMoveable ( void ) {
+	liveMoveables.Remove( this );
 	FreeEntityDef ( );
 
 	// Remove any trail effect if there is one
@@ -148,6 +169,23 @@ void rvClientMoveable::Spawn ( void ) {
 	mHasBounced = false;
 	
 	scale.Init( gameLocal.GetTime(), SEC2MS(spawnArgs.GetFloat("scale_reset_duration", "0.2")), Max(VECTOR_EPSILON, spawnArgs.GetFloat("scale", "1.0f")), 1.0f );
+
+	// Past the cap the oldest pieces fade out early (physics and render cost only: nothing here
+	// affects damage or AI). Pieces already fading are skipped.
+	const int cap = g_clientDebrisMax.GetInteger();
+	if ( cap > 0 && liveMoveables.Num() > cap ) {
+		int excess = liveMoveables.Num() - cap;
+		for ( int i = 0; i < liveMoveables.Num() && excess > 0; i++ ) {
+			rvClientMoveable *old = liveMoveables[i];
+			if ( old == this || old->capFading ) {
+				continue;
+			}
+			old->capFading = true;
+			old->PostEventMS( &CL_FadeOut, 0, 300 );
+			cappedMoveables++;
+			excess--;
+		}
+	}
 }
 
 /*

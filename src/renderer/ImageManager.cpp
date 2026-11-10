@@ -1747,6 +1747,27 @@ void idImageManager::FinishBuild( bool removeDups ) {
 idImageManager::PrintMemInfo
 ===============
 */
+/*
+===============
+idImageManager::SwitchMemoryTotals
+
+Image count and the storage they take, for the periodic memory diagnostics.
+===============
+*/
+void idImageManager::SwitchMemoryTotals( int &numImages, int &numLoaded, float &megaBytes ) const {
+	numImages = images.Num();
+	numLoaded = 0;
+	double bytes = 0.0;
+	for ( int i = 0; i < images.Num(); i++ ) {
+		const int size = images[i]->StorageSize();
+		if ( size > 0 ) {
+			numLoaded++;
+			bytes += size;
+		}
+	}
+	megaBytes = (float)( bytes / ( 1024.0 * 1024.0 ) );
+}
+
 void idImageManager::PrintMemInfo( MemInfo_t *mi ) {
 	R_RenderThread_Sync( "image registry" );
 	int i, j, total = 0;

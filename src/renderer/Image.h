@@ -484,6 +484,7 @@ public:
 	void				FinishBuild(bool removeDups = false);
 
 	void				PrintMemInfo(MemInfo_t* mi);
+	void				SwitchMemoryTotals( int &numImages, int &numLoaded, float &megaBytes ) const;
 
 	// built-in images
 	void CreateIntrinsicImages();
