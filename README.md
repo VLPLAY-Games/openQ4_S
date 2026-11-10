@@ -24,7 +24,7 @@
 
 ## Status
 
-The single-player campaign is playable and saves and loads work. This is the 1.0.0 release line of the Switch port, on the `switch` branch.
+The single-player campaign is playable and saves and loads work. This is the 1.0.0 release line of the Switch port, on the `main` branch. The `switch` branch is used for testing, and `upstream-main` keeps the state of the repository before the port.
 
 **What was tested:** the first three levels, on a Switch Lite in handheld mode, with a CPU clock of **1785 MHz**, a GPU clock of **460 MHz** and a RAM clock of **1600 MHz**. Later levels have not been played through yet. **In heavy fights the frame rate drops a lot**, well below 30 FPS in the worst moments.
 

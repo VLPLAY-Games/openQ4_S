@@ -27,7 +27,7 @@ with `OPENQ4_SWITCH_DIAG` defined; the analysis scripts are in `tools/switch/`.
 
 ## Code changes
 
-- Work on the `switch` branch and open the pull request against it.
+- Open pull requests against `main`. The `switch` branch is used for testing changes, and `upstream-main` is the original project state before the port; neither takes pull requests.
 - Keep a change focused, and describe what it does and how you tested it on
   hardware. For performance work, give before and after frame times from the
   same route in the game.
