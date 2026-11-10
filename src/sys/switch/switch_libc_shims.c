@@ -210,12 +210,21 @@ void switch_pin_current_thread( int core ) {
 	svcSetThreadCoreMask( CUR_THREAD_HANDLE, core, 1u << core );
 }
 
+static volatile int switch_log_stop = 0;
+static pthread_t switch_log_thread;
+static int switch_log_thread_started = 0;
+
 static void *switch_log_flusher( void *arg ) {
 	(void)arg;
 	switch_pin_current_thread( 2 );
 	int tick = 0;
-	for ( ;; ) {
-		svcSleepThread( 2000000000ULL );	// 2 s
+	int slice = 0;
+	while ( !switch_log_stop ) {
+		svcSleepThread( 100000000ULL );	// 100 ms slices so shutdown can join the thread quickly
+		if ( ++slice < 20 ) {
+			continue;
+		}
+		slice = 0;
 #ifdef OPENQ4_SWITCH_DIAG
 		if ( ++tick >= 60 ) {
 			// every 2 min: process memory in use and the malloc heap, to spot growth or fragmentation.
@@ -387,8 +396,7 @@ void userAppInit( void ) {
 			dup2( fileno( stdout ), fileno( stderr ) );
 			setvbuf( stderr, NULL, _IONBF, 0 );
 			printf( "openQ4 Switch log start\n" );
-			pthread_t flusher;
-			pthread_create( &flusher, NULL, switch_log_flusher, NULL );
+			switch_log_thread_started = pthread_create( &switch_log_thread, NULL, switch_log_flusher, NULL ) == 0;
 		}
 	}
 }
@@ -397,14 +405,25 @@ void userAppExit( void ) {
 	socketExit();
 }
 
-/* Leave the process directly. Running exit() on the way out goes through every static destructor in
-   the engine, game and renderer groups while worker threads are still alive, and a crash there ends
-   the session with a system error screen instead of a clean close. By this point the game has already
-   shut itself down and written its files. */
+/* Leave through the loader without running exit(): exit() goes through every static destructor in the
+   engine, game and renderer groups, and a crash there ends the session with a system error screen
+   instead of a clean close. By this point the game has already shut itself down and written its
+   files. Same steps as libnx's own exit, minus the destructors. */
+extern void __appExit( void );
+extern void NX_NORETURN __nx_exit( Result rc, LoaderReturnFn retaddr );
+
 void switch_fast_exit( int rc ) {
 	(void)rc;
+	// The loader unmaps this program's code when it takes control back: no thread of ours may still be
+	// running, so stop the log flusher first.
+	switch_log_stop = 1;
+	if ( switch_log_thread_started ) {
+		pthread_join( switch_log_thread, NULL );
+	}
 	fflush( NULL );
-	svcExitProcess();
+	switch_mark( "exit: handing back to the loader" );
+	__appExit();
+	__nx_exit( 0, envGetExitFuncPtr() );
 	for ( ;; ) {
 		svcSleepThread( 1000000000ULL );
 	}

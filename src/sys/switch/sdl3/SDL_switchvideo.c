@@ -192,6 +192,9 @@ static void SWITCH_ShowKeyboard(void)
     swkbdConfigSetStringLenMin(&kbd, 0);
     if (R_SUCCEEDED(swkbdShow(&kbd, text, sizeof(text))) && text[0]) {
         SDL_SendKeyboardText(text);
+        // confirming the keyboard confirms the field (save name, player name)
+        SDL_SendKeyboardKey(0, SDL_GLOBAL_KEYBOARD_ID, 0, SDL_SCANCODE_RETURN, true);
+        SDL_SendKeyboardKey(0, SDL_GLOBAL_KEYBOARD_ID, 0, SDL_SCANCODE_RETURN, false);
     }
     swkbdClose(&kbd);
 }
@@ -199,9 +202,14 @@ static void SWITCH_ShowKeyboard(void)
 static void SWITCH_PumpEvents(SDL_VideoDevice *_this)
 {
     if (s_keyboardRequested) {
-        // once per request: asking again needs the field to lose and regain focus
+        // once per request: asking again needs the field to lose and regain focus. Returning from the
+        // keyboard applet can restart text input at once, so ignore requests right after one closed.
+        static u64 lastClosed = 0;
         s_keyboardRequested = false;
-        SWITCH_ShowKeyboard();
+        if (lastClosed == 0 || armTicksToNs(armGetSystemTick() - lastClosed) > 1500000000ULL) {
+            SWITCH_ShowKeyboard();
+            lastClosed = armGetSystemTick();
+        }
     }
     // appletMainLoop services HOME/sleep messages and returns false once the
     // system asks the application to exit.
