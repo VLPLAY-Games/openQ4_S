@@ -2764,10 +2764,7 @@ static void R_BSEDiag_Add( int cat, double micros ) {
 }
 
 static void R_BSEDiag_EndFrame( void ) {
-	if ( ++bseDiagFrames < 300 ) {
-		return;
-	}
-	if ( bse_serviceDiag.GetBool() ) {
+	if ( bse_serviceDiag.GetBool() && ++bseDiagFrames >= 300 ) {
 		static const char *names[BSEDIAG_COUNT] = { "all", "frustumCulled", "areaCulled", "far>1024", "far>2048", "loop", "oneShot", "hidden(frustum|area)" };
 		common->Printf( "bsediag: per 300 frames, services (count / ms):" );
 		for ( int i = 0; i < BSEDIAG_COUNT; i++ ) {
@@ -2776,18 +2773,32 @@ static void R_BSEDiag_EndFrame( void ) {
 			bseDiagMicros[i] = 0.0;
 		}
 		common->Printf( "\n" );
+		bseDiagFrames = 0;
 	}
-	{
-		int numImages, numLoaded;
-		float imageMB;
-		globalImages->SwitchMemoryTotals( numImages, numLoaded, imageMB );
-		common->Printf( "memdiag: images=%d loaded=%d storage=%.0fMB entityDefs=%d lightDefs=%d effectDefs=%d\n",
-			numImages, numLoaded, imageMB,
-			tr.primaryWorld ? tr.primaryWorld->entityDefs.Num() : 0,
-			tr.primaryWorld ? tr.primaryWorld->lightDefs.Num() : 0,
-			tr.primaryWorld ? tr.primaryWorld->effectsDef.Num() : 0 );
+
+	// memory growth diagnostics: roughly once a minute
+	static int memFrames = 0;
+	if ( ++memFrames < 1800 ) {
+		return;
 	}
-	bseDiagFrames = 0;
+	memFrames = 0;
+	int numImages, numLoaded;
+	float imageMB;
+	globalImages->SwitchMemoryTotals( numImages, numLoaded, imageMB );
+	int liveEntityDefs = 0, liveLightDefs = 0, liveEffectDefs = 0;
+	if ( tr.primaryWorld ) {
+		for ( int i = 0; i < tr.primaryWorld->entityDefs.Num(); i++ ) {
+			if ( tr.primaryWorld->entityDefs[i] ) liveEntityDefs++;
+		}
+		for ( int i = 0; i < tr.primaryWorld->lightDefs.Num(); i++ ) {
+			if ( tr.primaryWorld->lightDefs[i] ) liveLightDefs++;
+		}
+		for ( int i = 0; i < tr.primaryWorld->effectsDef.Num(); i++ ) {
+			if ( tr.primaryWorld->effectsDef[i] ) liveEffectDefs++;
+		}
+	}
+	common->Printf( "memdiag: images=%d loaded=%d storage=%.0fMB liveDefs entity=%d light=%d effect=%d\n",
+		numImages, numLoaded, imageMB, liveEntityDefs, liveLightDefs, liveEffectDefs );
 }
 #endif
 
