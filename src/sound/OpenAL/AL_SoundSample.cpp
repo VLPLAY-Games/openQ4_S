@@ -148,8 +148,127 @@ static int SoundStream_ReadAt( void* user, unsigned int offset, void* data, int 
 }
 
 idSoundOggStream::idSoundOggStream() : file( NULL ), decoder( NULL ), list( NULL ), state( BLOCK_IDLE ), fileLength( 0 ), requestTime( 0 ),
-	decoderOpen( false ), outcome( DECODE_NONE ), decoderError( 0 ), position( 0 ), requestFrame( 0 ), requestFrames( 0 ), decodedFrames( 0 ), decodeMs( 0 ) {}
+	decoderOpen( false ), outcome( DECODE_NONE ), decoderError( 0 ), position( 0 ), requestFrame( 0 ), requestFrames( 0 ), decodedFrames( 0 ), decodeMs( 0 ),
+	diagLast( 0 ), diagNextFrame( 0 ), diagHaveLast( false ), diagDump( -1 ), diagDumpedFrames( 0 ) {}
 idSoundOggStream::~idSoundOggStream() { Close(); }
+
+#if defined( __SWITCH__ )
+/*
+===============================================================================
+
+	Decoded-sound checks (Switch bring-up). The OpenAL output was verified clean from the mixer onward,
+	so the remaining suspect for crackle is the PCM itself. For every decoded block (streamed Ogg) and
+	every uploaded sample this measures the level, a high-frequency measure (rms of the second
+	difference over four times the rms: hiss and decoder damage raise it) and the largest step between
+	neighbouring samples, and logs the first few plus anything suspicious. The first few streams and
+	samples are also written raw (sdmc:/switch/openQ4/pcm_N.raw, little-endian s16, interleaved) so the
+	same sound can be decoded on the PC and compared sample by sample.
+
+===============================================================================
+*/
+#include <stdio.h>
+static int	soundDiagLogged = 0;
+static int	soundDiagDumps = 0;
+
+static void SoundDiag_Measure( const short *pcm, int frames, int channels, float &rms, float &hf, float &maxStep ) {
+	double sum = 0.0, sum2 = 0.0;
+	float step = 0.0f;
+	rms = hf = 0.0f;
+	if( frames < 3 ) {
+		maxStep = 0.0f;
+		return;
+	}
+	for( int i = 0; i < frames; i++ ) {
+		const float v = pcm[i * channels] * ( 1.0f / 32768.0f );
+		sum += static_cast<double>( v ) * v;
+		if( i >= 2 ) {
+			const float a = pcm[( i - 2 ) * channels] * ( 1.0f / 32768.0f );
+			const float b = pcm[( i - 1 ) * channels] * ( 1.0f / 32768.0f );
+			const float d2 = v - 2.0f * b + a;
+			sum2 += static_cast<double>( d2 ) * d2;
+			const float s = idMath::Fabs( v - b );
+			if( s > step ) step = s;
+		}
+	}
+	rms = static_cast<float>( sqrt( sum / frames ) );
+	hf = static_cast<float>( sqrt( sum2 / ( frames - 2 ) ) ) / ( 4.0f * rms + 1e-9f );
+	maxStep = step;
+}
+
+static int SoundDiag_OpenDump( const char *prefix, const char *name, int channels, int rate, int format ) {
+	if( soundDiagDumps >= 8 ) {
+		return -1;
+	}
+	const int n = soundDiagDumps++;
+	printf( "sounddiag: %s dump %d = %s (channels=%d rate=%d format=%d)\n", prefix, n, name, channels, rate, format );
+	return n;
+}
+
+static void SoundDiag_Write( int dump, const short *pcm, int frames, int channels ) {
+	char path[128];
+	idStr::snPrintf( path, sizeof( path ), "sdmc:/switch/openQ4/pcm_%d.raw", dump );
+	FILE *f = fopen( path, "ab" );
+	if( f ) {
+		fwrite( pcm, sizeof( short ) * channels, static_cast<size_t>( frames ), f );
+		fclose( f );
+	}
+}
+
+static void SoundDiag_Sample( const char *name, int formatTag, const short *pcm, int frames, int channels, int rate ) {
+	float rms, hf, step;
+	SoundDiag_Measure( pcm, frames, channels, rms, hf, step );
+	if( soundDiagLogged < 40 || hf > 0.12f || step > 0.5f ) {
+		if( soundDiagLogged < 400 ) {
+			printf( "sounddiag: sample %s fmt=%d ch=%d rate=%d frames=%d rms=%.4f hf=%.3f step=%.3f\n", name, formatTag, channels, rate, frames, rms, hf, step );
+			soundDiagLogged++;
+		}
+	}
+	// dump the first few ADPCM-decoded samples (formatTag 2) and the first plain PCM ones
+	static int dumpedAdpcm = 0, dumpedPcm = 0;
+	if( ( formatTag == 2 && dumpedAdpcm < 2 ) || ( formatTag != 2 && dumpedPcm < 2 ) ) {
+		const int d = SoundDiag_OpenDump( "sample", name, channels, rate, formatTag );
+		if( d >= 0 ) {
+			( formatTag == 2 ? dumpedAdpcm : dumpedPcm )++;
+			SoundDiag_Write( d, pcm, Min( frames, rate * 6 ), channels );
+		}
+	}
+}
+
+void idSoundOggStream::DiagnoseBlock() {
+	const int channels = shape.channels;
+	const int frames = decodedFrames;
+	if( frames < 3 || channels < 1 || channels > 6 ) {
+		return;
+	}
+	float rms, hf, step;
+	SoundDiag_Measure( block, frames, channels, rms, hf, step );
+	float boundary = 0.0f;
+	if( diagHaveLast && requestFrame == diagNextFrame ) {
+		boundary = idMath::Fabs( ( block[0] - diagLast ) * ( 1.0f / 32768.0f ) );
+	}
+	diagLast = block[( frames - 1 ) * channels];
+	diagNextFrame = requestFrame + static_cast<unsigned int>( frames );
+	diagHaveLast = true;
+	if( soundDiagLogged < 24 || hf > 0.15f || step > 0.35f || boundary > 0.3f ) {
+		if( soundDiagLogged < 400 ) {
+			printf( "sounddiag: ogg %s @%u frames=%d ch=%d rms=%.4f hf=%.3f step=%.3f boundary=%.3f\n", name.c_str(), requestFrame, frames, channels, rms, hf, step, boundary );
+			soundDiagLogged++;
+		}
+	}
+	if( diagDump < 0 && requestFrame == 0 ) {
+		static int streamsDumped = 0;
+		if( streamsDumped < 3 ) {
+			diagDump = SoundDiag_OpenDump( "ogg", name.c_str(), channels, shape.rate, 0 );
+			if( diagDump >= 0 ) streamsDumped++;
+		}
+	}
+	if( diagDump >= 0 && diagDumpedFrames < static_cast<unsigned int>( shape.rate ) * 8u && requestFrame == diagDumpedFrames ) {
+		SoundDiag_Write( diagDump, block, frames, channels );
+		diagDumpedFrames += static_cast<unsigned int>( frames );
+	}
+}
+#endif
+
 void idSoundOggStream::Close() {
 	if( list != NULL ) {
 		// Release parks streams with an outstanding block, so this waits only for
@@ -241,6 +360,9 @@ void idSoundOggStream::FinishBlock() {
 	switch( outcome ) {
 		case DECODE_READY:
 			state = BLOCK_READY;
+#if defined( __SWITCH__ )
+			DiagnoseBlock();
+#endif
 			if( requestTime != 0 ) {
 				// The wait covers the job queue and the frame that polls it; the decode
 				// covers the worker's header parse, seek and first block.
@@ -1091,6 +1213,12 @@ void idSoundSample_OpenAL::CreateOpenALBuffer()
 				return; // CPU bytes remain available to the bounded queue fallback.
 			}
 			openalReserved = bufferSize;
+#if defined( __SWITCH__ )
+			if( NumChannels() >= 1 && NumChannels() <= 2 && bufferSize >= 64 ) {
+				SoundDiag_Sample( GetName(), static_cast<int>( format.basic.formatTag ), static_cast<const short *>( buffer ),
+					static_cast<int>( bufferSize / ( sizeof( short ) * NumChannels() ) ), NumChannels(), static_cast<int>( format.basic.samplesPerSec ) );
+			}
+#endif
 			alBufferData( openalBuffer, GetOpenALBufferFormat(), buffer, bufferSize, format.basic.samplesPerSec );
 		}
 

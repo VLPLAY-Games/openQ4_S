@@ -111,6 +111,13 @@ private:
 	int decodedFrames;
 	int decodeMs;		// worker time of the last block, opening and seeking included
 	short block[BLOCK_SAMPLES];
+	// bring-up diagnostics (Switch): per-block checks of the decoded PCM, see DiagnoseBlock
+	void DiagnoseBlock();
+	short diagLast;				// last sample (channel 0) of the previous block
+	unsigned int diagNextFrame;	// frame that block ended at
+	bool diagHaveLast;
+	int diagDump;				// index of the raw dump this stream writes, or -1
+	unsigned int diagDumpedFrames;
 };
 class idSoundSample_OpenAL
 {
