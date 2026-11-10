@@ -497,9 +497,6 @@ rvGameState::Run
 void rvGameState::Run( void ) {
 	if ( currentState == INACTIVE ) {
 
-#ifdef _XENON
-		if(Live()->RoundsPlayed() < cvarSystem->GetCVarInteger("si_matchRounds"))
-#endif
 		{
 			NewState( WARMUP );
 		}
@@ -576,13 +573,6 @@ void rvGameState::Run( void ) {
 
 //RAVEN BEGIN
 //asalmon: Live has its own rules for ending warm up
-#ifdef _XENON
-			if(!Live()->RollCall())
-			{
-				break;
-			}
-			
-#endif
 //RAVEN END
 			if ( gameLocal.mpGame.IsArenaCampaignMatch() ) {
 				// The introduction owns warmup until every authored opponent has

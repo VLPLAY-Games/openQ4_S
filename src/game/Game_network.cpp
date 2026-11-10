@@ -254,9 +254,6 @@ void idGameLocal::ServerClientBegin( int clientNum, bool isBot, const char* botN
 	}
 //RAVEN BEGIN
 //asalmon: This client has finish loading and will be spawned mark them as ready.
-#ifdef _XENON
-	Live()->ClientReady(clientNum);
-#endif
 //RAVEN END
 }
 

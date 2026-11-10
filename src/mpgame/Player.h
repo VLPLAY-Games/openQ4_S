@@ -63,15 +63,6 @@ const int	IMPULSE_NUMBER_OF_BITS		= 8;							// allows for 2<<X impulses
 
 // RAVEN BEGIN
 // jnewquist: Xenon weapon combo system
-#ifdef _XENON
-typedef struct
-{
-	int up;
-	int down;
-	int left;
-	int right;
-} nextWeaponCombo_t;
-#endif
 // RAVEN END
 
 typedef enum {
@@ -778,9 +769,6 @@ public:
 	idCamera *				GetPrivateCameraView( void ) const { return privateCameraView; }
 	void					StartFxFov( float duration  );
  	void					UpdateHudWeapon( int displayWeapon = -1 );
-#ifdef _XENON
-	void					ResetHUDWeaponSwitch( void );
-#endif
 	void					UpdateHudStats( idUserInterface *hud );
  	void					UpdateHudAmmo( idUserInterface *hud );
  	void					UpdateHudPowerUps( idUserInterface *hud );

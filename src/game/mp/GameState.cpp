@@ -287,9 +287,6 @@ rvGameState::Run
 void rvGameState::Run( void ) {
 	if ( currentState == INACTIVE ) {
 
-#ifdef _XENON
-		if(Live()->RoundsPlayed() < cvarSystem->GetCVarInteger("si_matchRounds"))
-#endif
 		{
 			NewState( WARMUP );
 		}
@@ -365,13 +362,6 @@ void rvGameState::Run( void ) {
 
 //RAVEN BEGIN
 //asalmon: Live has its own rules for ending warm up
-#ifdef _XENON
-			if(!Live()->RollCall())
-			{
-				break;
-			}
-			
-#endif
 //RAVEN END
 			if( !gameLocal.serverInfo.GetBool( "si_warmup" ) && gameLocal.gameType != GAME_TOURNEY ) {
 				// tourney always needs a warmup, to ensure that at least 2 players get seeded for the tournament.

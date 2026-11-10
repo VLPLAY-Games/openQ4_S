@@ -1,17 +1,6 @@
 #include "NumericString.h"
 
 // TTimo - don't do anything funky if you're on a real OS ;-)
-#if defined(_WINDOWS) || defined(_XENON)
-
-// RAVEN BEGIN
-// jsinger: attempt at removing the DLL cross boundary issue
-// mwhitlock: Dynamic memory consolidation - may want to consier making a totally separate string allocator
-#if ( !defined(ID_REDIRECT_NEWDELETE) && !defined(RV_UNIFIED_ALLOCATOR) ) || defined(_RV_MEM_SYS_SUPPORT)
-// RAVEN END
-	//#define USE_STRING_DATA_ALLOCATOR
-#endif
-
-#endif
 
 #ifdef USE_STRING_DATA_ALLOCATOR
 static idDynamicBlockAlloc<char, 1<<18, 128, MA_STRING>	stringDataAllocator;
@@ -2027,15 +2016,9 @@ int idStr::vsnPrintf( char *dest, int size, const char *fmt, va_list argptr ) {
 	if ( dest == NULL || size <= 0 ) {
 		return -1;
 	}
-#ifdef _WIN32
-#undef _vsnprintf
-	ret = _vsnprintf( dest, size-1, fmt, argptr );
-#define _vsnprintf	use_idStr_vsnPrintf
-#else
 #undef vsnprintf
 	ret = vsnprintf( dest, size, fmt, argptr );
 #define vsnprintf	use_idStr_vsnPrintf
-#endif
 	dest[size-1] = '\0';
 	if ( ret < 0 || ret >= size ) {
 		return -1;
@@ -2109,39 +2092,6 @@ char *va( const char *fmt, ... ) {
 	return buf;
 }
 
-#ifdef _WIN32
-/*
-============
-fe
-
-Used for formatting windows errors
-NOTE: not thread safe
-============
-*/
-// RAVEN BEGIN
-// abahr
-char *fe( int errorId ) {
-	static int index = 0;
-	static char string[4][256];	// in case called by nested functions
-	char *buf;
-
-	buf = string[index];
-	index = (index + 1) & 3;
-#ifndef _XBOX
-	FormatMessage( 
-		FORMAT_MESSAGE_FROM_SYSTEM | 
-		FORMAT_MESSAGE_IGNORE_INSERTS,
-		NULL,
-		errorId,
-		0, // Default language
-		(LPTSTR) buf,
-		256,
-		NULL 
-	);
-#endif
-	return buf;
-}
-#endif
 // RAVEN END
 
 /*

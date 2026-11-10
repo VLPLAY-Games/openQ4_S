@@ -193,11 +193,7 @@ is skipped rather than breaking the load.
 // -- it is only ever reached by name from the loader -- so without it both
 // -dead_strip and --gc-sections drop the symbol and every module silently
 // reports nothing.
-#if defined( _WIN32 )
-	#define MEM_MODULE_STATS_EXPORT		__declspec( dllexport )
-#else
 	#define MEM_MODULE_STATS_EXPORT		__attribute__( ( visibility( "default" ), used ) )
-#endif
 
 typedef void ( *memModuleStats_t )( memoryStats_t *stats );
 
@@ -296,7 +292,7 @@ void operator delete[]( void *p );
 #endif
 // RAVEN END
 
-#else /* ID_DEBUG_MEMORY */
+#else
 
 // RAVEN BEGIN
 // amccarthy: added tags from memory allocation tracking.

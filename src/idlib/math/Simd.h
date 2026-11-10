@@ -29,19 +29,11 @@ public:
 ===============================================================================
 */
 
-#ifdef _WIN32
-#define VPCALL __fastcall
-#else
 #define VPCALL
-#endif
 
 class idVec2;
 class idVec3;
-#ifdef _XENON
-class __declspec(align(16)) idVec4;
-#else
 class idVec4;
-#endif
 class idVec5;
 class idVec6;
 class idVecX;
@@ -81,10 +73,6 @@ typedef enum {
 
 // RAVEN BEGIN
 // jsinger: forward declare and use a typedef so that xenon doesn't have to use inheritence for the SIMD stuff
-#ifdef _XENON
-class idSIMD_Xenon;
-typedef idSIMD_Xenon idSIMDProcessor;
-#else
 // RAVEN END
 class idSIMDProcessor {
 public:
@@ -222,7 +210,6 @@ public:
 // RAVEN END
 };
 // RAVEN BEGIN
-#endif
 // RAVEN END
 
 // pointer to SIMD processor

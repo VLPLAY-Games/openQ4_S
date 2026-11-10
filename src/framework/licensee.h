@@ -64,11 +64,7 @@
 #endif
 #define	CD_EXE							PROJECT_NAME "-client_" OPENQ4_BINARY_ARCH ".exe"
 
-#ifdef _XENON
-#define CONFIG_FILE						"save:/openQ4Config.cfg"
-#else
 #define CONFIG_FILE						"openQ4Config.cfg"
-#endif
 
 // base folder where the source code lives
 #define SOURCE_CODE_BASE_FOLDER			"code"
@@ -144,8 +140,6 @@
 
 #ifdef __linux__
 	#define DEFAULT_BASE_PATH				"/usr/local/games/openq4"
-#elif defined( MACOS_X )
-	#define DEFAULT_BASE_PATH				"/Applications/openQ4"
 #endif
 
 // CD Key file info

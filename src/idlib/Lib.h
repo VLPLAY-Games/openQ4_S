@@ -93,7 +93,7 @@ if ( !verify(game) ) {
 				} ) \
 				, false ) ) \
 		)
-	#else
+#else
 		#define assert( x )		if ( x ) { } else AssertFailed( __FILE__, __LINE__, #x )
 		#define verify( x )		( ( x ) ? true : ( AssertFailed( __FILE__, __LINE__, #x ), false ) )
 	#endif
@@ -159,11 +159,7 @@ typedef int						qhandle_t;
 
 class idFile;
 class idVec3;
-#ifdef _XENON
-#define ID_VEC4_ALIGN __declspec(align(16))
-#else
 #define ID_VEC4_ALIGN
-#endif
 class ID_VEC4_ALIGN idVec4;
 
 #ifndef NULL
@@ -348,12 +344,6 @@ bool IsSignedType(const _type_ t) {
 #include "Timer.h"
 // RAVEN BEGIN
 // jsinger: xenon needs these because the simd class is no longer virtual
-#ifdef _XENON
-#include "math/Simd_generic.h"
-#include "math/Simd_Xenon.h"
-#include "Threads/ThreadEventManager.h"
-#include "Threads/WorkerThreadManager.h"
-#endif
 // RAVEN END
 
 #include "Swap.h"

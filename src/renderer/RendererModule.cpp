@@ -466,9 +466,6 @@ static bool RM_ResolveModulePath( rendererModuleApi_t api, char *outPath, int ma
 	const char *archTags[ 2 ];
 	int numArchTags = 0;
 	archTags[ numArchTags++ ] = RENDERER_MODULE_ARCH_TAG;
-#if defined( MACOS_X ) || defined( __APPLE__ )
-	archTags[ numArchTags++ ] = "universal2";
-#endif
 
 	R_RendererModule_BuildBinaryName( api, binaryName, sizeof( binaryName ) );
 	sys->DLL_GetFileName( binaryName, fileName, sizeof( fileName ) );

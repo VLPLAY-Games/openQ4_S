@@ -31,11 +31,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "Unzip.h"
 
-#if defined( _WIN32 )
-#include <io.h>
-#else
 #include <unistd.h>
-#endif
 
 #define	MAX_PRINT_MSG		4096
 
@@ -1365,11 +1361,7 @@ bool idFile_Permanent::Sync( void ) {
 	if ( !( mode & ( 1 << FS_WRITE ) ) ) {
 		return true;
 	}
-#if defined( _WIN32 )
-	return _commit( _fileno( o ) ) == 0;
-#else
 	return fsync( fileno( o ) ) == 0;
-#endif
 }
 
 /*

@@ -11,9 +11,6 @@ extern idUserInterfaceManagerLocal uiManagerLocal;
 extern idCVar r_skipGuiShaders;
 #ifndef ID_DEDICATED
 #include "../framework/KeyInput.h"
-#if defined(__ANDROID__)
-#include "../sys/android/android_public.h"
-#endif
 #include "retained/Runtime.h"
 #include <json/json.h>
 #include <cmath>
@@ -520,16 +517,6 @@ bool idRemasteredHud::Draw(const idUserInterfaceLocal& legacy,int time) {
 		{viewport.safeLeft,viewport.safeTop,viewport.safeRight,viewport.safeBottom},ui_hudWidth.GetInteger(),
 		cvarSystem->GetCVarFloat("ui_hudSafeInset"),cvarSystem->GetCVarFloat("ui_hudScale"));
 	float top=layout.top,bottom=layout.bottom;
-#if defined(__ANDROID__)
-	// Touch plates span the SDL window; the HUD may occupy an inset, scaled
-	// drawable viewport. Keep top readouts below the active targets without
-	// changing the player's saved safe-area preference.
-	const float touchTop=AndroidTouchControls_HudTop()*viewport.pixelDensityY;
-	top=Max(top,Max(0.f,touchTop-viewport.originY)/ratio);
-	// In portrait the bottom readouts rise above the thumb deck (section 13.6).
-	const float deckEdge=AndroidTouchControls_HudBottomEdge()*viewport.pixelDensityY;
-	if (deckEdge>0) bottom=Max(bottom,Max(0.f,viewport.originY+float(viewport.height)-deckEdge)/ratio);
-#endif
 	impl->gui->SetStateFloat("hud.width",layout.width);
 	impl->gui->SetStateFloat("hud.height",layout.height);
 	impl->gui->SetStateFloat("hud.left",layout.left);

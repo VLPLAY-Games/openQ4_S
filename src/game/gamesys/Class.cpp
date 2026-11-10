@@ -684,12 +684,6 @@ bool idClass::PostEventArgs( const idEventDef *ev, int time, int numargs, ... ) 
 // jnewquist: Use accessor for static class type 
 	bool isClient = !IsClient() && gameLocal.isClient;
 
-#ifdef _XENON
-	// nrausch: We want to allow selectWeapon to pass through, but that's all
-	if ( idStr::Cmp( ev->GetName(), "selectWeapon" ) == 0 ) {
-		isClient = false;
-	}
-#endif
 
 	if(  isClient && ( gameLocal.GameState() != GAMESTATE_STARTUP ) && ( gameLocal.GameState() != GAMESTATE_RESTART ) && !IsType( idThread::GetClassType() ) ) {
 // RAVEN END

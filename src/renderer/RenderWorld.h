@@ -209,9 +209,6 @@ typedef struct renderEntity_s {
   
 // RAVEN BEGIN
 // mwhitlock: Xenon texture streaming
-#if defined(_XENON)
-	idList<idMaterial *>	allMaterials;
-#endif
 // RAVEN END
 
   	// networking: see WriteGUIToSnapshot / ReadGUIFromSnapshot
@@ -311,9 +308,6 @@ typedef struct renderLight_s {
 // RAVEN BEGIN
 	int						referenceSoundHandle;		// for shader sound tables, allowing effects to vary with sounds
 // mwhitlock: Xenon texture streaming
-#if defined(_XENON)
-	idList<idMaterial *>	allMaterials;
-#endif
 // RAVEN END
 
 // jmarshall
@@ -374,9 +368,6 @@ typedef struct renderView_s {
 
 // RAVEN BEGIN
 // mwhitlock: Xenon texture streaming.
-#if defined(_XENON)
-	bool					streamingPrecache;	// If true, we precache all the textures that are visible in the world
-#endif
 // RAVEN END
 
 	// openQ4: an off-axis frustum, one eye of a head-mounted display. When set,
@@ -566,10 +557,6 @@ public:
 	virtual void			RemoveAllModelReferences( idRenderModel *model ) = 0;
 
 // mwhitlock: Xenon texture streaming
-#if defined(_XENON)
-	virtual void			StreamAreaTextures(bool inBackground) = 0;	
-	virtual void			ClearAreaTextureStreamer(void) = 0;
-#endif
 // RAVEN END
 
 	// Force the generation of all light / surface interactions at the start of a level

@@ -3,7 +3,7 @@
 We want openQ4 to be a welcoming, productive community for everyone interested in
 keeping Quake 4 playable on modern systems. This Code of Conduct applies to all
 project spaces, including the issue tracker, pull requests, discussions,
-Discord server, and any other channel where community members interact.
+and any other channel where community members interact.
 
 ## Our Standards
 
@@ -56,9 +56,8 @@ productive community.
 ## Reporting
 
 If you experience or witness unacceptable behavior, or have other concerns,
-please contact the maintainers through a private channel such as Discord direct
-message or, where available, the contact information listed on the project
-website. Reports will be handled confidentially.
+please contact the maintainers through a private channel such as a direct message on GitHub or the contact
+information listed on the maintainer's profile. Reports will be handled confidentially.
 
 ## Attribution
 

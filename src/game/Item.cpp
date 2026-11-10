@@ -1528,9 +1528,7 @@ void idObjective::Restore( idRestoreGame *savefile ) {
 	savefile->ReadVec3( playerPos );
 // RAVEN BEGIN
 // jnewquist: Don't do this on Xenon, we want prebuilt textures
-#ifndef _XENON
  	PostEventMS( &EV_CamShot, 250 );
-#endif
 // RAVEN END
 }
 
@@ -1543,13 +1541,11 @@ void idObjective::Spawn( void ) {
 	Hide();
 // RAVEN BEGIN
 // jnewquist: Only post a camshot event if the spawn args request it
-#ifndef _XENON
 	const char *camName;
 	if ( spawnArgs.GetString( "camShot", "", &camName ) ) {
 		common->Warning( "SpawnArg camShot on %s is not recommended.", spawnArgs.GetString( "name" ) );
  		PostEventMS( &EV_CamShot, 250 );
 	}
-#endif
 // RAVEN END
 }
 

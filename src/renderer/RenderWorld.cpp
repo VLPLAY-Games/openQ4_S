@@ -2486,56 +2486,6 @@ void idRenderWorldLocal::PushVolumeIntoTree_r( idRenderEntityLocal *def, idRende
 
 	// exact check all the points against the node plane
 	front = back = false;
-#ifdef MACOS_X	//loop unrolling & pre-fetching for performance
-	const idVec3 norm = node->plane.Normal();
-	const float plane3 = node->plane[3];
-	float D0, D1, D2, D3;
-
-	for ( i = 0 ; i < numPoints - 4; i+=4 ) {
-		D0 = points[i+0] * norm + plane3;
-		D1 = points[i+1] * norm + plane3;
-		if ( !front && D0 >= 0.0f ) {
-		    front = true;
-		} else if ( !back && D0 <= 0.0f ) {
-		    back = true;
-		}
-		D2 = points[i+1] * norm + plane3;
-		if ( !front && D1 >= 0.0f ) {
-		    front = true;
-		} else if ( !back && D1 <= 0.0f ) {
-		    back = true;
-		}
-		D3 = points[i+1] * norm + plane3;
-		if ( !front && D2 >= 0.0f ) {
-		    front = true;
-		} else if ( !back && D2 <= 0.0f ) {
-		    back = true;
-		}
-		
-		if ( !front && D3 >= 0.0f ) {
-		    front = true;
-		} else if ( !back && D3 <= 0.0f ) {
-		    back = true;
-		}
-		if ( back && front ) {
-		    break;
-		}
-	}
-	if(!(back && front)) {
-		for (; i < numPoints ; i++ ) {
-			float d;
-			d = points[i] * node->plane.Normal() + node->plane[3];
-			if ( d >= 0.0f ) {
-				front = true;
-			} else if ( d <= 0.0f ) {
-				back = true;
-			}
-			if ( back && front ) {
-				break;
-			}
-		}	
-	}
-#else
 	for ( i = 0 ; i < numPoints ; i++ ) {
 		float d;
 
@@ -2549,7 +2499,6 @@ void idRenderWorldLocal::PushVolumeIntoTree_r( idRenderEntityLocal *def, idRende
 		    break;
 		}
 	}
-#endif
 	if ( front ) {
 		nodeNum = node->children[0];
 		if ( nodeNum ) {	// 0 = solid

@@ -70,11 +70,7 @@ public:
 	virtual sysEvent_t		GenerateMouseMoveEvent( int deltax, int deltay );
 
 	virtual void			OpenURL( const char *url, bool quit );
-#if defined( _WIN32 )
-	virtual void			StartProcess( const char *exeName, bool quit ) { };
-#else
 	virtual void			StartProcess( const char *exeName, bool quit );
-#endif
 
 	virtual int				Milliseconds(void) { return Sys_Milliseconds(); }
 	virtual bool			SecureRandomBytes( void *buffer, int bytes ) {

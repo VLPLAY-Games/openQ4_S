@@ -1,223 +1,188 @@
-<a id="top"></a>
+# openQ4 for Nintendo Switch
+
+**Quake 4 on the Nintendo Switch.** A port of the [openQ4](https://github.com/themuffinator/openQ4) engine and single-player game libraries to the Switch homebrew platform (devkitA64 / libnx), built around your own retail Quake 4 data.
+
+[![Platform](https://img.shields.io/badge/platform-Nintendo%20Switch-e60012.svg)](#requirements)
+[![Status](https://img.shields.io/badge/status-1.0.0%20release%20candidate-d97a1f.svg)](#status)
+[![Licensing](https://img.shields.io/badge/Licensing-GPL%20engine%20%7C%20SDK%20game%20code-blue.svg)](LICENSING.md)
 
 > [!IMPORTANT]
-> **Calling all vibe masters.** openQ4 got this far on sharp prompts, stubborn validation runs and a healthy disregard for sleep, but the Strogg aren't beaten yet. The remaining work is mapped out in the [development roadmap](docs/dev/roadmap.md), and we'd welcome more hands (and more agents) to help bring it home. Before you unleash your favourite model, check in on the **#openq4** channel of the [DarkMatter Discord](https://discord.gg/T32mFejwR4): we'll point you at the work that needs you most and keep everyone's agents from fragging each other over the same roadmap item. Then brief your model with [AGENTS.md](AGENTS.md) and open a pull request. Reviews are human, standards are high, and the snacks are strictly virtual.
+> This repository contains **no Quake 4 game data**. You need your own legitimate copy of Quake 4 (Steam or GOG) and you copy its files to your own console. Nothing from the retail game is distributed here.
 
-<div align="center">
-
-<img src="assets/docs/img/banner.png" alt="openQ4 banner">
-
-[![Licensing: GPL engine and SDK game code](https://img.shields.io/badge/Licensing-GPL%20engine%20%7C%20SDK%20game%20code-blue.svg)](LICENSING.md)
-[![Status](https://img.shields.io/badge/status-Beta%20Development-d97a1f.svg)](https://github.com/themuffinator/openQ4/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20preview-lightgrey.svg)](https://github.com/themuffinator/openQ4)
-[![Architecture](https://img.shields.io/badge/arch-x64%20%7C%20ARM64-orange.svg)](https://github.com/themuffinator/openQ4)
-[![Proudly vibecoded](assets/docs/img/badge-proudly-vibecoded.svg)](AGENTS.md)
-
-**Play Quake 4 on modern systems with an open-source engine and SDK-licensed game-code replacement built around the original retail assets.**
-
-<a href="https://github.com/themuffinator/openQ4/releases">
-  <img src="https://img.shields.io/badge/Download-Latest%20Release-2d8f4e?style=for-the-badge&logo=github" alt="Download the latest openQ4 release">
-</a>
-<a href="https://github.com/themuffinator/openQ4/stargazers">
-  <img src="https://img.shields.io/github/stars/themuffinator/openQ4?style=for-the-badge&logo=github&label=Star%20on%20GitHub" alt="Star openQ4 on GitHub">
-</a>
-<a href="https://github.com/themuffinator/openQ4/fork">
-  <img src="https://img.shields.io/github/forks/themuffinator/openQ4?style=for-the-badge&logo=github&label=Fork%20on%20GitHub" alt="Fork openQ4 on GitHub">
-</a>
-
-<a href="https://discord.gg/T32mFejwR4">
-  <img src="https://img.shields.io/badge/Join%20the-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the openQ4 Discord server">
-</a>
-
-[Latest release: 0.13.2](https://github.com/themuffinator/openQ4/releases/tag/v0.13.2) | [Release status](docs/user/release-status.md) | [Get Started](#getting-started) | [Features](#features-in-0132) | [Player Guides](#player-guides) | [Build from Source](BUILDING.md) | [Technical Reference](TECHNICAL.md)
-
-</div>
+- [Status](#status)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Playing](#playing)
+- [Known limitations](#known-limitations)
+- [Building from source](#building-from-source)
+- [Repository layout](#repository-layout)
+- [Credits](#credits)
+- [Licence](#licence)
+- [Кратко по-русски](#кратко-по-русски)
 
 ---
 
-<p align="center">
-  <img src="assets/docs/img/readme-airdefense1-cinematic.png" alt="openQ4 airdefense1 intro cinematic showing ships approaching Stroggos" width="92%">
-</p>
+## Status
 
-## What is openQ4?
+The single-player campaign is playable and saves and loads work. This is the 1.0.0 release line of the Switch port, on the `switch` branch.
 
-**openQ4** replaces the Quake 4 engine and game binaries with a GPL-covered engine and SDK-licensed, source-available game modules. It keeps the original game playable on modern PCs while improving visuals, audio, controls and everyday usability.
+**What was tested:** the first three levels, on a Switch Lite in handheld mode, with a CPU clock of **1785 MHz**, a GPU clock of **460 MHz** and a RAM clock of **1600 MHz**. Later levels have not been played through yet. **In heavy fights the frame rate drops a lot**, well below 30 FPS in the worst moments.
 
-It is for players who want the original Quake 4 experience on today's hardware.
-
-> [!NOTE]
-> openQ4 does **not** include Quake 4 assets. You still need a legitimate Quake 4 copy from Steam or GOG.
-
----
-
-## Features in 0.13.2
-
-- **Built for modern displays.** Widescreen, ultrawide, multi-monitor, borderless and fullscreen setups all work. On 144 Hz and 240 Hz screens the camera, weapons and moving objects are drawn smoothly between the game's 60 Hz ticks, while gameplay, networking, demos and saves keep their original timing.
-- **Optional visual upgrades.** Bloom, HDR, anti-aliasing, soft particles, baked light grids, cel shading, a CRT filter and cleaner [shadow maps](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/shadow-mapping.md), each one switchable.
-- **Real liquids.** Wade, swim and drown in water, take damage in slime and lava, with underwater visuals and audio. Retail Quake 4 has no liquids, so they appear in maps built for them; see the [Liquids guide](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/liquids.md).
-- **OpenAL audio**, including bundled OpenAL Soft in preview macOS packages.
-- **Controller support and quality-of-life fixes**, including a better console and modern settings behaviour.
-- **More single-player.** Alongside the original campaign there is an experimental [Arena Campaign](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/arena-campaign.md): bot matches across five tiers of the stock maps, with boss matches and saved progress.
-- **Better multiplayer** (experimental): a server browser with sorting, filters and favourites, [readable chat with history](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/multiplayer-chat.md), Duel queues and spectator match controls.
-- **A demo library and player** with pause, speed, stepping, rewind and fast-forward, plus free-fly playback of full-match recordings.
-- **Single-player and multiplayer in one install** on Windows, Linux and Steam Deck, with preview Apple Silicon macOS packages.
-- **An experimental Vulkan renderer**, chosen with `r_renderApi vulkan`. OpenGL is the recommended default in this release.
-- **Renderer previews**, all off by default: [temporal anti-aliasing and dynamic resolution](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/temporal-presentation.md) and [volumetrics, reflections and indirect light](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/advanced-screen-space-lighting.md).
-
-See the [0.13.2 notes](docs/dev/releases/v0.13.2.md) and [release status](docs/user/release-status.md) for upgrade advice and the withdrawn 0.14.0 release.
+| Area | State |
+| --- | --- |
+| Single-player campaign | Playable, saves and loads work |
+| Rendering | OpenGL ES 3.0 renderer (Mesa/nouveau), render thread overlapping game logic, NEON-accelerated skeletal model and culling code |
+| Frame rate | Around 45 FPS median on the first levels at the clocks above; **heavy fights have strong frame-rate drops** |
+| Audio | OpenAL Soft on top of the audio renderer (`audren`), 48 kHz stereo |
+| Input | Handheld, Joy-Con and Pro Controller; **gyro aiming**; system on-screen keyboard for text fields (save names, player name) |
+| Multiplayer | Not supported (see [Known limitations](#known-limitations)) |
 
 ---
 
-## Screenshots
+## Requirements
 
-<p align="center">
-  <img src="assets/docs/img/readme-bloom-hdr.png" alt="openQ4 bloom and HDR side-by-side comparison on mp q4dm2" width="92%">
-</p>
-<p align="center"><sub>Bloom and HDR on mp/q4dm2: normal rendering on the left, enhanced post-processing on the right.</sub></p>
-
-<p align="center">
-  <img src="assets/docs/img/readme-lightgrid.png" alt="openQ4 light-grid indirect diffuse off and on comparison" width="92%">
-</p>
-<p align="center"><sub>Baked light-grid lighting on mp/q4dm2, off and on.</sub></p>
-
-<p align="center">
-  <img src="assets/docs/img/readme-crt.png" alt="openQ4 CRT post-process off and on comparison on mp q4dm8" width="92%">
-</p>
-<p align="center"><sub>The CRT filter on mp/q4dm8, off and on.</sub></p>
-
-> [!TIP]
-> **OpenGL is the default and recommended renderer in 0.13.2.** Vulkan is experimental on every platform in this release: set `r_renderApi vulkan` and restart to try it. An initialization failure falls back to OpenGL. On macOS, Vulkan uses bundled MoltenVK. See [Display Settings](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/display-settings.md).
+- A Nintendo Switch with custom firmware that runs homebrew (for example Atmosphère) and the Homebrew Menu (`hbmenu`).
+- **Launch in title takeover mode**: start `hbmenu` by holding **R** while opening a game, not through the Album applet. Applet mode gives the application far too little memory for Quake 4.
+- **CPU overclock to 1785 MHz or higher.** The game is CPU-bound, so the stock 1020 MHz is not enough for a comfortable frame rate. Use an overclocking tool such as Horizon OC; the game never changes clocks itself.
+- GPU and RAM overclocking is **optional**. The GPU is mostly idle in this port and the stock memory clock works.
+- 4 GB of RAM is what the console has; the game uses most of what it is given. Do not run other memory-hungry homebrew in the background.
+- An SD card with a few GB free.
+- A legitimate copy of Quake 4 (its `q4base` folder).
 
 ---
 
-## System requirements
+## Installation
 
-You need a legitimate Quake 4 install plus the openQ4 package that matches your operating system and CPU architecture.
+The game lives in `sdmc:/switch/openQ4/`:
 
-| Tier | Practical target |
-|---|---|
-| **Minimum** | 64-bit CPU, 4 GB RAM, a working OpenGL compatibility driver with ARB2-era vertex/fragment program support, and about 12 GB free for the openQ4 package plus retail Quake 4 assets. Use the `minimum` or `lowpower` performance preset on constrained systems. |
-| **Recommended** | Modern quad-core CPU, 8 GB RAM, OpenGL 4.1+ compatibility-class GPU with 2 GB+ VRAM, current graphics drivers, and 15 GB+ free. For high resolutions, `quality`, or `ultra`, 16 GB RAM and 6 GB+ VRAM gives much better headroom. |
+```text
+sdmc:/switch/openQ4/
+├── openQ4.nro            the application
+├── q4base/               your retail Quake 4 data (pak001.pk4 ... pak0xx.pk4 and the rest of the folder)
+└── baseoq4/              openQ4's own content packs (pak0.pk4, pak1.pk4, pak2.pk4, ...)
+```
 
-Packages are available for Windows x64, Linux x64 and Steam Deck/SteamOS, with preview Linux ARM64, preview Apple Silicon/arm64 macOS and experimental Windows ARM64 builds:
+1. Copy `openQ4.nro` to `sdmc:/switch/openQ4/`.
+2. Copy the `q4base` folder from your Quake 4 installation next to it.
+3. Copy the openQ4 content packs into `baseoq4/` (they are built from `content/baseoq4`, see [Building from source](#building-from-source)).
+4. Start `hbmenu` in title takeover mode and launch **openQ4**.
 
-- **Linux** ships as directly executable AppImages and archives for `x86_64` and `aarch64`. Linux ARM64 needs a desktop OpenGL compatibility driver.
-- **macOS** players can get [signed and notarized builds for Apple Silicon and Intel Macs](https://www.macsourceports.com/game/quake4) from Schnapple at Mac Source Ports. Our GitHub OpenGL/Metal bridge packages remain unsigned Apple Silicon previews; players have run them only on current macOS.
-- **Windows ARM64** packages are built but have not yet been confirmed to run on real hardware.
-
-See [Getting Started](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/getting-started.md#system-requirements) for platform details.
-
----
-
-## Getting started
-
-1. Install **Quake 4** from [Steam](https://store.steampowered.com/app/2210/Quake_4/) or [GOG](https://www.gog.com/en/game/quake_4).
-2. Download the latest available release, [openQ4 0.13.2](https://github.com/themuffinator/openQ4/releases/tag/v0.13.2).
-3. On Linux, make the matching `x86_64` or `aarch64` AppImage executable and launch it; for an extracted archive, launch `openQ4-client_<arch>` (or `openQ4-steamdeck` on Steam Deck).
-4. If openQ4 does not find your Quake 4 install automatically, follow the path setup notes in the [Getting Started guide](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/getting-started.md).
-
-When upgrading, replace the whole openQ4 package rather than individual files. If returning from withdrawn 0.14.0, follow the [rollback and save guidance](docs/user/release-status.md#installing-or-returning-to-0132).
+Settings, saves and the log are written inside `baseoq4/` and next to the application (`log.txt`). If something goes wrong, `log.txt` is the file to attach to a bug report.
 
 ---
 
-## Player guides
+## Playing
 
-Start with [release status and documentation corrections](docs/user/release-status.md). The guides below are pinned to 0.13.2.
+### Controls
 
-### Start here
+The sticks move and look, and the triggers and buttons follow the standard Quake 4 controller layout. Every binding can be checked and changed in **Settings -> Controls**.
 
-- [Getting Started](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/getting-started.md) - system requirements, installation, first launch, and common setup questions
-- [Client Settings Guide](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/client-settings.md) - where to find the most useful in-game settings
-- [Server Setup Guide](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/server-setup.md) - dedicated server setup and common server variables
-- [Server and Remote-Console Security](docs/user/release-status.md#guides-for-the-available-release) - secure remote console and password handling
+### Gyro aiming
 
-### Play and tune
+Gyro aiming adds the motion of the console (or of the connected controller) to the stick look, so you can fine-tune your aim by turning the console. The sticks keep working at the same time.
 
-- [Display Settings](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/display-settings.md) - fullscreen, windowed mode, resolution scale, multi-monitor, and renderer choice
-- [Input Settings](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/input-settings.md) - keyboard, mouse, controller, and bindings
-- [Gameplay Settings](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/gameplay-settings.md) - gameplay and audio options
-- [Arena Campaign](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/arena-campaign.md) (experimental) - tiers, unlocks, maps, game types, and bots
-- [Steam Deck](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/steam-deck.md) - launcher, controls, and handheld notes
-- [Multiplayer Networking](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/multiplayer-networking.md) (experimental) - connection tuning and lag compensation
-- [Multiplayer Chat](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/multiplayer-chat.md) - chat controls, history, and layout
-- [Competitive Matches](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/competitive-matches.md) (experimental) - match rules, voting, readiness, rounds, and One Flag
-- [Demo Library and Multi-View Demos](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/multiview-demos.md) - browsing, playback controls, and recording full matches
-- [Shadow Mapping](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/shadow-mapping.md) - shadow-map options, flashlight shadows, and troubleshooting
-- [Light Grids](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/light-grids.md) - baked indirect lighting
-- [Classic Dynamic Lights](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/classic-dynamic-lights.md) - Quake II/III style lights on muzzle flashes, projectiles, and explosions
-- [Cel Shading](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/cel-shading.md) - the cel-shaded look
-- [Temporal AA and Dynamic Resolution](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/temporal-presentation.md) (experimental) - temporal anti-aliasing, upscaling, and automatic resolution scaling
-- [Advanced Screen-Space Lighting](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/advanced-screen-space-lighting.md) (experimental) - volumetrics, reflections, and indirect light
-- [DDS Texture Replacements](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/texture-replacements.md) - installing texture packs
-- [Level-Load Cache](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/level-load-cache.md) (experimental) - optional local load caches, and how to clear them
+1. Open **Settings -> Game Options -> Controller**.
+2. Switch **Gyro aiming** on.
+3. Adjust **Gyro sensitivity** to taste.
 
-### Mapping and modding
+It only applies during gameplay, never in menus.
 
-- [Liquids](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/liquids.md) - water, slime, and lava behaviour, and how to add them to maps
-- [Map Entity Strings](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/map-entity-strings.md) - replace or extend a map's entities without editing the map
+### On-screen keyboard
+
+When a text field needs input (for example the name of a save game) the system software keyboard opens. Type the name, confirm, and the field is confirmed as well.
+
+### Settings worth knowing
+
+- **Game Options -> Controller**: stick dead zone, look sensitivity, gyro aiming and sensitivity, rumble.
+- **System**: resolution and quality options. The defaults are tuned for the Switch.
 
 ---
 
-## Compatibility
+## Known limitations
 
-- openQ4 targets the **official Quake 4 retail assets** and ships its **own engine and game modules**.
-- It is **not** a drop-in runtime for mods built on the original proprietary Quake 4 game DLLs.
-- Retail Quake 4 multiplayer clients and servers cannot connect to openQ4. Use matching openQ4 builds; see the [documentation correction](docs/user/release-status.md#guides-for-the-available-release).
-- The project is in **beta development**, so compatibility work is ongoing. Current-source features are documented separately from the available package in [release status](docs/user/release-status.md).
-
-## Reporting problems
-
-Please use the [issue tracker](https://github.com/themuffinator/openQ4/issues) and include crash logs or setup details when you can. For macOS crashes, follow the [macOS support-data guide](https://github.com/themuffinator/openQ4/blob/v0.13.2/docs/user/macos-support-data.md) first. Windows ARM64 and Linux ARM64 have their own issue templates; a report that everything simply worked is as useful there as a bug.
+- **No multiplayer.** Network play and the dedicated server are not part of this port.
+- **Closing the game takes a while.** Shutdown is complete and safe, just not instant.
+- **Heavy fights drop the frame rate a lot.** Large fights with many enemies and effects can fall well below 30 FPS; exploring is usually well above that. Higher CPU clocks help.
+- **Overclocking is up to you.** The application never requests clock changes. A CPU clock of 1785 MHz or more is needed.
+- Features that need a PC (VR, external editors, level compilers' GUI tools) are not included.
+- Memory is tight: if you see the game close during a very long session, restart it.
 
 ---
 
-## Contributing
+## Building from source
 
-Current source builds default to the modern interface and preserve saved preferences. See [Modern and classic screens](docs/user/client-settings.md#modern-and-classic-screens) for release defaults and switching interfaces.
+The Switch build reuses the upstream Meson build as the source of truth for source lists and compiler flags, and re-emits the engine, the OpenGL ES renderer and the single-player game libraries for `aarch64-none-elf`. The three groups are linked into a single NRO.
 
-Bug reports, compatibility reports, testing feedback, and code contributions are all welcome. To build openQ4 yourself, start with [BUILDING.md](BUILDING.md); for project conventions, see [CONTRIBUTING.md](.github/CONTRIBUTING.md).
+### Prerequisites
 
-Developers can also find advanced configuration and file layout in [TECHNICAL.md](TECHNICAL.md), the experimental ARM64 APK and source builds in [Android, GLES and SigmaTouch](docs/dev/android-build.md), and the current implemented/experimental/missing status of every subsystem in the [engine capability matrix](docs/dev/engine-capability-matrix.md).
+- A Linux machine (the build is developed and tested on Ubuntu).
+- [devkitPro](https://devkitpro.org/wiki/Getting_Started) with **devkitA64** (r29 or newer) and **libnx** (4.12 or newer), plus the packages the port links against (`switch-mesa`, `switch-sdl2` dependencies such as `switch-openal-soft` and the usual `switch-*` libraries).
+- `meson`, `ninja`, `python3` and a host C/C++ compiler for the generator step.
+- Your own Quake 4 data to run it.
+
+### Steps
+
+```bash
+# 1. Configure and build the host tree (it generates headers and the compile database
+#    that the Switch generator reads).
+meson setup build-host --buildtype release -Dplatform_backend=sdl3 -Dbuild_renderer_gles=enabled
+ninja -C build-host
+
+# 2. Generate the devkitA64 build from it.
+python3 tools/switch/gen_ninja.py --host-build build-host --out build-switch
+
+# 3. Build the NRO.
+ninja -C build-switch        # produces build-switch/openQ4.nro
+```
+
+The content packs (`baseoq4/pak*.pk4`) are built by the Meson tree from `content/baseoq4`.
+
+### Development diagnostics
+
+Release builds contain no diagnostics. For performance and audio bring-up there are optional tools behind the `OPENQ4_SWITCH_DIAG` compile flag (an on-device sampling profiler, audio test tones and dumps, per-frame timing lines). Offline analysis scripts are in `tools/switch/`.
+
+---
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `src/` | Engine, renderer, single-player game, UI |
+| `src/sys/switch/` | Switch platform layer: libnx services, SDL3 video, joystick (with gyro), audio and libc shims |
+| `src/renderer/GLES/`, `src/renderer/GLES_D3/` | OpenGL ES renderer and the render thread |
+| `tools/switch/` | NRO generator and analysis scripts |
+| `content/baseoq4/` | openQ4 content that becomes `baseoq4/pak*.pk4` |
+| `LICENSES/`, `LICENSING.md` | Licence texts and the licensing overview |
 
 ---
 
 ## Credits
 
-- **themuffinator** - openQ4 development and maintenance
-- **[Schnapple / Mac Source Ports](https://www.macsourceports.com/game/quake4)** - signed and notarized macOS builds for Apple Silicon and Intel Macs
-- **[Emile Belanger (emileb)](https://github.com/emileb)** - contributor and original author of the Android port, SigmaTouch integration, OpenGL ES 3.0 renderer, GLES shader variants, ETC2/EAC compression, and associated mobile memory/loading work. This integration builds on his [Android branch](https://github.com/emileb/openQ4/tree/android) and [GLES shader-variants branch](https://github.com/emileb/openQ4/tree/gles-shader-variants); see the [contribution and adaptation record](docs/dev/android-gles-integration.md).
-- **DarkMatter Productions** - project stewardship and website
-- **[The RmlUi Team, CodePoint, Shift Technology and contributors](https://github.com/mikke89/RmlUi/tree/6.3)** - MIT-licensed layout library behind the new interface, with [openQ4 patches](subprojects/packagefiles/rmlui/README.openq4.md); [licence notice](LICENSES/RmlUi.txt)
-- **[Baptiste Lepilleur and the JsonCpp authors](https://github.com/open-source-parsers/jsoncpp/tree/1.9.8)** - JSON parser for the new interface's source files, used under its MIT option with an [openQ4 patch](subprojects/packagefiles/jsoncpp/subnormal-numbers.patch); [licence notice](LICENSES/JsonCpp.txt)
-- **[Mikko Mononen, Eric Veach and the libtess2 contributors](https://github.com/memononen/libtess2/tree/8dbd6483e920311a58c9af10a10beb278efebc36)** - SGI-B-2.0 polygon tessellator for the new interface's vector shapes, with an [openQ4 precision patch](subprojects/packagefiles/libtess2/double-precision.patch); [licence notice](LICENSES/libtess2.txt)
-- **[Q2REX Project Team](https://github.com/themuffinator/Q2REX)** - design reference for the [multiplayer chat panel](docs/user/multiplayer-chat.md)
-- **[MuffMode](https://github.com/themuffinator/MuffMode)** and **[Q4MAX](https://www.moddb.com/mods/q4max)** - multiplayer workflow and usability references
-- **[Team Beef](https://github.com/Team-Beef-Studios)** - design reference for [VR mode](docs/user/vr.md): [PreyVR](https://github.com/Team-Beef-Studios/PreyVR) (LuboÅ¡ VonÃ¡sek, GLKarin, DrBeef, Baggyg, Bummser and contributors) and [Doom3Quest](https://github.com/DrBeef/Doom3Quest) (DrBeef and contributors) shaped its head-driven movement, two-handed aim, zoom, comfort options and physical crouch; ideas only, no code copied
-- **Justin Marshall** - Quake4Doom and early BSE reverse engineering reference work, and recovering and publishing Quake 4: The Awakening
-- **Robert Beckebans** - renderer modernization reference work, including RBDOOM-3-BFG inspiration
-- **id Software's official Doom 3 and Doom 3 BFG source releases** - retained idTech 4 source lineage; see the [source provenance inventory](docs/dev/source-provenance.md)
-- **id Software** and **Raven Software** - Quake 4 and the underlying technology
-- **Raven Software** and **Ritual Entertainment** - Quake 4: The Awakening, the unreleased expansion whose single-player campaign openQ4 can run
-- **Chris Robinson and the [OpenAL Soft](https://openal-soft.org/) contributors** - cross-platform OpenAL runtime bundled in macOS packages
-- **Sam Lantinga and the [SDL contributors](https://github.com/libsdl-org/SDL/tree/release-3.4.18)** - cross-platform window, input and microphone support, including the dummy audio driver used in automated voice tests; SDL uses the zlib licence
-- **Sean Barrett and the [stb_vorbis contributors](https://github.com/nothings/stb/blob/master/stb_vorbis.c)** - MIT/public-domain Vorbis decoding; openQ4 adds a virtual-filesystem callback path for bounded compressed streaming
-- **The Khronos Group and [glslang contributors](https://github.com/KhronosGroup/glslang/tree/16.6.0)** - GLSL-to-SPIR-V compiler used by the Vulkan renderer; its complete licence ships under `licenses/`
-- **[The Khronos Group, Valve Corporation and LunarG](https://github.com/KhronosGroup/OpenXR-SDK/tree/release-1.1.65)** - Apache-2.0 OpenXR loader and headers behind [VR mode](docs/user/vr.md); [licence notice](LICENSES/openxr-sdk.txt)
-- **[The Khronos Group](https://github.com/KhronosGroup/OpenGL-Registry)** - MIT-licensed OpenGL ES API headers, with their original notices retained
-- **akacross** (Discord user) - Thorough playtesting on Linux and Windows, a huge help moving the project forward!
+- **id Software** and **Raven Software** for Quake 4, and for releasing the engine and SDK sources.
+- **[themuffinator](https://github.com/themuffinator) and the openQ4 contributors** for the openQ4 engine and game libraries this port is built on.
+- **devkitPro**, **libnx**, **switch-mesa** (nouveau) and the wider Switch homebrew community.
+- **SDL**, **OpenAL Soft**, **stb_vorbis**, **libjpeg** and the other third-party libraries listed in [LICENSES](LICENSES/).
 
 ---
 
-## License and disclaimer
+## Licence
 
-openQ4 engine code is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0). See [LICENSE](LICENSE) for details. Files retaining Doom 3 or Doom 3 BFG Edition headers also retain their upstream notices and are accompanied by the corresponding published Additional Terms; the [source-provenance inventory](docs/dev/source-provenance.md) records their scope, pinned audit references, and intermediate lineage without offering a legal conclusion.
-
-The game-library code in [`src/game`](src/game/) and [`src/mpgame`](src/mpgame/) is derived from the Quake 4 SDK and remains subject to [id Software's SDK EULA](LICENSES/QUAKE-4-SDK-EULA.rtf). [LICENSING.md](LICENSING.md) distinguishes component terms and the unresolved linked-distribution licensing question. Quake 4 assets remain the property of id Software and ZeniMax Media.
-
-openQ4 is an independent project and is not affiliated with, endorsed by, or sponsored by id Software, Raven Software, Bethesda, or ZeniMax Media.
+openQ4 contains components under different licences. The engine is covered by the GNU GPL version 3; the SDK-derived game libraries are under the Quake 4 SDK Limited Use License Agreement. See [LICENSING.md](LICENSING.md) for the full overview. Quake 4 game data is not included and is not licensed by this repository.
 
 ---
 
-[Website](https://www.darkmatter-quake.com) | [Repository](https://github.com/themuffinator/openQ4) | [Game Sources](src/game/) | [Issues](https://github.com/themuffinator/openQ4/issues) | [Releases](https://github.com/themuffinator/openQ4/releases)
+## Кратко по-русски
 
-[Back to Top](#top)
+**openQ4 для Nintendo Switch** это порт движка openQ4 и одиночной игры Quake 4 на Switch (homebrew). Игровые данные в репозитории **не** лежат: нужна своя лицензионная копия Quake 4.
+
+**Установка:** скопируйте `openQ4.nro` в `sdmc:/switch/openQ4/`, рядом положите папку `q4base` из вашей копии игры и контент-паки openQ4 в `baseoq4/`. Запускайте `hbmenu` в режиме перехвата игры (удерживая **R** при запуске игры), а не через альбом.
+
+**Что есть:** одиночная кампания, отрисовка на OpenGL ES, звук через `audren`, управление геймпадом, **гироскоп для прицеливания** (Настройки -> Game Options -> Controller), экранная клавиатура системы для ввода имён сохранений.
+
+**Чего нет:** сетевой игры (мультиплеера) и выделенного сервера.
+
+**Требования к разгону:** нужен разгон процессора до **1785 МГц и выше**; видеокарту и память разгонять необязательно. **Тестировалось:** первые 3 уровня на частотах 1785 / 460 / 1600 МГц (CPU / GPU / RAM). **В тяжёлых боях сильные просадки FPS.**
+
+**Известные особенности:** выход из игры занимает некоторое время.
+
+**Сборка:** см. раздел [Building from source](#building-from-source) (devkitPro, meson, `tools/switch/gen_ninja.py`).

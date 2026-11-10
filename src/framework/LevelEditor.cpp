@@ -5,7 +5,7 @@
 
 #if defined( USE_SDL3 )
 #include <SDL3/SDL_process.h>
-#elif !defined( _WIN32 )
+#else
 #include <signal.h>
 #include <spawn.h>
 #include <sys/types.h>
@@ -152,12 +152,9 @@ public:
 #if defined( USE_SDL3 )
 		process = SDL_CreateProcess( argv.data(), false );
 		if ( !process ) { error = std::string( "could not start " ) + arguments.front() + ": " + SDL_GetError(); return false; }
-#elif !defined( _WIN32 )
+#else
 		const int result = posix_spawnp( &pid, argv[0], nullptr, nullptr, const_cast<char *const *>( argv.data() ), environ );
 		if ( result != 0 ) { pid = -1; error = std::string( "could not start " ) + arguments.front() + ": " + strerror( result ); return false; }
-#else
-		error = "this build cannot start child processes";
-		return false;
 #endif
 		exited = false;
 		return true;
@@ -166,12 +163,10 @@ public:
 		if ( !exited ) {
 #if defined( USE_SDL3 )
 			exited = !process || SDL_WaitProcess( process, false, &code );
-#elif !defined( _WIN32 )
+#else
 			int status = 0;
 			const pid_t done = pid > 0 ? waitpid( pid, &status, WNOHANG ) : pid;
 			if ( done == pid || done < 0 ) { exited = true; code = done < 0 ? -1 : WIFEXITED( status ) ? WEXITSTATUS( status ) : -1; }
-#else
-			exited = true;
 #endif
 		}
 		exitCode = code;
@@ -181,7 +176,7 @@ public:
 		if ( exited ) { return; }
 #if defined( USE_SDL3 )
 		if ( process ) { SDL_KillProcess( process, true ); exited = SDL_WaitProcess( process, true, &code ); }
-#elif !defined( _WIN32 )
+#else
 		if ( pid > 0 ) { kill( pid, SIGKILL ); int status = 0; waitpid( pid, &status, 0 ); code = -1; exited = true; }
 #endif
 	}
@@ -189,13 +184,13 @@ private:
 	void Release() {
 #if defined( USE_SDL3 )
 		if ( process ) { SDL_DestroyProcess( process ); process = nullptr; }
-#elif !defined( _WIN32 )
+#else
 		pid = -1;
 #endif
 	}
 #if defined( USE_SDL3 )
 	SDL_Process *process = nullptr;
-#elif !defined( _WIN32 )
+#else
 	pid_t pid = -1;
 #endif
 	bool exited = true;

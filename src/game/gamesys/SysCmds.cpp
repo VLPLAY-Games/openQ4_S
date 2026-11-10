@@ -1305,13 +1305,6 @@ static void Cmd_Say( bool team, const idCmdArgs &args ) {
 	}
 
 // asalmon: check to see if the text passes the live decency standard
-#ifdef _XENON
-	if(!Sys_VerifyString(text.c_str()))
-	{
-		gameLocal.Printf( "Your message did not pass Xbox decency standards\n");
-		return;
-	}
-#endif
 
 
 // ddynerman: team speak only in team games
@@ -4888,11 +4881,9 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "forceTeamChange",				idMultiplayerGame::ForceTeamChange_f,			CMD_FL_GAME,		"force team change: forceTeamChange <id>" );
 	cmdSystem->AddCommand( "removeClientFromBanList",		idMultiplayerGame::RemoveClientFromBanList_f,	CMD_FL_GAME,		"removes a client id from the ban list: removeClientFromBanList <client id>" );
 
-#ifndef _XBOX
 // shouchard:  more voice chat stuff (non-XBOX)
 	cmdSystem->AddCommand( "clientvoicemute",		idMultiplayerGame::VoiceMute_f, CMD_FL_GAME,			"mute the specified player's incoming voicechat" );
 	cmdSystem->AddCommand( "clientvoiceunmute",		idMultiplayerGame::VoiceUnmute_f, CMD_FL_GAME,			"unmute the specified player's incoming voicechat" );
-#endif // _XBOX
 // RAVEN END
 
 	// multiplayer server commands

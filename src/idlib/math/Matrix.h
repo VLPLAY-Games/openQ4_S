@@ -1839,9 +1839,6 @@ ID_INLINE float *idMat6::ToFloatPtr( void ) {
 
 // RAVEN BEGIN
 // jsinger: this is broken at the moment because idSIMDProcessor is no longer virtual
-#ifdef _XENON
-#undef MATX_SIMD
-#endif
 // RAVEN END
 class idMatX {
 public:

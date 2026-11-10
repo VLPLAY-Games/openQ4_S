@@ -93,13 +93,7 @@ void idSaveGame::PopulateDictionaryCache() {
 }
 
 const char *OpenQ4SaveGameWireABI( void ) {
-#if defined( _WIN32 )
-	#define OPENQ4_SAVEGAME_ABI_OS "windows"
-	#define OPENQ4_SAVEGAME_ABI_COMPILER "msvcabi"
-#elif defined( __APPLE__ )
-	#define OPENQ4_SAVEGAME_ABI_OS "macos"
-	#define OPENQ4_SAVEGAME_ABI_COMPILER "itaniumabi"
-#elif defined( __linux__ )
+#if defined( __linux__ )
 	#define OPENQ4_SAVEGAME_ABI_OS "linux"
 	#define OPENQ4_SAVEGAME_ABI_COMPILER "itaniumabi"
 #else

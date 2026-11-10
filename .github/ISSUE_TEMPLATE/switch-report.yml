@@ -1,0 +1,74 @@
+name: Switch bug or performance report
+description: Report a crash, a bug or a performance problem on Nintendo Switch.
+title: "[Switch]: "
+labels:
+  - switch
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing openQ4 on the Switch. This repository does not contain Quake 4 data, so please do not attach game files.
+
+        Please attach `sdmc:/switch/openQ4/log.txt` (as a file, not a screenshot) and, for crashes, the newest file from `sdmc:/atmosphere/crash_reports/`.
+  - type: input
+    id: version
+    attributes:
+      label: openQ4 version
+      description: The release tag you downloaded, or the commit SHA if you built it yourself.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: Console
+      options:
+        - Switch (original, V1/V2)
+        - Switch Lite
+        - Switch OLED
+        - Other / not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Play mode
+      options:
+        - Handheld
+        - Docked (TV)
+        - Tabletop
+    validations:
+      required: true
+  - type: dropdown
+    id: launch
+    attributes:
+      label: How was it launched
+      description: Title takeover (hold R while opening a game) is the supported way.
+      options:
+        - Title takeover (hbmenu opened over a game)
+        - Album applet
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: clocks
+    attributes:
+      label: CPU / GPU / RAM clocks
+      description: The clocks you used, for example from Horizon OC. The CPU needs 1785 MHz or higher.
+      placeholder: "1785 / 460 / 1600 MHz"
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware and custom firmware version
+      placeholder: "Firmware 19.0.1, Atmosphere 1.8.0"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you saw. For performance reports, where in the game and how bad.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce

@@ -49,89 +49,7 @@ typedef unsigned long long	uint64;
 class ThreadedAlloc;		// class that is only used to expand the AutoCrit template to tag allocs/frees called from inside the R_AddModelSurfaces call graph
 #define PC_CVAR_ARCHIVE CVAR_ARCHIVE
 
-#if defined( __APPLE__ ) && !defined( MACOS_X )
-#define MACOS_X 1
-#endif
 
-#ifdef _WINDOWS
-
-	// _WIN32 always defined
-	// _WIN64 also defined for x64 target
-	#if !defined( _WIN64 )
-		#define ID_WIN_X86_ASM
-		#define ID_WIN_X86_MMX
-		#define ID_WIN_X86_SSE
-		//#define ID_WIN_X86_SSE2
-	#endif
-
-	// we should never rely on this define in our code. this is here so dodgy external libraries don't get confused
-	#ifndef WIN32
-		#define WIN32
-	#endif
-
-	#undef _XBOX
-	#undef _CONSOLE								// Used to comment out code that can't be used on a console
-	#define _OPENGL
-	#define _LITTLE_ENDIAN
-	#undef _CASE_SENSITIVE_FILESYSTEM
-	#define _USE_OPENAL
-	#define _USE_VOICECHAT
-	#define __WITH_PB__
-	//#define _RV_MEM_SYS_SUPPORT
-	// when using the PC to make Xenon builds, enable _MD5R_SUPPORT / _MD5R_WRITE_SUPPORT and run with fs_game q4baseXenon
-	#ifdef Q4SDK
-		// the SDK can't be compiled with _MD5R_SUPPORT, but since the PC version is we need to maintain ABI
-		// to make things worse, only the windows version was compiled with _MD5R enabled, the Linux and Mac builds didn't
-		//#define Q4SDK_MD5R
-	#else	// Q4SDK
-		#define Q4SDK_MD5R
-		//#define _MD5R_SUPPORT
-		//#define _MD5R_WRITE_SUPPORT
-	#endif	// !Q4SDK
-	#define _GLVAS_SUPPPORT
-	//#define RV_BINARYDECLS
-	#define RV_SINGLE_DECL_FILE
-	// this can't be used with _RV_MEM_SYS_SUPPORT and actually shouldn't be used at all on the Xenon at present
-	#if !defined(_RV_MEM_SYS_SUPPORT) && !defined(ID_REDIRECT_NEWDELETE)
-		//#define RV_UNIFIED_ALLOCATOR
-	#endif
-
-	// SMP support for running the backend on a 2nd thread
-	#define ENABLE_INTEL_SMP
-	// Enables the batching of vertex cache request in SMP mode.
-	// Note (TTimo): is tied to ENABLE_INTEL_SMP
-	#define ENABLE_INTEL_VERTEXCACHE_OPT
-	
-	// Empty define for Xbox 360 compatibility
-	#define RESTRICT
-	#define TIME_THIS_SCOPE(x)
-
-	#define NEWLINE				"\r\n"
-
-	#pragma warning( disable : 4100 )			// unreferenced formal parameter
-	#pragma warning( disable : 4127 )			// conditional expression is constant
-	#pragma warning( disable : 4201 )			// non standard extension nameless struct or union
-	#pragma warning( disable : 4244 )			// conversion to smaller type, possible loss of data
-	#pragma warning( disable : 4245 )			// signed/unsigned mismatch
-	#pragma warning( disable : 4389 )			// signed/unsigned mismatch
-	#pragma warning( disable : 4714 )			// function marked as __forceinline not inlined
-	#pragma warning( disable : 4800 )			// forcing value to bool 'true' or 'false' (performance warning)
-// jmarshall
-	#pragma warning( disable : 4458 )			//  hides class member
-// jmarshall end
-
-	#ifndef ID_ALIGNMENTCHECKER_DEFINED
-#define ID_ALIGNMENTCHECKER_DEFINED
-class AlignmentChecker
-{
-public:
-	static void UpdateCount(void const * const ptr) {}
-	static void ClearCount() {}
-	static void Print() {}
-};
-#endif
-
-#endif // _WINDOWS
 
 #ifdef __linux__
 
@@ -151,7 +69,7 @@ public:
 		// redefinition breaks every later system header.
 		#include <sys/types.h>
 		#undef quad
-	#else
+#else
 	#define _LITTLE_ENDIAN
 	#endif
 	#define _CASE_SENSITIVE_FILESYSTEM
@@ -186,59 +104,6 @@ public:
 
 #endif
 
-#ifdef MACOS_X
-
-// for offsetof
-#include <stddef.h>
-#include <limits.h>
-#include <float.h>				// for FLT_MIN
-
-	// SMP support for running the backend on a 2nd thread
-	#ifndef ENABLE_INTEL_SMP
-	#define ENABLE_INTEL_SMP
-	#endif
-	// Enables the batching of vertex cache request in SMP mode.
-	// Note (TTimo): is tied to ENABLE_INTEL_SMP
-	#define ENABLE_INTEL_VERTEXCACHE_OPT
-
-	#define __WITH_PB__
-	#undef WIN32
-	#undef _XBOX
-	#undef _CONSOLE
-	#define _OPENGL
-	#ifdef __ppc__
-	#undef _LITTLE_ENDIAN
-	#elif defined( __SWITCH__ )
-	#include <sys/types.h>
-	#undef quad
-	#else
-	#define _LITTLE_ENDIAN
-	#endif
-	#define _CASE_SENSITIVE_FILESYSTEM
-	#define _USE_OPENAL
-	#ifndef Q4SDK
-		#define Q4SDK_MD5R
-	#endif
-	#define ID_INLINE inline
-	#define NEWLINE				"\n"
-
-	#define _GLVAS_SUPPPORT
-
-	#ifndef ID_ALIGNMENTCHECKER_DEFINED
-#define ID_ALIGNMENTCHECKER_DEFINED
-class AlignmentChecker
-{
-public:
-	static void UpdateCount(void const * const ptr) {}
-	static void ClearCount() {}
-	static void Print() {}
-};
-#endif
-
-	#define RESTRICT
-	#define TIME_THIS_SCOPE(x)
-
-#endif
 
 #ifndef RESTRICT
 	#define RESTRICT
@@ -266,56 +131,6 @@ public:
 
 #define ID_TIME_T time_t
 
-#ifdef _WIN32
-
-#define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS	// prevent auto literal to string conversion
-
-#ifndef Q4SDK
-#ifndef GAME_DLL
-
-#define WINVER				0x501
-
-#if 0
-// Dedicated server hits unresolved when trying to link this way now. Likely because of the 2010/Win7 transition? - TTimo
-
-#ifdef	ID_DEDICATED
-// dedicated sets windows version here
-#define	_WIN32_WINNT WINVER
-#define	WIN32_LEAN_AND_MEAN
-#else
-// non-dedicated includes MFC and sets windows version here
-#include "../tools/comafx/StdAfx.h"			// this will go away when MFC goes away
-#endif
-
-#else
-
-//#include "../tools/comafx/StdAfx.h"
-
-#endif
-
-#include <winsock2.h>
-#include <mmsystem.h>
-#include <mmreg.h>
-
-#define DIRECTINPUT_VERSION  0x0800			// was 0x0700 with the old mssdk
-#define DIRECTSOUND_VERSION  0x0800
-
-#include <dsound.h>
-#include <dinput.h>
-
-#endif /* !GAME_DLL */
-#endif /* !Q4SDK */
-
-#pragma warning(disable : 4100)				// unreferenced formal parameter
-#pragma warning(disable : 4244)				// conversion to smaller type, possible loss of data
-#pragma warning(disable : 4714)				// function marked as __forceinline not inlined
-#pragma warning(disable : 4996)				// unsafe string operations
-
-#include <malloc.h>							// no malloc.h on mac or unix
-#include <windows.h>						// for qgl.h
-#undef FindText								// stupid namespace poluting Microsoft monkeys
-
-#endif /* _WIN32 */
 
 //-----------------------------------------------------
 

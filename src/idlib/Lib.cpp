@@ -2,18 +2,11 @@
 
 
 
-#if defined( _WIN32 )
-#include <windows.h>
-#endif
 
 #if defined( MACOS_X ) || defined( __linux__ )
 #include <signal.h>
 #endif
 
-#if defined( MACOS_X )
-#include <sys/types.h>
-#include <unistd.h>
-#endif
 
 /*
 ===============================================================================
@@ -76,13 +69,11 @@ void idLib::Init( void ) {
 
 // RAVEN BEGIN
 // jsinger: There is no reason for us to be doing this on the Xenon
-#ifndef _XENON
 	// test idMatX
 	//idMatX::Test();
 
 	// test idPolynomial
 	idPolynomial::Test();
-#endif
 // RAVEN END
 
 	// initialize the dictionary string pools
@@ -642,16 +633,7 @@ void AssertFailed( const char *file, int line, const char *expression ) {
 	if ( idLib::common ) {
 		idLib::common->Warning( "ASSERTION FAILED! %s(%d): '%s'", file, line, expression );
 	}
-#ifdef _WIN32
-// RAVEN BEGIN
-// jnewquist: Visual Studio platform independent breakpoint
-	if ( IsDebuggerPresent() ) {
-		__debugbreak();
-	}
-// RAVEN END
-#elif defined( __linux__ )
+#if defined( __linux__ )
 	raise( SIGTRAP );
-#elif defined( MACOS_X )
-	kill( getpid(), SIGINT );
 #endif
 }

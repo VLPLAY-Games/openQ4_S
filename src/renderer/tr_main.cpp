@@ -36,9 +36,6 @@ If you have questions concerning this license or the applicable additional terms
 #ifdef __ppc__
 #include <vecLib/vecLib.h>
 #endif
-#if defined(MACOS_X) && defined(__i386__)
-#include <xmmintrin.h>
-#endif
 
 //====================================================================
 

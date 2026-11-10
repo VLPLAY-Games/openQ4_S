@@ -23,13 +23,8 @@ Quake 4 SDK game module or another cryptographic implementation is used here.
 #if defined( _M_X64 ) || defined( __x86_64__ )
 #define IDCRYPTO_SHA_X86 1
 #include <immintrin.h>
-#if defined( _MSC_VER ) && !defined( __clang__ )
-#include <intrin.h>
-#define IDCRYPTO_SHA_X86_TARGET
-#else
 #include <cpuid.h>
 #define IDCRYPTO_SHA_X86_TARGET __attribute__(( target( "sha,sse4.1,ssse3" ) ))
-#endif
 #else
 #define IDCRYPTO_SHA_X86 0
 #endif
@@ -217,18 +212,6 @@ static void SHA256TransformBlocksX86( std::uint32_t state[ 8 ],
 }
 
 static bool SHA256DetectX86( void ) {
-#if defined( _MSC_VER ) && !defined( __clang__ )
-	int registers[ 4 ] = {};
-	__cpuid( registers, 0 );
-	if ( registers[ 0 ] < 7 ) {
-		return false;
-	}
-	__cpuid( registers, 1 );
-	const bool ssse3 = ( registers[ 2 ] & ( 1 << 9 ) ) != 0;
-	const bool sse41 = ( registers[ 2 ] & ( 1 << 19 ) ) != 0;
-	__cpuidex( registers, 7, 0 );
-	const bool sha = ( registers[ 1 ] & ( 1 << 29 ) ) != 0;
-#else
 	unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
 	if ( __get_cpuid_max( 0, nullptr ) < 7 ) {
 		return false;
@@ -238,7 +221,6 @@ static bool SHA256DetectX86( void ) {
 	const bool sse41 = ( ecx & ( 1u << 19 ) ) != 0;
 	__cpuid_count( 7, 0, eax, ebx, ecx, edx );
 	const bool sha = ( ebx & ( 1u << 29 ) ) != 0;
-#endif
 	return ssse3 && sse41 && sha;
 }
 #endif

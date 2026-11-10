@@ -1872,12 +1872,6 @@ void idGameLocal::LoadMap( const char *mapName, int randseed ) {
 	pvs.Init();
 // RAVEN BEGIN
 // mwhitlock: Xenon texture streaming
-#if defined(_XENON)
-	// Experimental use of game's PVS for reducing amount of stuff streamed. Will
-	// do this a bit more cleanly if I decide to keep this.
-	extern idPVS* pvsForStreaming;
-	pvsForStreaming=&pvs;
-#endif
 // RAVEN END
 
 	playerPVS.i = -1;
@@ -2131,10 +2125,6 @@ bool idGameLocal::NextMap( void ) {
 
 //RAVEN BEGIN
 //asalmon: pick another map on Xenon
-#ifdef _XENON
-	//Live()->PickMap();
-	return true;
-#endif
 //RAVEN END
 
 // RAVEN BEGIN
@@ -2415,16 +2405,10 @@ void idGameLocal::InitFromNewMap( const char *mapName, idRenderWorld *renderWorl
 		return;
 #else
 		statManager->EndGame();
-#ifdef _XENON
-		Live()->DeleteSPSession(true);
-#endif
 		statManager->Shutdown();
 		statManager->Init();
 		statManager->BeginGame();
 		statManager->ClientConnect(0);
-#ifdef _XENON
-		Live()->CreateSPSession();
-#endif
 #endif // _MPBETA
 	}
 //RAVEN END
@@ -4940,14 +4924,6 @@ bool idGameLocal::Draw( int clientNum, bool menuPaused ) {
 
 // RAVEN BEGIN
 // mwhitlock: Xenon texture streaming.
-#if defined(_XENON)
-	renderView_t *view = player->GetRenderView();
-	// nrausch: view doesn't necessarily exist yet
-	if ( !view ) {
-		player->CalculateRenderView();
-		view = player->GetRenderView();
-	}
-#endif
 // RAVEN END
 	// render the scene
 	player->playerView.RenderPlayerView( player->hud );
@@ -5048,12 +5024,6 @@ escReply_t idGameLocal::HandleESC( idUserInterface **gui ) {
 
 //RAVEN BEGIN
 //asalmon: xbox dedicated server needs to bring up a special menu
-#ifdef _XBOX
-	if( cvarSystem->GetCVarBool( "net_serverDedicated" ))
-	{
-		return ESC_MAIN;
-	}
-#endif
 //RAVEN END
 
 	if ( isMultiplayer ) {
@@ -10929,11 +10899,7 @@ void idGameLocal::FlushBeforelevelLoad( void )
 {
 	TIME_THIS_SCOPE( __FUNCLINE__);
 
-#ifndef _XENON
 	MapShutdown();
-#else
-	mpGame.Clear();
-#endif
 	for(int i = 0; i < aasNames.Num(); i++)
 	{
 		aasList[i]->Shutdown();
@@ -10984,7 +10950,7 @@ void operator delete[]( void *p ) {
 	Mem_Free( p, "", 0 );
 }
 
-#else	// #ifdef ID_DEBUG_MEMORY
+#else
 
 void *operator new( size_t s ) {
 	return Mem_Alloc( s, MemScopedTag_GetTopTag() );

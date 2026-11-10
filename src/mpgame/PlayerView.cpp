@@ -10,9 +10,6 @@
 #include "../game/gamesys/RetainedViewEffects.inl"
 #include "../game/gamesys/Subtitles.inl"
 
-#if defined(_XENON) && (defined(_PROFILE) || defined(_DEBUG))
-#include "../sys/xenon/ProfilingSupport.h"
-#endif
 
 const int IMPULSE_DELAY = 150;
 

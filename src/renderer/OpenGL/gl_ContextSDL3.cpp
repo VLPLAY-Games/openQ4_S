@@ -31,31 +31,11 @@
 bool QGL_Init(const char *dllname);
 void QGL_Shutdown(void);
 void *GLimp_ExtensionPointer(const char *name);
-#if defined(_WIN32)
-// the wgl extension pointers win_local.h declares and win_qgl.cpp defines
-// engine-side live in this TU inside the module (RenderSystem_init.cpp
-// re-declares wglSwapIntervalEXT extern, so external linkage is required)
-#include "../wglext.h"
-PFNWGLGETEXTENSIONSSTRINGARBPROC wglGetExtensionsStringARB = NULL;
-PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT = NULL;
-PFNWGLGETPIXELFORMATATTRIBIVARBPROC wglGetPixelFormatAttribivARB = NULL;
-PFNWGLGETPIXELFORMATATTRIBFVARBPROC wglGetPixelFormatAttribfvARB = NULL;
-PFNWGLCHOOSEPIXELFORMATARBPROC wglChoosePixelFormatARB = NULL;
-PFNWGLCREATEPBUFFERARBPROC wglCreatePbufferARB = NULL;
-PFNWGLGETPBUFFERDCARBPROC wglGetPbufferDCARB = NULL;
-PFNWGLRELEASEPBUFFERDCARBPROC wglReleasePbufferDCARB = NULL;
-PFNWGLDESTROYPBUFFERARBPROC wglDestroyPbufferARB = NULL;
-PFNWGLQUERYPBUFFERARBPROC wglQueryPbufferARB = NULL;
-PFNWGLBINDTEXIMAGEARBPROC wglBindTexImageARB = NULL;
-PFNWGLRELEASETEXIMAGEARBPROC wglReleaseTexImageARB = NULL;
-PFNWGLSETPBUFFERATTRIBARBPROC wglSetPbufferAttribARB = NULL;
-#else
 #define OPENQ4_SDL3_POSIX_HOST 1
 #if defined(__linux__)
 // the module build has no linux_sdl3.cpp wrapper to define the host macro;
 // the GLEW SDL3-loader hook (OpenQ4_GlewGetProcAddress) hangs off it
 #define OPENQ4_SDL3_LINUX_HOST 1
-#endif
 #endif
 #endif
 
@@ -642,8 +622,6 @@ bool GLimp_Init(glimpParms_t parms) {
 
 #if defined(__linux__)
 	driverName = r_glDriver.GetString()[0] ? r_glDriver.GetString() : "libGL.so.1";
-#elif defined(__APPLE__)
-	driverName = r_glDriver.GetString()[0] ? r_glDriver.GetString() : "OpenGL.framework";
 #else
 	driverName = r_glDriver.GetString()[0] ? r_glDriver.GetString() : "opengl32";
 #endif
@@ -796,11 +774,6 @@ void GLimp_SwapBuffers(void) {
 		R_DisplayPresentationSubmitted(); R_DisplayPresentationPresented();
 	}
 
-#if defined(__ANDROID__) && defined(OPENQ4_RENDERER_GLES_MODULE)
-	// The host app's touch overlay draws inside that swap; undo what it left
-	// behind before the next frame delta-codes against it.
-	RB_GLES_RestoreStateAfterOverlay();
-#endif
 }
 
 void GLimp_ActivateContext(void) {

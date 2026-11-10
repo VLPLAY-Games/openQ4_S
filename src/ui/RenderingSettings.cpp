@@ -11,11 +11,7 @@ namespace openq4::ui {
 namespace {
 std::uint64_t catalogSerial=0;
 bool Desktop() {
-#ifdef __ANDROID__
-	return false;
-#else
 	return true;
-#endif
 }
 bool Fail(std::string& error,const char* text) { error=text; return false; }
 bool AtMainMenu() { return session && !sessLocal.IsMapSpawned() && !session->IsLoadingSaveGame(); }

@@ -64,15 +64,6 @@ const int	IMPULSE_NUMBER_OF_BITS		= 8;							// allows for 2<<X impulses
 
 // RAVEN BEGIN
 // jnewquist: Xenon weapon combo system
-#ifdef _XENON
-typedef struct
-{
-	int up;
-	int down;
-	int left;
-	int right;
-} nextWeaponCombo_t;
-#endif
 // RAVEN END
 
 typedef enum {
@@ -479,9 +470,6 @@ public:
 	int						lastPickupTime;
 //RAVEN BEGIN
 // asalmon: the eneny the player is most likely currently aiming at
-#ifdef _XBOX
-	idEntityPtr<idActor>	bestEnemy;
-#endif
 //RAVEN END
 
 // RITUAL BEGIN
@@ -711,9 +699,6 @@ public:
 
 //RAVEN BEGIN
 //asalmon: switch weapon based on d-pad combo
-#ifdef _XBOX
-	void					ScheduleWeaponSwitch		(int weapon);
-#endif
 //RAVEN BEGIN
 
 	void					Reload						( void );
@@ -764,9 +749,6 @@ public:
 	idCamera *				GetPrivateCameraView( void ) const { return privateCameraView; }
 	void					StartFxFov( float duration  );
  	void					UpdateHudWeapon( int displayWeapon=-1 );
-#ifdef _XENON
-	void					ResetHUDWeaponSwitch( void );
-#endif
 	void					UpdateHudStats( idUserInterface *hud );
  	void					UpdateHudAmmo( idUserInterface *hud );
  	void					ShowTip( const char *title, const char *tip, bool autoHide );

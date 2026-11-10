@@ -109,13 +109,6 @@ idCVar	s_muteUnfocused( "s_muteUnfocused", "1", CVAR_ARCHIVE | CVAR_BOOL, "mute 
 #if defined( USE_SDL3 )
 bool Sys_SDL_IsGameWindowFocused( void );
 float Sys_SDL_GetWindowRefreshHz( void );
-#if defined( __ANDROID__ )
-#include "../sys/android/android_public.h"
-bool Sys_SDL_ConsumeAppSuspension( void );
-void S_SetDevicePaused( bool paused );
-#endif
-#elif defined( _WIN32 )
-bool Sys_IsGameWindowFocused( void );
 #endif
 
 idSessionLocal		sessLocal;
@@ -424,13 +417,7 @@ static const char *SESSION_LEGACY_SAVEGAME_WIRE_ABI = "windows-msvcabi-x64-le-ra
 static const char *Session_GetSaveGameWireABI( void );
 
 static const char *Session_GetSaveGameWireABI( void ) {
-#if defined( _WIN32 )
-	#define SESSION_SAVEGAME_ABI_OS "windows"
-	#define SESSION_SAVEGAME_ABI_COMPILER "msvcabi"
-#elif defined( __APPLE__ )
-	#define SESSION_SAVEGAME_ABI_OS "macos"
-	#define SESSION_SAVEGAME_ABI_COMPILER "itaniumabi"
-#elif defined( __linux__ )
+#if defined( __linux__ )
 	#define SESSION_SAVEGAME_ABI_OS "linux"
 	#define SESSION_SAVEGAME_ABI_COMPILER "itaniumabi"
 #else
@@ -2984,8 +2971,6 @@ static bool Session_ShouldSilenceAudioWhenUnfocused() {
 	}
 #if defined( USE_SDL3 )
 	return s_muteUnfocused.GetBool() && !Sys_SDL_IsGameWindowFocused();
-#elif defined( _WIN32 )
-	return s_muteUnfocused.GetBool() && !Sys_IsGameWindowFocused();
 #else
 	return false;
 #endif
@@ -10061,9 +10046,6 @@ void idSessionLocal::Draw() {
 	if ( mapSpawned && !insideExecuteMapChange && !guiActive && !readDemo ) {
 		DrawIAmTheDukeOverlay();
 		Session_DrawLevelshotBounds();
-#ifdef __ANDROID__
-		AndroidTouchControls_Draw();
-#endif
 	}
 
 	if ( guiActive == NULL && demoOverlayVisible && IsDemoPlaybackActive() &&
@@ -10103,14 +10085,6 @@ void idSessionLocal::UpdateScreen( bool outOfSequence ) {
 		return;
 	}
 
-#ifdef _WIN32
-
-	if ( com_editors ) {
-		if ( !Sys_IsWindowVisible() ) {
-			return;
-		}
-	}
-#endif
 
 	if ( insideUpdateScreen ) {
 		return;
@@ -10163,18 +10137,7 @@ idSessionLocal::Frame
 ===============
 */
 void idSessionLocal::HandleAppResume( bool afterMapLoad ) {
-#if defined( USE_SDL3 ) && defined( __ANDROID__ )
-	if ( !Sys_SDL_ConsumeAppSuspension() ) return;
-	// Do this outside SDL's event watch: the renderer is current again, and
-	// opening the menu switches off the gameplay sound world before unmuting.
-	if ( !afterMapLoad && mapSpawned && !insideExecuteMapChange && !IsGUIActive() &&
-		 !readDemo && !com_editorActive && !idAsyncNetwork::IsActive() ) {
-		StartMenu();
-	}
-	S_SetDevicePaused( false );
-#else
 	(void)afterMapLoad;
-#endif
 }
 
 void idSessionLocal::Frame() {
@@ -10277,16 +10240,6 @@ void idSessionLocal::Frame() {
 
 	if ( shouldWaitForGameTic ) {
 		const int waitStartMsec = Sys_Milliseconds();
-#if defined( _WIN32 )
-		// Demo / capture playback still consumes exact tics instead of repeated-state presentation.
-		while( 1 ) {
-			latchedTicNumber = com_ticNumber;
-			if ( latchedTicNumber >= minTic ) {
-				break;
-			}
-			Sys_Sleep( 1 );
-		}
-#else
 		while( 1 ) {
 			latchedTicNumber = com_ticNumber;
 			if ( latchedTicNumber >= minTic ) {
@@ -10294,7 +10247,6 @@ void idSessionLocal::Frame() {
 			}
 			Sys_WaitForEvent( TRIGGER_EVENT_ONE );
 		}
-#endif
 		actualWaitMsec = Max( 0, Sys_Milliseconds() - waitStartMsec );
 	} else {
 		latchedTicNumber = com_ticNumber;

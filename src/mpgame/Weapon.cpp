@@ -663,9 +663,6 @@ rvWeapon::rvWeapon ( void ) {
 	memset ( lightHandles, -1, sizeof(lightHandles) );
 	flashlightOn = false;
 
-#ifdef _XENON
-	aimAssistFOV = 10.0f;
-#endif	
 
 	memset ( &animDoneTime, 0, sizeof(animDoneTime) );
 	memset ( &wsfl, 0, sizeof(wsfl) );
@@ -718,9 +715,6 @@ void rvWeapon::Init( idPlayer* _owner, const idDeclEntityDef* def, int _weaponIn
 	
 	spawnArgs = weaponDef->dict;
 
-#ifdef _XENON
-	aimAssistFOV = spawnArgs.GetFloat( "aimAssistFOV", "10.0f" );
-#endif	
 
 	// Apply the mod dictionaries
 	for ( i = 0; i < MAX_WEAPONMODS; i ++ ) {		
@@ -777,9 +771,6 @@ void rvWeapon::Spawn ( void ) {
 
 // RAVEN BEGIN
 // nrausch:
-#if defined(_XENON)
-	aimAssistFOV = spawnArgs.GetFloat( "aimAssistFOV", "10.0f" );
-#endif
 // RAVEN END
 
 	// Initialize variables
@@ -2278,9 +2269,6 @@ void rvWeapon::Restore ( idRestoreGame *savefile ) {
 	
 	savefile->ReadInt		( methodOfDeath );	// cnicholson: Added unrestored var
 
-#ifdef _XENON
-	aimAssistFOV = spawnArgs.GetFloat( "aimAssistFOV", "10.0f" );
-#endif	
 }
 
 /***********************************************************************
@@ -2691,12 +2679,7 @@ rvViewWeapon::CanZoom
 =====================
 */
 bool rvWeapon::CanZoom( void ) const {
-#ifdef _XENON
-	// apparently a xenon specific bug in medlabs.
-	return zoomFov != -1 && !IsHidden();
-#else
 	return zoomFov != -1;
-#endif
 }
 
 /***********************************************************************
@@ -3445,17 +3428,10 @@ void rvWeapon::LaunchProjectiles ( idDict& dict, const idVec3& muzzleOrigin, con
 			trace_t	tr;
 //RAVEN BEGIN
 //asalmon: xbox must use muzzle Axis for aim assistance
-#ifdef _XBOX
-			muzzle_pos = muzzleOrigin + muzzleAxis[ 0 ] * 2.0f;
-			if ( ( ownerBounds - projBounds).RayIntersection( muzzle_pos, muzzleAxis[0], distance ) ) {
-				start = muzzle_pos + distance * muzzleAxis[0];
-			} 
-#else
 			muzzle_pos = muzzleOrigin + playerViewAxis[ 0 ] * 2.0f;
 			if ( ( ownerBounds - projBounds).RayIntersection( muzzle_pos, playerViewAxis[0], distance ) ) {
 				start = muzzle_pos + distance * playerViewAxis[0];
 			} 
-#endif
 //RAVEN END
 			else {
 				start = ownerBounds.GetCenter();
@@ -3570,15 +3546,9 @@ void rvWeapon::Hitscan( const idDict& dict, const idVec3& muzzleOrigin, const id
 			float r = gameLocal.random.RandomFloat() * idMath::PI * 2.0f;
 			float u = idMath::Sin( r ) * gameLocal.random.CRandomFloat() * spread * 16;
 			r = idMath::Cos( r ) * gameLocal.random.CRandomFloat() * spread * 16;
-#ifdef _XBOX
-			end = muzzleOrigin + ( ( 8192 * 16 ) * muzzleAxis[ 0 ] );
-			end += ( r * muzzleAxis[ 1 ] );
-			end += ( u * muzzleAxis[ 2 ] );
-#else
 			end = muzzleOrigin + ( ( 8192 * 16 ) * playerViewAxis[ 0 ] );
 			end += ( r * playerViewAxis[ 1 ] );
 			end += ( u * playerViewAxis[ 2 ] );
-#endif
 			dir = end - muzzleOrigin;
 		} else if( weaponDef->dict.GetBool( "shotgunSpreadStyle" ) ) {
 			int radius;
@@ -3601,26 +3571,16 @@ void rvWeapon::Hitscan( const idDict& dict, const idVec3& muzzleOrigin, const id
 			float r = radius * (idMath::Cos(angle) + (gameLocal.random.CRandomFloat() * 0.2f));
 			float u = radius * (idMath::Sin(angle) + (gameLocal.random.CRandomFloat() * 0.2f));
 			
-#ifdef _XBOX
-			end = muzzleOrigin + ( ( 8192 * 16 ) * muzzleAxis[ 0 ] );
-			end += ( r * muzzleAxis[ 1 ] );
-			end += ( u * muzzleAxis[ 2 ] );
-#else
 			end = muzzleOrigin + ( ( 8192 * 16 ) * playerViewAxis[ 0 ] );
 			end += ( r * playerViewAxis[ 1 ] );
 			end += ( u * playerViewAxis[ 2 ] );
-#endif
 			dir = end - muzzleOrigin;
 		} else {
 			ang = idMath::Sin( spreadRad * gameLocal.random.RandomFloat() );
 			spin = (float)DEG2RAD( 360.0f ) * gameLocal.random.RandomFloat();
 			//RAVEN BEGIN
 			//asalmon: xbox must use the muzzleAxis so the aim can be adjusted for aim assistance
-#ifdef _XBOX
-			dir = muzzleAxis[ 0 ] + muzzleAxis[ 2 ] * ( ang * idMath::Sin( spin ) ) - muzzleAxis[ 1 ] * ( ang * idMath::Cos( spin ) );
-#else
 			dir = playerViewAxis[ 0 ] + playerViewAxis[ 2 ] * ( ang * idMath::Sin( spin ) ) - playerViewAxis[ 1 ] * ( ang * idMath::Cos( spin ) );
-#endif
 			//RAVEN END
 		}
 		dir.Normalize();

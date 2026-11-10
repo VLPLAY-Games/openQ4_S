@@ -58,10 +58,6 @@ If you have questions concerning this license or the applicable additional terms
 #include <malloc.h>
 #endif
 
-#if defined( MACOS_X )
-#include <mach/mach.h>
-#include <sys/sysctl.h>
-#endif
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -69,9 +65,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "posix_public.h"
 
-#if !defined( MACOS_X ) || defined( USE_SDL3 )
 #define OPENQ4_POSIX_OWNS_COMMON_SYS 1
-#endif
 
 #if defined( USE_SDL3 )
 bool Sys_SDL_PumpEvents( void );
@@ -160,11 +154,6 @@ Posix_Exit
 ================
 */
 void Posix_Exit(int ret) {
-#if defined( __ANDROID__ )
-	// nothing below is guaranteed to print again, so do not let an
-	// unterminated line leave with the process
-	Sys_AndroidLogFlush();
-#endif
 	if ( !Posix_IsMainThread() ) {
 		// A worker-thread fatal error exits through here. Joining the async
 		// thread from itself would recurse through common->Error until the
@@ -311,12 +300,7 @@ bool Sys_GetSecureRandomBytes( void *buffer, int bytes ) {
 		return true;
 	}
 
-#if defined( __ANDROID__ )
-	// bionic only grew getrandom() at API 28; arc4random_buf has been there
-	// since API 21 and is the same kernel entropy source.
-	arc4random_buf( buffer, static_cast<size_t>( bytes ) );
-	return true;
-#elif defined( __linux__ )
+#if defined( __linux__ )
 	unsigned char *cursor = static_cast<unsigned char *>( buffer );
 	int remaining = bytes;
 	while ( remaining > 0 ) {
@@ -331,9 +315,6 @@ bool Sys_GetSecureRandomBytes( void *buffer, int bytes ) {
 		}
 		return false;
 	}
-	return true;
-#elif defined( MACOS_X )
-	arc4random_buf( buffer, static_cast<size_t>( bytes ) );
 	return true;
 #else
 	int descriptor;
@@ -712,35 +693,6 @@ void Sys_GetCurrentMemoryStatus( sysMemoryStats_t &stats ) {
 	const unsigned long long availVirtual = availPhysical + availSwap;
 
 	Sys_SetMemoryStatsFromBytes( stats, totalPhysical, availPhysical, totalVirtual, availVirtual );
-#elif defined( MACOS_X )
-	unsigned long long totalPhysical = 0;
-	size_t totalPhysicalSize = sizeof( totalPhysical );
-	if ( sysctlbyname( "hw.memsize", &totalPhysical, &totalPhysicalSize, NULL, 0 ) == -1 || totalPhysical == 0 ) {
-		common->DPrintf( "Sys_GetCurrentMemoryStatus: hw.memsize failed: %s\n", strerror( errno ) );
-		return;
-	}
-
-	mach_port_t hostPort = mach_host_self();
-	vm_size_t pageSize = 0;
-	vm_statistics64_data_t vmStats;
-	mach_msg_type_number_t vmStatsCount = HOST_VM_INFO64_COUNT;
-
-	if ( host_page_size( hostPort, &pageSize ) != KERN_SUCCESS ||
-		 host_statistics64( hostPort, HOST_VM_INFO64, reinterpret_cast<host_info64_t>( &vmStats ), &vmStatsCount ) != KERN_SUCCESS ||
-		 pageSize == 0 ) {
-		mach_port_deallocate( mach_task_self(), hostPort );
-		Sys_SetMemoryStatsFromBytes( stats, totalPhysical, 0, totalPhysical, 0 );
-		return;
-	}
-
-	const unsigned long long availablePages =
-		static_cast<unsigned long long>( vmStats.free_count ) +
-		static_cast<unsigned long long>( vmStats.inactive_count ) +
-		static_cast<unsigned long long>( vmStats.speculative_count );
-	const unsigned long long availPhysical = availablePages * static_cast<unsigned long long>( pageSize );
-
-	mach_port_deallocate( mach_task_self(), hostPort );
-	Sys_SetMemoryStatsFromBytes( stats, totalPhysical, availPhysical, totalPhysical, availPhysical );
 #endif
 }
 
@@ -769,16 +721,6 @@ bool Sys_GetProcessMemoryUsage( unsigned long long &privateBytes, unsigned long 
 	privateBytes = ( anonymousKiB + swapKiB ) * 1024ULL;
 	residentBytes = residentKiB * 1024ULL;
 	return found;
-#elif defined( MACOS_X )
-	// The physical footprint is the figure the system's memory pressure tools use.
-	task_vm_info_data_t info;
-	mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
-	if ( task_info( mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>( &info ), &count ) != KERN_SUCCESS ) {
-		return false;
-	}
-	privateBytes = info.phys_footprint;
-	residentBytes = info.resident_size;
-	return true;
 #else
 	return false;
 #endif
@@ -799,11 +741,6 @@ void Sys_Init( void ) { }
 Sys_Shutdown
 =================
 */
-#if defined( MACOS_X ) && defined( USE_SDL3 )
-void Sys_Shutdown( void ) {
-	Posix_Shutdown();
-}
-#endif
 
 /*
 =================
@@ -875,16 +812,7 @@ intptr_t Sys_DLL_Load( const char *path ) {
 		Sys_Printf( "dlopen failed: empty path\n" );
 		return 0;
 	}
-#if defined( MACOS_X )
-	char resolvedPath[PATH_MAX];
-	if ( realpath( path, resolvedPath ) == NULL ) {
-		Sys_Printf( "dlopen '%s' failed: %s\n", path, strerror( errno ) );
-		return 0;
-	}
-	const char *loadPath = resolvedPath;
-#else
 	const char *loadPath = path;
-#endif
 	dlerror();
 	void *handle = dlopen( loadPath, RTLD_NOW | RTLD_LOCAL );
 	if ( !handle ) {
@@ -928,22 +856,12 @@ void Sys_DLL_Unload( intptr_t handle ) {
 
 // ---------------------------------------------------------------------------
 
-#if !defined( MACOS_X )
 // Only relevant when specified on the command line. macOS provides a
 // bundle-aware implementation in macos_compat.mm so Finder launches can use
 // the adjacent package root even when their process working directory differs.
 const char *Sys_DefaultCDPath( void ) {
-#if defined( __ANDROID__ )
-	// The standalone host extracts packaged overlays into private storage.
-	// Keep the retail install, writable saves and APK native modules separate.
-	const char *contentRoot = getenv( "OPENQ4_CONTENT_ROOT" );
-	if ( contentRoot != NULL && contentRoot[0] == '/' ) {
-		return contentRoot;
-	}
-#endif
 	return Posix_Cwd();
 }
-#endif
 
 ID_TIME_T Sys_FileTimeStamp(FILE * fp) {
 	if ( fp == NULL ) {
@@ -1106,13 +1024,6 @@ return in MegaBytes
 ===========
 */
 int Sys_GetDriveFreeSpace( const char *path ) {
-#if defined( __ANDROID__ ) && defined( OPENQ4_SIGMATOUCH )
-	// Always report plenty. Save paths may be SAF-backed and synthetic
-	// ('/[internal]/...'), so statvfs resolves no component of them and the walk
-	// up below would end on the read-only system mount and report it as (near
-	// zero) free, blocking savegames with "not enough drive space".
-	return 1024;
-#else
 	char probePath[PATH_MAX];
 	struct statvfs fsStats;
 
@@ -1150,7 +1061,6 @@ int Sys_GetDriveFreeSpace( const char *path ) {
 
 	common->DPrintf( "Sys_GetDriveFreeSpace: statvfs failed for '%s': %s\n", path, strerror( errno ) );
 	return 26;
-#endif
 }
 
 /*
@@ -1683,7 +1593,6 @@ char *Posix_ConsoleInput( void ) {
 	} else {
 		// disabled on OSX. works fine from a terminal, but launching from Finder is causing trouble
 		// I'm pretty sure it could be re-enabled if needed, and just handling the Finder failure case right (TTimo)
-#ifndef MACOS_X
 		// no terminal support - read only complete lines
 		int				len;
 		fd_set			fdset;
@@ -1714,7 +1623,6 @@ char *Posix_ConsoleInput( void ) {
 
 		input_ret[ len-1 ] = '\0';		// rip off the \n and terminate
 		return input_ret;
-#endif
 	}
 	return NULL;
 }
@@ -1770,36 +1678,20 @@ void Sys_DebugPrintf( const char *fmt, ... ) {
 	if ( fmt == NULL ) {
 		return;
 	}
-#if defined( __ANDROID__ )
-	char text[MAX_POSIX_PRINT_MSG];
-	va_start( argptr, fmt );
-	idStr::vsnPrintf( text, sizeof( text ) - 1, fmt, argptr );
-	va_end( argptr );
-	text[sizeof( text ) - 1] = '\0';
-	Sys_AndroidLogPrint( SYS_ANDROID_LOG_DEBUG, text );
-#else
 	tty_Hide();
 	va_start( argptr, fmt );
 	vprintf( fmt, argptr );
 	va_end( argptr );
 	tty_Show();
-#endif
 }
 
 void Sys_DebugVPrintf( const char *fmt, va_list arg ) {
 	if ( fmt == NULL ) {
 		return;
 	}
-#if defined( __ANDROID__ )
-	char text[MAX_POSIX_PRINT_MSG];
-	idStr::vsnPrintf( text, sizeof( text ) - 1, fmt, arg );
-	text[sizeof( text ) - 1] = '\0';
-	Sys_AndroidLogPrint( SYS_ANDROID_LOG_DEBUG, text );
-#else
 	tty_Hide();
 	vprintf( fmt, arg );
 	tty_Show();
-#endif
 }
 
 void Sys_Printf(const char *msg, ...) {
@@ -1816,16 +1708,9 @@ void Sys_Printf(const char *msg, ...) {
 
 	Posix_ConsoleAppendText( text );
 
-#if defined( __ANDROID__ )
-	// There is no terminal here, and stdout only reaches logcat through the
-	// host app's pipe pump, which cannot preserve line boundaries. Go straight
-	// to liblog instead - see sys/android/android_log.cpp.
-	Sys_AndroidLogPrint( SYS_ANDROID_LOG_INFO, text );
-#else
 	tty_Hide();
 	fputs( text, stdout );
 	tty_Show();
-#endif
 }
 
 void Sys_VPrintf(const char *msg, va_list arg) {
@@ -1839,13 +1724,9 @@ void Sys_VPrintf(const char *msg, va_list arg) {
 
 	Posix_ConsoleAppendText( text );
 
-#if defined( __ANDROID__ )
-	Sys_AndroidLogPrint( SYS_ANDROID_LOG_INFO, text );
-#else
 	tty_Hide();
 	fputs( text, stdout );
 	tty_Show();
-#endif
 }
 
 static char posix_fatalBreadcrumbPath[ MAX_OSPATH ];
@@ -1960,11 +1841,6 @@ void Sys_Error(const char *error, ...) {
 
 	Sys_SetFatalError( text );
 	Posix_AppendFatalBreadcrumb( text );
-#if defined( __ANDROID__ )
-	// whatever was mid-line when this happened is the context for the error,
-	// so get it out before the error itself rather than after
-	Sys_AndroidLogFlush();
-#endif
 	Sys_Printf( "Sys_Error: %s\n", text );
 	Posix_ConsoleFatalErrorWait();
 

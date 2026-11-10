@@ -1141,18 +1141,12 @@ ID_INLINE bool idVec3::IsZero( void ) const {
 //	idVec4 - 4D vector
 //
 //===============================================================
-#ifdef _XENON
-#else
 class idVec4 {
-#endif
 public:	
-#ifndef _XENON
 	float			x;
 	float			y;
 	float			z;
 	float			w;
-#else
-#endif
 	ID_INLINE				idVec4( void );
 	ID_INLINE				explicit idVec4( const float x, const float y, const float z, const float w );
 
@@ -1214,7 +1208,6 @@ extern idVec4 vec4_one;
 
 #define vec4_zero vec4_origin
 
-#ifndef _XENON
 ID_INLINE idVec4::idVec4( void ) {
 	AlignmentChecker::UpdateCount(&x);
 }
@@ -1498,7 +1491,6 @@ ID_INLINE void idVec4::Lerp( const idVec4 &v1, const idVec4 &v2, const float l )
 		(*this) = v1 + l * ( v2 - v1 );
 	}
 }
-#endif
 
 //===============================================================
 //
@@ -1877,9 +1869,6 @@ ID_INLINE float *idVec6::ToFloatPtr( void ) {
 
 // RAVEN BEGIN
 // jsinger: this is broken at the moment because idSIMDProcessor is no longer virtual
-#ifdef _XENON
-#undef VECX_SIMD
-#endif
 // RAVEN END
 
 class idVecX {

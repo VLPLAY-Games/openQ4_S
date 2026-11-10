@@ -19,10 +19,6 @@ rvHeap defaultHeap;					// this is the default system heap
 
 static rvHeap *systemHeapArray[MAX_SYSTEM_HEAPS];		// array of pointers to rvHeaps that are common to idLib, Game, and executable 
 
-#if defined(_WIN32) && !defined(_XENON)
-static LPVOID sharedMem = NULL;      // pointer to shared memory
-static HANDLE hMapObject = NULL;	// handle to file mapping
-#endif
 
 // Descriptions that go with each tag.  When updating the tag enum in Heap.h please 
 // update this list as well.
@@ -177,45 +173,6 @@ void Mem_Init( void )
 	if ( NULL == currentHeapArena )
 	{
 
-#if defined(_WIN32) && !defined(_XENON)
-        hMapObject = CreateFileMapping(INVALID_HANDLE_VALUE, // use paging file
-									   NULL,                 // default security attributes
-									   PAGE_READWRITE,       // read/write access
-									   0,                    // size: high 32-bits
-									   sizeof(systemHeapArray)+sizeof(currentHeapArena),     // size: low 32-bits
-									   "quake4share");		// name of map object
-        if ( hMapObject == NULL ) 
-		{
-            return; 
-		}
- 
-        // The first process to attach initializes memory.
-        bool firstInit = (GetLastError() != ERROR_ALREADY_EXISTS); 
-
-        // Get a pointer to the file-mapped shared memory.
-        sharedMem = MapViewOfFile(hMapObject,     // object to map view of
-								  FILE_MAP_WRITE, // read/write access
-								  0,              // high offset:  map from
-								  0,              // low offset:   beginning
-								  0);             // default: map entire file
-        if ( sharedMem == NULL ) 
-		{
-            return; 
-		}
-
-		if ( !firstInit )
-		{
-			memcpy( &currentHeapArena, sharedMem, sizeof(currentHeapArena) );
-			memcpy( &systemHeapArray, (byte*) sharedMem + sizeof(currentHeapArena), sizeof(systemHeapArray) );
-
-			UnmapViewOfFile( sharedMem );
-			CloseHandle( hMapObject );
-
-			sharedMem = NULL;
-			hMapObject = NULL;
-			return;
-		}
-#endif
 
 		currentHeapArena = &mainHeapArena;
 		currentHeapArena->Init();
@@ -231,10 +188,6 @@ void Mem_Init( void )
 		rvSetSysHeap( RV_HEAP_ID_IO_TEMP, &defaultHeap );
 		RV_PUSH_SYS_HEAP_ID( RV_HEAP_ID_DEFAULT );
 
-#if defined(_WIN32) && !defined(_XENON)
-		memcpy( sharedMem,  &currentHeapArena, sizeof(currentHeapArena) );
-		memcpy( (byte*) sharedMem + sizeof(currentHeapArena), &systemHeapArray, sizeof(systemHeapArray) );
-#endif
 	}
 }
 
@@ -247,15 +200,6 @@ Shuts down the memory system from all further use
 */
 void Mem_Shutdown( void )
 {
-#if defined(_WIN32) && !defined(_XENON)
-	if ( sharedMem != NULL )
-	{
-		UnmapViewOfFile( sharedMem );
-		CloseHandle( hMapObject );
-		sharedMem = NULL;
-		hMapObject = NULL;
-	}
-#endif
 
 	if ( currentHeapArena == &mainHeapArena )
 	{
@@ -565,7 +509,6 @@ void Mem_DumpCompressed( const char *fileName, memorySortType_t memSort, int sor
 			{
 				continue;
 			}
-#ifndef _XENON
 			// removed the call stack info for better consolidation of info and speed of dump
 			for ( j = 0; j < MAX_CALLSTACK_DEPTH; j++ ) {
 				if ( a->callStack[j] != b->callStack[j] ) {
@@ -575,7 +518,6 @@ void Mem_DumpCompressed( const char *fileName, memorySortType_t memSort, int sor
 			if ( j < MAX_CALLSTACK_DEPTH ) {
 				continue;
 			}
-#endif
 			if ( idStr::Cmp( a->fileName, b->fileName ) != 0 ) {
 				continue;
 			}
@@ -681,47 +623,6 @@ void Mem_DumpCompressed( const char *fileName, memorySortType_t memSort, int sor
 // dluetscher: changed xenon version to output anything above 1K to the console 
 // mwhitlock: added verbose option to show < 1K also since I need to see leaks,
 // no matter how small.
-#ifdef _XENON
-	
-	unsigned int notShownSize = 0;
-	unsigned int notShownNumAllocs = 0;
-	
-	// write list to debug output and console
-	char buff[256];
-	for ( a = sortedAllocInfo; a; a = nexta ) {
-		nexta = a->next;
-
-		if((a->size >> 10) > 0)
-		{
-			idStr::snPrintf(buff, sizeof(buff), "%6d K",( a->size >> 10));
-		}
-		else
-		{
-			idStr::snPrintf(buff, sizeof(buff), "%6d B", a->size);
-		}
-
-		if ( verbose || ((a->size >> 10) > 0 ) )
-		{
-				idLib::common->Printf("size: %s, allocs: %5d: %s, line: %d, heap: %d, call stack: %s\r\n",
-							buff, a->numAllocs, Mem_CleanupFileName(a->fileName),
-							a->lineNumber, a->heapId, idLib::sys->GetCallStackStr( a->callStack, MAX_CALLSTACK_DEPTH ) );
-		}
-		else
-		{
-			notShownSize+=(unsigned int)a->size;
-			notShownNumAllocs+=(unsigned int)a->numAllocs;
-		}
-
-		currentHeapArena->Free( a );
-	}
-
-	idLib::sys->ShutdownSymbols();
-
-	idLib::common->Printf("%8d bytes in %d allocs not shown\r\n", notShownSize, notShownNumAllocs );
-	idLib::common->Printf("%8d total memory blocks allocated\r\n", numBlocks );
-	idLib::common->Printf("%8d KB memory allocated\r\n", ( totalSize >> 10 ) );
-
-#else
 // RAVEN END
 	FILE *f;
 
@@ -749,7 +650,6 @@ void Mem_DumpCompressed( const char *fileName, memorySortType_t memSort, int sor
 	fprintf( f, "%8d KB memory allocated\r\n", ( totalSize >> 10 ) );
 
 	fclose( f );
-#endif
 }
 
 /*
@@ -1028,7 +928,7 @@ int Mem_Size( void *ptr )
 	return currentHeapArena->Msize( (byte*)ptr - sizeof( debugMemory_t ) );
 }
 
-#else	// #ifdef ID_DEBUG_MEMORY
+#else
 
 void Mem_Dump_f( const class idCmdArgs &args )
 {
@@ -1070,9 +970,6 @@ void *Mem_Alloc( const size_t size, byte tag )
 
 	Mem_UpdateAllocStats( currentHeapArena->Msize( p ) );
 
-#if defined( _XENON ) && !defined( _FINAL )
-	MemTracker::OnAlloc(p, heapSize);
-#endif
 	
 	return p;
 }
@@ -1085,9 +982,6 @@ void *Mem_ClearedAlloc( const size_t size, byte tag )
 {
 	byte *allocation = (byte *) Mem_Alloc( size, tag );
 	
-#if defined( _XENON ) && !defined( _FINAL )
-	MemTracker::OnAlloc(allocation, size);
-#endif
 	
 	if ( allocation != NULL )
 	{
@@ -1114,9 +1008,6 @@ void Mem_Free( void *ptr )
 	}
 	assert( currentHeapArena != NULL );
 	
-#if defined( _XENON ) && !defined( _FINAL )
-	MemTracker::OnDelete(ptr);
-#endif
 
 	Mem_UpdateFreeStats( currentHeapArena->Msize( ptr ) );
 
@@ -1169,9 +1060,6 @@ void *Mem_Alloc16( const size_t size, byte tag )
 	}
 	void *mem = currentHeapArena->Allocate16( heapSize, tag );
 
-#if defined( _XENON ) && !defined( _FINAL )
-	MemTracker::OnAlloc(mem, heapSize);
-#endif
 
 	return mem;
 }
@@ -1190,9 +1078,6 @@ void Mem_Free16( void *ptr )
 	assert( currentHeapArena != NULL );
 	currentHeapArena->Free( ptr );
 	
-#if defined( _XENON ) && !defined( _FINAL )
-	MemTracker::OnDelete(ptr);
-#endif
 }
 
 /*

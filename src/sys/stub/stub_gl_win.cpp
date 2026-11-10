@@ -30,9 +30,7 @@
 
 #include "../../renderer/tr_local.h"
 
-#if !defined( _WIN32 ) || !defined( ID_DEDICATED )
 	#error "stub_gl_win.cpp is only for Windows dedicated-server builds"
-#endif
 
 void glAccum(GLenum op, GLfloat value){};
 void glAlphaFunc(GLenum func, GLclampf ref){};

@@ -27,19 +27,7 @@ void idSaveGame::ClearDictionaryCache() {
 }
 
 
-#if defined(_WIN32)
-	#if defined(__has_include)
-		#if __has_include("TypeInfo.h")
-			#include "TypeInfo.h"
-		#else
-			#include "NoGameTypeInfo.h"
-		#endif
-	#else
-		#include "TypeInfo.h"
-	#endif
-#else
 	#include "NoGameTypeInfo.h"
-#endif
 
 // The generated stamp hashes every save-relevant game source, so it changes
 // whenever one of them does. Keep it out of SaveGame.h: through Game_local.h it
@@ -106,13 +94,7 @@ void idSaveGame::PopulateDictionaryCache() {
 }
 
 const char *OpenQ4SaveGameWireABI( void ) {
-#if defined( _WIN32 )
-	#define OPENQ4_SAVEGAME_ABI_OS "windows"
-	#define OPENQ4_SAVEGAME_ABI_COMPILER "msvcabi"
-#elif defined( __APPLE__ )
-	#define OPENQ4_SAVEGAME_ABI_OS "macos"
-	#define OPENQ4_SAVEGAME_ABI_COMPILER "itaniumabi"
-#elif defined( __linux__ )
+#if defined( __linux__ )
 	#define OPENQ4_SAVEGAME_ABI_OS "linux"
 	#define OPENQ4_SAVEGAME_ABI_COMPILER "itaniumabi"
 #else

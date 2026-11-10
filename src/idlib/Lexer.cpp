@@ -1223,12 +1223,8 @@ int idLexer::ReadToken( idToken *token ) {
 
 	if ( !loaded ) {
 // RAVEN BEGIN
-#ifndef _XENON
 // nrausch: should not be an error on xenon since it prevents the precache stuff from working
 		idLib::common->Error( "idLexer::ReadToken: no file loaded" );
-#else
-		idLib::common->Warning( "idLexer::ReadToken: no file loaded" );
-#endif
 // RAVEN END
 		return 0;
 	}

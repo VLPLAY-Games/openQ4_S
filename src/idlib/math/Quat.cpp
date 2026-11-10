@@ -131,8 +131,6 @@ Spherical linear interpolation between two quaternions.
 =====================
 */
 idQuat &idQuat::Slerp( const idQuat &from, const idQuat &to, float t ) {
-#ifdef _XENON
-#else
 	idQuat	temp;
 	float	omega, cosom, sinom, scale0, scale1;
 
@@ -179,7 +177,6 @@ idQuat &idQuat::Slerp( const idQuat &from, const idQuat &to, float t ) {
 
 	*this = ( scale0 * from ) + ( scale1 * temp );
 	return *this;
-#endif
 }
 
 /*

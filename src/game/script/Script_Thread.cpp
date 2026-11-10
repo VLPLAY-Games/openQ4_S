@@ -2204,9 +2204,6 @@ idThread::Event_AwardAchievement
 ================
 */
 void idThread::Event_AwardAchievement( const char *name ) {
-#ifdef _XENON
-	Live()->AwardAchievement(name);
-#endif
 }
 // twhitaker: ceil, floor and intVal
 /*

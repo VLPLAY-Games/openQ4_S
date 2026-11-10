@@ -852,12 +852,8 @@ void idMultiplayerGame::Reset() {
 	PACIFIER_UPDATE;
 	scoreBoard = uiManager->FindGui( "guis/scoreboard.gui", true, false, true );
 
-#ifdef _XENON
-	statSummary = scoreBoard;
-#else
 	statSummary = uiManager->FindGui( "guis/summary.gui", true, false, true );
 	statSummary->SetStateBool( "gameDraw", true );
-#endif
 
 	PACIFIER_UPDATE;
 
@@ -4076,18 +4072,8 @@ void idMultiplayerGame::UpdateMainGui( void ) {
 // cnicholson: We need to setup the custom crosshair so it shows up the first time the player enters the MP settings menu.
 //			   This block checks the current crosshair, and compares it against the list of crosshairs in player.def (mtr_crosshair*) under the 
 //			   player_marine_mp section. If it finds a match, it assigns the crosshair, otherwise, the first found crosshair is used.
-#ifndef _XENON
 	const idDeclEntityDef *defCH = static_cast<const idDeclEntityDef*>( declManager->FindType( DECL_ENTITYDEF, "player_marine_mp", false, true ) );
-#else
-	bool insideLevelLoad = declManager->GetInsideLoad();
-	if ( !insideLevelLoad ) {
-		declManager->SetInsideLoad( true );
-	}
-	const idDeclEntityDef *defCH = static_cast<const idDeclEntityDef*>( declManager->FindType( DECL_ENTITYDEF, "player_marine_mp_ui", false, false ) );
-	declManager->SetInsideLoad( insideLevelLoad );
-#endif
 
-#ifndef _XENON
 	idStr currentCrosshair = cvarSystem->GetCVarString("g_crosshairCustomFile");
 
 	const idKeyValue* kv = defCH->dict.MatchPrefix("mtr_crosshair", NULL);
@@ -4113,45 +4099,9 @@ void idMultiplayerGame::UpdateMainGui( void ) {
 
 
 	cvarSystem->SetCVarString("g_crosshairCustomFile", newCrosshair.c_str());
-#endif
 
 
 //asalmon: Set up a state var for match type of Xbox 360
-#ifdef _XENON
-	mainGui->SetStateBool("CustomHost", Live()->IsCustomHost());
-	mainGui->SetStateInt("MatchType", Live()->GetMatchtype());
-	mainGui->SetStateString("si_gametype", gameLocal.serverInfo.GetString("si_gametype"));
-	const char *damage; 
-	if (gameLocal.serverInfo.GetBool("si_teamdamage")){
-		damage = "Yes" ; 
-	}
-	else {
-		damage = "No";
-	}
-	mainGui->SetStateString("si_teamdamage", damage);
-	const char *shuffle; 
-	if (gameLocal.serverInfo.GetBool("si_shuffleMaps")){
-		shuffle = "Yes" ; 
-	}
-	else {
-		shuffle = "No";
-	}
-	mainGui->SetStateString("si_shuffleMaps", shuffle);
-	mainGui->SetStateString("si_fraglimit", gameLocal.serverInfo.GetString("si_fraglimit"));
-	mainGui->SetStateString("si_capturelimit", gameLocal.serverInfo.GetString("si_capturelimit"));
-	mainGui->SetStateString("si_timelimit", gameLocal.serverInfo.GetString("si_timelimit"));
-
-// mekberg: send spectating to the mainGui.
-	if ( gameLocal.GetLocalPlayer( ) ) {
-		mainGui->SetStateBool( "spectating", gameLocal.GetLocalPlayer( )->spectating );
-		if( gameLocal.gameType == GAME_TOURNEY ) {
-			// additionally in tourney, indicate whether the player is voluntarily spectating
-			mainGui->SetStateBool( "tourneyspectating", !idStr::Icmp( gameLocal.GetLocalPlayer()->GetUserInfo()->GetString( "ui_spectate" ), "Spectate" ) );
-		}
-	} else {
-		mainGui->SetStateBool( "spectating", false );
-	}
-#endif
 // RAVEN END
 
 }
@@ -4408,9 +4358,6 @@ void idMultiplayerGame::DisableMenu( void ) {
 		gameLocal.GetLocalPlayer()->disableHud = false;
 //RAVEN BEGIN
 //asalmon: make the scoreboard on Xenon close
-#ifdef _XENON
-		gameLocal.GetLocalPlayer()->scoreBoardOpen = false;
-#endif
 //RAVEN END
 		if( gameLocal.GetLocalPlayer()->mphud)	{
 			gameLocal.GetLocalPlayer()->mphud->Activate( true, gameLocal.time );
@@ -4434,10 +4381,6 @@ idMultiplayerGame::SetMapShot
 ================
 */
 void idMultiplayerGame::SetMapShot( void ) {
-#ifdef _XENON	
-	// Should not be used
-	assert( 0 );
-#else
 	char screenshot[ MAX_STRING_CHARS ];
 	const idDict *dict = NULL;
 	GetSelectedMapDeclFromList( mainGui, "mapList", dict );
@@ -4448,7 +4391,6 @@ void idMultiplayerGame::SetMapShot( void ) {
 	const idMaterial *mat = declManager->FindMaterial( screenshot );
 	mat->SetSort( SS_GUI );
 // RAVEN END
-#endif
 }
 
 /*
@@ -4483,24 +4425,13 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 		return "continue";
 	}
 	
-#ifdef _XENON
-	if ( currentMenu == 0 && (session->GetActiveGUI() != scoreBoard) ) {
-#else
 	if ( currentMenu == 0 ) {
-#endif
 		return NULL; // this will tell session to not send us events/commands anymore
 	}
 
 	if ( currentMenu == 1 ) {
 		currentGui = mainGui;
 	} 
-#ifdef _XENON
-	else if (session->GetActiveGUI() != scoreBoard) {
-		currentGui = msgmodeGui;
-	} else {
-		currentGui = scoreBoard;
-	}
-#else
 	else if( currentMenu == 2 ) {
 		currentGui = msgmodeGui;
 // RITUAL BEGIN
@@ -4515,7 +4446,6 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 		currentGui = mainGui;
 	}
 // RITUAL END
-#endif
 	
 
  	args.TokenizeString( _menuCommand, false );
@@ -4846,10 +4776,6 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			mainGui->StateChanged( gameLocal.time );
 			continue;
 		} else if ( !idStr::Icmp( cmd, "setVoteMapList" ) ) {
-#ifdef _XENON
-			// Xenon should not get here
-			assert( 0 );
-#else
 			int gameTypeInt = mainGui->GetStateInt( "currentGametype" );
 			const char *gameType = NULL;
 			switch ( gameTypeInt ) {
@@ -4894,13 +4820,8 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			}
 			mainGui->StateChanged( gameLocal.time );
 			
-#endif
 			continue;
 		} else if ( !idStr::Icmp( cmd, "setVoteData" ) ) {
-#ifdef _XENON
-			// Xenon should not get here
-			assert( 0 );
-#else
 			// push data into the vote_ cvars so the UI can start at where we currently are
 			int players;
 			for ( players=0; players<gameLocal.numClients; players++ ) { 
@@ -4938,13 +4859,8 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			mainGui->SetStateInt( "si_shuffleteams", 0 );
 			mainGui->StateChanged( gameLocal.time );
 			mainGui->HandleNamedEvent( "gametypeChange" );
-#endif
 			continue;
 		} else if ( !idStr::Icmp( cmd, "populateServerInfo" ) ) {
-#ifdef _XENON
-			// Xenon should not get here
-			assert( 0 );
-#else
 			mainGui->SetStateString( "serverInfoList_item_0", va( "%s:\t%s", common->GetLocalizedString( "#str_107725" ), gameLocal.serverInfo.GetString( "si_name" ) ) );
 			idStr serverAddress = networkSystem->GetServerAddress( );
 			mainGui->SetStateString( "serverInfoList_item_1", va( "%s:\t%s", common->GetLocalizedString( "#str_107726" ), serverAddress.c_str() ) );
@@ -4969,7 +4885,6 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			mainGui->SetStateString( "serverInfoList_item_7", va( "%s:\t%s", common->GetLocalizedString( "#str_107663" ), gameLocal.serverInfo.GetString( "si_maxPlayers" ) ) );
 			mainGui->SetStateString( "serverInfoList_item_8", va( "%s:\t%s", common->GetLocalizedString( "#str_107664" ), gameLocal.serverInfo.GetString( "si_teamDamage" ) ) );
 			mainGui->SetStateString( "serverInfoList_item_9", va( "%s:\t%s", common->GetLocalizedString( "#str_104254" ), gameLocal.serverInfo.GetString( "si_spectators" ) ) );
-#endif
 			continue;
 		// handler for the server admin tab (normal stuff)
 		} else if ( !idStr::Icmp( cmd, "checkAdminPass" )) {
@@ -5007,10 +4922,6 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			continue;
 		// handler for populating the map list; called both on open and on change gametype so it'll show the right maps
 		} else if ( !idStr::Icmp( cmd, "initServerAdminMapList" ) ) {
-#ifdef _XENON
-			// Xenon should not get here
-			assert( 0 );
-#else
 			// RAVEN BEGIN
 // mekberg: get localized string.
 			const char *mapName = gameLocal.serverInfo.GetString( "si_map" );
@@ -5044,7 +4955,6 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			PopulateMapListForGameType( mainGui, "sa_mapList", gameType, gameLocal.serverInfo.GetString( "si_map" ), true, NULL );
 			mainGui->SetStateString( "sa_mapList_sel_0", "-1" );
 			mainGui->StateChanged( gameLocal.time );
-#endif
 			continue;
 		// handler for updating the current map in the name
 		} else if ( !idStr::Icmp( cmd, "serverAdminUpdateMap" ) ) {
@@ -5197,10 +5107,6 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			}
 			continue;
 		} else if (	!idStr::Icmp( cmd, "MAPScan" ) ) {
-#ifdef _XENON
-			// Xenon should not get here
-			assert( 0 );
-#else
 			const char *gametype = gameLocal.serverInfo.GetString( "si_gameType" );
 			if ( gametype == NULL || *gametype == 0 || idStr::Icmp( gametype, "singleplayer" ) == 0 ) {
 				gametype = "DM";
@@ -5224,7 +5130,6 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			// set the current level shot
 			SetMapShot(	);
 			mainGui->StateChanged( gameLocal.time );
-#endif
 			return "continue";
 		} else if (	!idStr::Icmp( cmd, "click_maplist" ) ) {
 			int mapSelection = ResolveListSelectionFromUI( mainGui, "mapList", true );
@@ -5330,18 +5235,8 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 //			   agasint the list of crosshairs in player.def under the player_marine_mp section. If it finds a match, it assigns the 
 //			   crosshair to the next one in the list. If there isn't one, or if its the end of the list, the first found crosshair is used.
 		else if ( !idStr::Icmp( cmd, "chooseCrosshair" ) ) {
-#ifndef _XENON
 
-#ifndef _XENON
 			const idDeclEntityDef *def = static_cast<const idDeclEntityDef*>( declManager->FindType( DECL_ENTITYDEF, "player_marine_mp", false, true ) );
-#else
-			bool insideLevelLoad = declManager->GetInsideLoad();
-			if ( !insideLevelLoad ) {
-				declManager->SetInsideLoad( true );
-			}
-			const idDeclEntityDef *def = static_cast<const idDeclEntityDef*>( declManager->FindType( DECL_ENTITYDEF, "player_marine_mp_ui", false, false ) );
-			declManager->SetInsideLoad( insideLevelLoad );
-#endif
 
 			idStr currentCrosshair = cvarSystem->GetCVarString("g_crosshairCustomFile");
 
@@ -5368,7 +5263,6 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			}			
 
 			cvarSystem->SetCVarString("g_crosshairCustomFile", newCrosshair.c_str());
-#endif		
 		}
 // RAVEN END
 		else if( !idStr::Icmp( cmd, "friend" ) ) {
@@ -5417,9 +5311,6 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 //RAVEN BEGIN
 //asalmon: pass through some commands that need to be handled in the main menu handle function
 		else if(strstr( cmd, "LiveInviteAccept" ) == cmd){
-#ifdef _XENON
-			Live()->SetInvite();
-#endif
 		}
 		else if ((strstr( cmd, "FilterMPMapList" ) == cmd) 
 			|| (strstr( cmd, "AddMapLive" ) == cmd) 
@@ -6712,7 +6603,6 @@ void idMultiplayerGame::CallVote_f( const idCmdArgs &args ) {
 
 // RAVEN BEGIN
 // shouchard: added voice mute and unmute console commands; sans XBOX to not step on their live voice stuff
-#ifndef _XBOX
 /*
 ================
 idMultiplayerGame::VoiceMute_f
@@ -6740,7 +6630,6 @@ void idMultiplayerGame::VoiceUnmute_f( const idCmdArgs &args ) {
 }
 
 // RAVEN END
-#endif // _XBOX
 
 // RAVEN BEGIN
 /*
@@ -7204,10 +7093,6 @@ void idMultiplayerGame::ServerCallVote( int clientNum, const idBitMsg &msg ) {
 			break;
 		}
 		case VOTE_MAP: {
-#ifdef _XENON
-			// Xenon should not get here
-			assert( 0 );
-#else
 			if ( idStr::FindText( gameLocal.serverInfo.GetString( "si_map" ), value ) != -1 ) {
 
 				// mekberg: localized string
@@ -7242,7 +7127,6 @@ void idMultiplayerGame::ServerCallVote( int clientNum, const idBitMsg &msg ) {
 			}
 			ServerStartVote( clientNum, voteIndex, value );
 			ClientStartVote( clientNum, va( common->GetLocalizedString( "#str_104256" ), dict ? dict->GetString( "name" ) : value ) );
-#endif
 			break;
 		}
 		case VOTE_BUYING: {

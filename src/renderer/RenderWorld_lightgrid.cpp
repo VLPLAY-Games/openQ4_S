@@ -23,9 +23,7 @@ GNU General Public License for more details.
 #include "RendererModule.h"
 #include "RendererUpload.h"
 #include "../imagetools/DXT/DXTCodec.h"
-#if !defined( _WIN32 )
 #include <unistd.h>
-#endif
 
 static const char *LGRID_FILE_ID = "LGRID";
 static const int LIGHTGRID_PACK_MAGIC = ( 'L' << 0 ) | ( 'G' << 8 ) | ( 'P' << 16 ) | ( 'K' << 24 );
@@ -2802,14 +2800,8 @@ static int LightGrid_GetBakeWorkerCount() {
 
 	// platform CPU count, not SDL: renderer sources must stay free of
 	// windowing-library references so the module build never links SDL
-#if defined( _WIN32 )
-	SYSTEM_INFO systemInfo;
-	GetNativeSystemInfo( &systemInfo );
-	const int logicalCpuCount = ( int )systemInfo.dwNumberOfProcessors;
-#else
 	const long onlineCpus = sysconf( _SC_NPROCESSORS_ONLN );
 	const int logicalCpuCount = onlineCpus > 0 ? ( int )onlineCpus : 1;
-#endif
 	if ( logicalCpuCount > 1 ) {
 		return idMath::ClampInt( 1, LIGHTGRID_BAKE_MAX_WORKERS, logicalCpuCount - 1 );
 	}

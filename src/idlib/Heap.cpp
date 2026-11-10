@@ -38,14 +38,10 @@ void Memory::Error(const char *errStr)
 #ifndef _RV_MEM_SYS_SUPPORT
 
 #ifndef USE_LIBC_MALLOC
-	#ifdef _XBOX
-		#define USE_LIBC_MALLOC		1
-	#else
 // RAVEN BEGIN
 // scork:  changed this to a 1, since 0 will crash Radiant if you BSP large maps ~3 times because of high watermark-mem that never gets freed.
 		#define USE_LIBC_MALLOC		1
 // RAVEN END
-	#endif
 #endif
 
 #ifndef CRASH_ON_STATIC_ALLOCATION
@@ -57,12 +53,11 @@ void Memory::Error(const char *errStr)
 inline
 void *local_malloc(size_t size)
 {
-#ifndef _XENON
 // RAVEN BEGIN
 // jsinger: attempt to eliminate cross-DLL allocation issues
 	#ifdef RV_UNIFIED_ALLOCATOR
 		return Memory::Allocate(size);
-	#else
+#else
 		void *addr = malloc(size);
 		if( !addr && size ) {
 			common->FatalError( "Out of memory" );
@@ -70,33 +65,26 @@ void *local_malloc(size_t size)
 		return( addr );
 	#endif  // RV_UNIFIED_ALLOCATOR
 // RAVEN END
-#else
-#endif
 }
 
 inline
 void local_free(void *ptr)
 {
-#ifndef _XENON
 // RAVEN BEGIN
 // jsinger: attempt to eliminate cross-DLL allocation issues
 	#ifdef RV_UNIFIED_ALLOCATOR
 		Memory::Free(ptr);
-	#else
+#else
 		return free(ptr);
 	#endif  // RV_UNIFIED_ALLOCATOR
 // RAVEN END
-#else
-#endif
 }
 // RAVEN END
 
 // The usable-size query local_msize needs lives in a different header on every
 // platform, and precompiled.h only pulls <malloc.h> in for the Windows build.
 #if !defined( RV_UNIFIED_ALLOCATOR )
-	#if defined( __APPLE__ )
-		#include <malloc/malloc.h>
-	#elif defined( __ANDROID__ ) || defined( __linux__ ) || defined( _WIN32 )
+#if defined( __ANDROID__ ) || defined( __linux__ ) || defined( _WIN32 )
 		#include <malloc.h>
 	#endif
 #endif
@@ -123,10 +111,6 @@ inline size_t local_msize( void *ptr )
 	}
 #ifdef RV_UNIFIED_ALLOCATOR
 	return Memory::MSize( ptr );
-#elif defined( __APPLE__ )
-	return malloc_size( ptr );
-#elif defined( _WIN32 )
-	return _msize( ptr );
 #elif defined( __ANDROID__ ) || defined( __linux__ )
 	return malloc_usable_size( ptr );
 #else
@@ -666,21 +650,6 @@ void idHeap::Free16( void *p ) {
 //RAVEN END
 }
 
-#if USE_LIBC_MALLOC && defined( _WINDOWS )
-/*
-================
-HeapSizeToDword
-================
-*/
-static dword HeapSizeToDword( size_t allocationSize ) {
-	if ( allocationSize > static_cast<size_t>( UINT_MAX ) ) {
-		idLib::Error( "idHeap::Msize: allocation exceeds the supported dword range" );
-		return UINT_MAX;
-	}
-
-	return static_cast<dword>( allocationSize );
-}
-#endif
 
 /*
 ================
@@ -699,28 +668,7 @@ dword idHeap::Msize( void *p ) {
 	}
 
 #if USE_LIBC_MALLOC
-	#ifdef _WINDOWS
-//RAVEN BEGIN
-//amccarthy:  allocation tracking
-		#ifdef _DEBUG
-			byte *ptr = ((byte *)p) - MALLOC_HEADER_SIZE;
-// jsinger: attempt to eliminate cross-DLL allocation issues
-			#ifdef RV_UNIFIED_ALLOCATOR
-						return HeapSizeToDword( Memory::MSize( ptr ) );
-			#else
-						return HeapSizeToDword( _msize( ptr ) );
-			#endif  // RV_UNIFIED_ALLOCATOR
-		#else
-			#ifdef RV_UNIFIED_ALLOCATOR
-						return HeapSizeToDword( Memory::MSize( p ) );
-			#else
-						return HeapSizeToDword( _msize( p ) );
-			#endif  // RV_UNIFIED_ALLOCATOR
-		#endif
-//RAVEN END
-	#else
 		return 0;
-	#endif
 #else
 	switch( ((byte *)(p))[-1] ) {
 		case SMALL_ALLOC: {
@@ -1951,7 +1899,7 @@ void Mem_EnableLeakTest( const char *name ) {
 }
 
 
-#else /* !ID_DEBUG_MEMORY */
+#else
 
 #undef		Mem_Alloc
 #undef		Mem_ClearedAlloc
@@ -2130,7 +2078,6 @@ void Mem_DumpCompressed( const char *fileName, memorySortType_t memSort, int sor
 			}
 // RAVEN BEGIN
 // dluetscher: removed the call stack info for better consolidation of info and speed of dump
-#ifndef _XENON
 			for ( j = 0; j < MAX_CALLSTACK_DEPTH; j++ ) {
 				if ( a->callStack[j] != b->callStack[j] ) {
 					break;
@@ -2139,7 +2086,6 @@ void Mem_DumpCompressed( const char *fileName, memorySortType_t memSort, int sor
 			if ( j < MAX_CALLSTACK_DEPTH ) {
 				continue;
 			}
-#endif
 // RAVEN END
 			if ( idStr::Cmp( a->fileName, b->fileName ) != 0 ) {
 				continue;
@@ -2227,25 +2173,6 @@ void Mem_DumpCompressed( const char *fileName, memorySortType_t memSort, int sor
 
 // RAVEN BEGIN
 // dluetscher: changed xenon version to output anything above 1K to the console 
-#ifdef _XENON
-	// write list to debug output and console
-	for ( a = sortedAllocInfo; a; a = nexta ) {
-		nexta = a->next;
-		if ( (a->size >> 10) > 0 ) {
-
-			idLib::common->Printf("size: %6d KB, allocs: %5d: %s, line: %d, call stack: %s\r\n",
-						(a->size >> 10), a->numAllocs, Mem_CleanupFileName(a->fileName),
-								a->lineNumber, idLib::sys->GetCallStackStr( a->callStack, MAX_CALLSTACK_DEPTH ) );
-
-		}
-		::local_free( a );
-	}
-
-	idLib::sys->ShutdownSymbols();
-
-	idLib::common->Printf("%8d total memory blocks allocated\r\n", numBlocks );
-	idLib::common->Printf("%8d KB memory allocated\r\n", ( totalSize >> 10 ) );
-#else
 // RAVEN END
 	FILE *f;
 
@@ -2272,7 +2199,6 @@ void Mem_DumpCompressed( const char *fileName, memorySortType_t memSort, int sor
 	fprintf( f, "%8d KB memory allocated\r\n", ( totalSize >> 10 ) );
 
 	fclose( f );
-#endif
 }
 
 /*

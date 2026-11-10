@@ -303,10 +303,6 @@ public:
 	void					StopTargetEffect	( void );
 
 protected:
-#ifdef _XENON
-	idActor*				bestEnemy;
-	void					AutoAim( idPlayer* player, const idVec3& origin, idVec3& dir );
-#endif
 	void					LaunchHitScan		( const idVec3& origin, const idVec3& dir, const idVec3& jointOrigin );
 	void					LaunchProjectile	( const idVec3& origin, const idVec3& dir, const idVec3& pushVelocity );
 	void					LaunchProjectiles	();

@@ -143,13 +143,6 @@ void Posix_ClearSigs( ) {
 	action.sa_flags = 0;
 
 	for ( int i = 0; signalRoutes[ i ].signum != -1; ++i ) {
-#if defined( __ANDROID__ )
-		// Android's runtime owns fatal signal handlers, including deliberate
-		// faults used by ART. Install/reset only our graceful quit routes.
-		if ( !signalRoutes[ i ].graceful ) {
-			continue;
-		}
-#endif
 		if ( sigaction( signalRoutes[ i ].signum, &action, NULL ) != 0 ) {
 			Sys_Printf( "Failed to reset %s handler: %s\n", signalRoutes[ i ].name, strerror( errno ) );
 		}
@@ -268,13 +261,6 @@ void Posix_InitSigs( ) {
 #endif
 
 	for ( int i = 0; signalRoutes[ i ].signum != -1; ++i ) {
-#if defined( __ANDROID__ )
-		// Android's runtime owns fatal signal handlers, including deliberate
-		// faults used by ART. Install/reset only our graceful quit routes.
-		if ( !signalRoutes[ i ].graceful ) {
-			continue;
-		}
-#endif
 		if ( sigaction( signalRoutes[ i ].signum, &action, NULL ) != 0 ) {
 			Sys_Printf( "Failed to set %s handler: %s\n", signalRoutes[ i ].name, strerror( errno ) );
 		}

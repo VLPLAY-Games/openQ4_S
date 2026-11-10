@@ -47,7 +47,7 @@
 		#if defined( _DEBUG )
 			#define ID_BT_STUB
 		#endif
-	#else
+#else
 		#define ID_BT_STUB
 	#endif
 #endif
@@ -55,7 +55,7 @@
 #ifndef ID_ENFORCE_KEY
 #	if !defined( ID_DEDICATED ) && !defined( ID_DEMO_BUILD )
 #		define ID_ENFORCE_KEY 0
-#	else
+#else
 // twhitaker: just leave it undefined
 // TTimo: that breaks the ability to control it from command line settings with !win32 builds, but I can live with it
 //#		define ID_ENFORCE_KEY 0
@@ -72,7 +72,5 @@
 // than the demo pak, even if productid is present.
 //#define ID_DEMO_BUILD
 
-#if !defined( _WIN32 )
 	// DOA? didn't see the pbuffer code used at all through the code
 	#define TMP_PBUFFSTUB
-#endif

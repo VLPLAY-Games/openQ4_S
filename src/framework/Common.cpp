@@ -140,13 +140,7 @@ idCVar jobs_deterministic( "jobs_deterministic", OPENQ4_JOBS_DETERMINISTIC_DEFAU
 idCVar jobs_numThreads( "jobs_numThreads", "0", CVAR_INTEGER | CVAR_ARCHIVE | CVAR_INIT | CVAR_SYSTEM, "portable job worker threads (0 = automatic, 1..32 = explicit)", 0, 32, idCmdSystem::ArgCompletion_Integer<0,32> );
 idCVar jobs_queueCapacity( "jobs_queueCapacity", "64", CVAR_INTEGER | CVAR_ARCHIVE | CVAR_INIT | CVAR_SYSTEM, "maximum admitted job lists; saturated submissions fail explicitly and remain retryable", 1, 1024, idCmdSystem::ArgCompletion_Integer<1,1024> );
 #define ASYNCSOUND_INFO "0: mix sound inline, 1: memory mapped async mix, 2: callback mixing, 3: write async mix"
-#if defined( MACOS_X )
-idCVar com_asyncSound( "com_asyncSound", "2", CVAR_INTEGER|CVAR_SYSTEM|CVAR_ROM, ASYNCSOUND_INFO );
-#elif defined( __linux__ )
 idCVar com_asyncSound( "com_asyncSound", "3", CVAR_INTEGER|CVAR_SYSTEM|CVAR_ROM, ASYNCSOUND_INFO );
-#else
-idCVar com_asyncSound( "com_asyncSound", "1", CVAR_INTEGER|CVAR_SYSTEM, ASYNCSOUND_INFO, 0, 1 );
-#endif
 idCVar com_productionMode("com_productionMode", "0", CVAR_SYSTEM | CVAR_BOOL, "0 - no special behavior, 1 - building a production build, 2 - running a production build");
 
 idCVar com_forceGenericSIMD( "com_forceGenericSIMD", "0", CVAR_BOOL | CVAR_SYSTEM | CVAR_NOCHEAT, "force generic platform independent SIMD" );
@@ -236,20 +230,6 @@ static void Common_MigrateLinuxLegacyLowVRamTexturePreset( void ) {
 #endif
 }
 
-static void Common_MigrateLegacyBorderlessWindowDefault( void ) {
-#if defined( _WIN32 )
-	if ( r_borderlessDefaultMigrated.GetBool() ) {
-		return;
-	}
-
-	if ( !cvarSystem->GetCVarBool( "r_borderless" ) ) {
-		common->Printf( "Migrating legacy display config: enabling borderless windowed presentation\n" );
-		cvarSystem->SetCVarBool( "r_borderless", true, CVAR_ARCHIVE );
-	}
-
-	r_borderlessDefaultMigrated.SetBool( true );
-#endif
-}
 
 /*
 ==================
@@ -409,9 +389,6 @@ bool Sys_SDL_IsGameWindowShown( void );
 static bool Common_IsGameWindowShown( void ) {
 #if defined( USE_SDL3 )
 	return Sys_SDL_IsGameWindowShown();
-#elif defined( _WIN32 )
-	// Win32 IsWindowVisible() reports TRUE for minimized windows
-	return Sys_IsWindowVisible();
 #else
 	return true;
 #endif
@@ -817,12 +794,6 @@ openQ4_ShouldCacheEntityDefMedia
 bool openQ4_ShouldCacheEntityDefMedia( bool noCaching ) {
 	return !noCaching && openQ4_GetActiveToolFlags( OPENQ4_ENTITYDEF_MEDIA_CACHE_TOOL_MASK ) == 0;
 }
-
-#ifdef _WIN32
-HWND			com_hwndMsg = NULL;
-bool			com_outputMsg = false;
-unsigned int	com_msgID = -1;
-#endif
 
 #ifdef __DOOM_DLL__
 idGame *		game = NULL;
@@ -1275,37 +1246,6 @@ void idCommonLocal::EndRedirect( void ) {
 	rd_flush = NULL;
 }
 
-#ifdef _WIN32
-
-/*
-==================
-EnumWindowsProc
-==================
-*/
-BOOL CALLBACK EnumWindowsProc( HWND hwnd, LPARAM lParam ) {
-	char buff[1024];
-
-	::GetWindowText( hwnd, buff, sizeof( buff ) );
-	if ( idStr::Icmpn( buff, EDITOR_WINDOWTEXT, idStr::Length( EDITOR_WINDOWTEXT ) ) == 0 ) {
-		com_hwndMsg = hwnd;
-		return FALSE;
-	}
-	return TRUE;
-}
-
-/*
-==================
-FindEditor
-==================
-*/
-bool FindEditor( void ) {
-	com_hwndMsg = NULL;
-	EnumWindows( EnumWindowsProc, 0 );
-	return !( com_hwndMsg == NULL );
-}
-
-#endif
-
 /*
 ==================
 idCommonLocal::CloseLogFile
@@ -1467,14 +1407,6 @@ void idCommonLocal::VPrintf( const char *fmt, va_list args ) {
 	// print to script debugger server
 	// DebuggerServerPrint( msg );
 
-#if 0	// !@#
-#if defined(_DEBUG) && defined(WIN32)
-	if ( strlen( msg ) < 512 ) {
-		TRACE( msg );
-	}
-#endif
-#endif
-
 	// logFile
 	if ( com_logFile.GetInteger() && !logFileFailed && fileSystem->IsInitialized() ) {
 		static bool recursing;
@@ -1536,25 +1468,6 @@ void idCommonLocal::VPrintf( const char *fmt, va_list args ) {
 		// let session redraw the animated loading screen if necessary
 		session->PacifierUpdate();
 	}
-
-#ifdef _WIN32
-
-	if ( com_outputMsg ) {
-		if ( com_msgID == -1 ) {
-			com_msgID = ::RegisterWindowMessage( DMAP_MSGID );
-			if ( !FindEditor() ) {
-				com_outputMsg = false;
-			} else {
-				Sys_ShowWindow( false );
-			}
-		}
-		if ( com_hwndMsg ) {
-			ATOM atom = ::GlobalAddAtom( msg );
-			::PostMessage( com_hwndMsg, com_msgID, 0, static_cast<LPARAM>(atom) );
-		}
-	}
-
-#endif
 }
 
 /*
@@ -1746,12 +1659,6 @@ void idCommonLocal::DumpWarnings( void ) {
 		warningFile->ForceFlush();
 
 		fileSystem->CloseFile( warningFile );
-
-#if defined(_WIN32) && !defined(_DEBUG)
-		idStr	osPath;
-		osPath = fileSystem->RelativePathToOSPath( "warnings.txt", "fs_savepath" );
-		WinExec( va( "Notepad.exe %s", osPath.c_str() ), SW_SHOW );
-#endif
 	}
 }
 
@@ -2629,23 +2536,9 @@ static bool Common_SettingsSaveDirectory( std::string& directory, std::string& e
 		return false;
 	}
 	size_t prefix = 0;
-#ifdef _WIN32
-	for ( char& c : root ) if ( c == '\\' ) c = '/';
-	if ( root.size() >= 3 && ( ( root[0] >= 'A' && root[0] <= 'Z' ) || ( root[0] >= 'a' && root[0] <= 'z' ) ) &&
-		root[1] == ':' && root[2] == '/' ) {
-		prefix = 3;
-	} else if ( root.size() > 2 && root[0] == '/' && root[1] == '/' ) {
-		// UNC paths require both a server and a share before our game directory.
-		const size_t share = root.find( '/', 2 );
-		if ( share != std::string::npos && share + 1 < root.size() ) prefix = 2;
-	}
-#elif defined( __SWITCH__ )
 	// Horizon absolute paths carry a device prefix ("sdmc:/...").
 	if ( root.compare( 0, 6, "sdmc:/" ) == 0 ) prefix = 6;
 	else if ( root[0] == '/' ) prefix = 1;
-#else
-	if ( root[0] == '/' ) prefix = 1;
-#endif
 	if ( prefix == 0 ) {
 		error = "configuration save root must be an absolute native path";
 		return false;
@@ -2666,9 +2559,6 @@ static void Common_CreateSettingsParent( const std::string& path ) {
 	// CreateOSPath recognizes only the native separator. DurableFile accepts
 	// these exact slash paths without VFS case correction or search fallbacks.
 	std::string nativePath = path;
-#ifdef _WIN32
-	for ( char& c : nativePath ) if ( c == '/' ) c = '\\';
-#endif
 	fileSystem->CreateOSPath( nativePath.c_str() );
 }
 
@@ -3366,9 +3256,6 @@ bool Common_CapturePerformancePresetSignals(openq4::PerformancePresetSignals& ou
  signals.raspberryPi=Common_HasRaspberryPiHostSignal();
  signals.steamDeck=idStr::Icmp(com_platformProfile.GetString(),"steamdeck")==0 || Common_HasSteamDeckHostSignal();
  signals.arm64=Common_HostCpuIsArm64();
-#if defined( __ANDROID__ )
- signals.mobile=true;
-#endif
 #if defined( USE_SDL3 )
  // Unlike the legacy platform getters, SDL reports 0 on query failure instead
  // of inventing 512/1024/2048 MiB. Use one observation on all supported hosts.
@@ -5159,29 +5046,6 @@ static void Common_AppendPreferredLanguagesFromLocaleList( const char *localeLis
 	}
 }
 
-#if defined( _WIN32 )
-static const char *Common_MapWindowsPrimaryLanguage( WORD primaryLanguage ) {
-	switch ( primaryLanguage ) {
-		case LANG_ENGLISH: return "english";
-		case LANG_SPANISH: return "spanish";
-		case LANG_FRENCH: return "french";
-		case LANG_ITALIAN: return "italian";
-		case LANG_GERMAN: return "german";
-		case LANG_RUSSIAN: return "russian";
-		case LANG_POLISH: return "polish";
-		case LANG_KOREAN: return "korean";
-		case LANG_JAPANESE: return "japanese";
-		case LANG_CHINESE: return "chinese";
-		case LANG_PORTUGUESE: return "brazilian";
-		case LANG_CZECH: return "czech";
-		case LANG_HUNGARIAN: return "hungarian";
-		case LANG_TURKISH: return "turkish";
-		case LANG_UKRAINIAN: return "ukrainian";
-		default: return NULL;
-	}
-}
-#endif
-
 static void Common_GetOSPreferredLanguages( idStrList &preferredLanguages ) {
 	preferredLanguages.Clear();
 
@@ -5194,12 +5058,6 @@ static void Common_GetOSPreferredLanguages( idStrList &preferredLanguages ) {
 		}
 		SDL_free( locales );
 	}
-#endif
-
-#if defined( _WIN32 )
-	Common_AppendUniqueLanguage(
-		preferredLanguages,
-		Common_MapWindowsPrimaryLanguage( PRIMARYLANGID( GetUserDefaultUILanguage() ) ) );
 #endif
 
 	const char *envNames[] = {
@@ -6859,16 +6717,8 @@ void idCommonLocal::Async( void ) {
 	}
 
 	// don't skip too many
-#if defined( __ANDROID__ )
-	// Android may freeze the entire process between timer wakes. Bound every
-	// timescale to ten current tics, including the first call after foreground,
-	// rather than replaying minutes of accelerated input in the async worker.
-	const bool boundCatchup = true;
-	const double clampedCatchupMsec = 10.0 * ticMsec;
-#else
 	const bool boundCatchup = smoothSlowTime || timescale == 1.0f;
 	const double clampedCatchupMsec = 10.0 * GetUserCmdMsecFloat();
-#endif
 	if ( boundCatchup && lastTicMsec + clampedCatchupMsec < static_cast<double>( msec ) ) {
 		lastTicMsec = static_cast<double>( msec ) - clampedCatchupMsec;
 	}
@@ -7007,22 +6857,6 @@ static void openQ4_DisableBSEWithWarning( const char *reason, bool showDialog = 
 		common->Warning( "BSE unavailable (%s). Effects will be disabled.", reason ? reason : "unknown reason" );
 	}
 
-#if defined( _WIN32 ) && !defined( ID_DEDICATED )
-	static bool warnedDialog = false;
-	if ( showDialog && !warnedDialog ) {
-		warnedDialog = true;
-
-		char message[1024];
-		idStr::snPrintf(
-			message,
-			sizeof( message ),
-			"BSE initialization failed.\n\nReason: %s\n\nEffects will be disabled.",
-			reason ? reason : "unknown reason"
-		);
-		::MessageBoxA( NULL, message, "openQ4 Warning", MB_OK | MB_ICONWARNING | MB_SYSTEMMODAL );
-	}
-#endif
-
 	::declEffectEdit = NULL;
 	::bseAllocDeclEffect = openQ4_AllocIntegratedBSEDeclEffect;
 	::bse = &bseDisabledLocal;
@@ -7153,9 +6987,6 @@ void idCommonLocal::LoadGameDLL( void ) {
 #ifdef __DOOM_DLL__
 	char			dllPath[ MAX_OSPATH ];
 	char			preferredGameModuleBinary[ MAX_OSPATH ];
-#if defined( MACOS_X ) || defined( __APPLE__ )
-	char			universalGameModuleBinary[ MAX_OSPATH ];
-#endif
 	const char *	selectedModuleBinary;
 
 	gameImport_t	gameImport;
@@ -7167,19 +6998,6 @@ void idCommonLocal::LoadGameDLL( void ) {
 	openQ4_BuildGameModuleBinaryName( gameModuleBaseName, preferredGameModuleBinary );
 	selectedModuleBinary = preferredGameModuleBinary;
 	fileSystem->FindDLL( selectedModuleBinary, dllPath, true );
-
-#if defined( MACOS_X ) || defined( __APPLE__ )
-	// Thin packages retain architecture-specific module names. A universal2
-	// package instead carries a single two-slice module per game variant, so
-	// both executable slices must converge on the same trusted module name.
-	if ( !dllPath[ 0 ] ) {
-		openQ4_BuildGameModuleBinaryNameForArch( gameModuleBaseName, "universal2", universalGameModuleBinary );
-		fileSystem->FindDLL( universalGameModuleBinary, dllPath, true );
-		if ( dllPath[ 0 ] ) {
-			selectedModuleBinary = universalGameModuleBinary;
-		}
-	}
-#endif
 
 	if ( !dllPath[ 0 ] ) {
 		common->FatalError(
@@ -7785,7 +7603,6 @@ void idCommonLocal::InitGame( void ) {
 		cvarSystem->SetModifiedFlags( CVAR_ARCHIVE );
 	}
 	Common_MigrateLinuxLegacyLowVRamTexturePreset();
-	Common_MigrateLegacyBorderlessWindowDefault();
 	Common_MigrateLegacyNetworkRateCaps();
 	Common_MigrateLegacyVRWeaponOffsets();
 	Common_MigrateLegacyAudioDefaults();

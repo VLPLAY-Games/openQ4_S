@@ -322,7 +322,7 @@ on abstract classes only.
 	}																								\
 	idEventFunc<nameofclass> nameofclass::eventCallbacks[] = {
 
-#else // CLASS_STATES_DECLARATION
+#else
 
 // RAVEN BEGIN
 // bdube: added states

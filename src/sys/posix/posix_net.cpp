@@ -733,57 +733,6 @@ void Sys_InitNetworking(void)
 	// haven't been able to clearly pinpoint which standards or RFCs define SIOCGIFCONF, SIOCGIFADDR, SIOCGIFNETMASK ioctls
 	// it seems fairly widespread, in Linux kernel ioctl, and in BSD .. so let's assume it's always available on our targets
 
-#if defined( MACOS_X ) || defined( __APPLE__ )
-	unsigned int ip, mask;
-	struct ifaddrs *ifap, *ifp;
-	
-	num_interfaces = 0;
-	
-	if( getifaddrs( &ifap ) < 0 ) {
-		common->FatalError( "InitNetworking: SIOCGIFCONF error - %s\n", strerror( errno ) );
-		return;
-	}
-	
-	for( ifp = ifap; ifp; ifp = ifp->ifa_next ) {
-		if ( !( ifp->ifa_flags & IFF_UP ) )
-			continue;
-
-		if ( !ifp->ifa_addr )
-			continue;
-
-		if ( ifp->ifa_addr->sa_family != AF_INET )
-			continue;
-
-		if ( !ifp->ifa_netmask )
-			continue;
-		
-		ip = Sys_SockaddrIPv4HostOrder( ifp->ifa_addr );
-		mask = Sys_SockaddrIPv4HostOrder( ifp->ifa_netmask );
-		if ( mask == 0 ) {
-			common->Printf( "Sys_InitNetworking: interface %s has a zero IPv4 netmask - skipped\n",
-				ifp->ifa_name != NULL ? ifp->ifa_name : "<unnamed>" );
-			continue;
-		}
-		
-		if ( ip == INADDR_LOOPBACK ) {
-			common->Printf( "loopback\n" );
-		} else {
-			common->Printf( "IP: " );
-			Sys_PrintSockaddrIPv4( ifp->ifa_addr );
-			common->Printf( "\nNetMask: " );
-			Sys_PrintSockaddrIPv4( ifp->ifa_netmask );
-			common->Printf( "\n" );
-		}
-		if ( num_interfaces < MAX_INTERFACES ) {
-			netint[ num_interfaces ].ip = ip;
-			netint[ num_interfaces ].mask = mask;
-			num_interfaces++;
-		} else {
-			common->Printf( "Sys_InitNetworking: MAX_INTERFACES(%d) hit.\n", MAX_INTERFACES );
-		}
-	}
-	freeifaddrs( ifap );
-#else
 	int		s;
 	char	buf[ MAX_INTERFACES*sizeof( ifreq ) ];
 	ifconf	ifc;
@@ -856,7 +805,6 @@ void Sys_InitNetworking(void)
 		ifindex += sizeof( ifreq );
 	}
 	close( s );
-#endif
 
 	Sys_InitIPv6Interfaces();
 }
@@ -1775,14 +1723,14 @@ int	idTCP::Write(void *data, int size) {
 	// handle EINTR interrupted system call with TEMP_FAILURE_RETRY -  this is probably GNU libc specific
 	#if defined( MSG_NOSIGNAL )
 	if ( ( nbytes = TEMP_FAILURE_RETRY( send( fd, data, size, MSG_NOSIGNAL ) ) ) == -1 ) {
-	#else
+#else
 	if ( ( nbytes = TEMP_FAILURE_RETRY( write( fd, data, size ) ) ) == -1 ) {
 	#endif
 #else
 	  do {
 	#if defined( MSG_NOSIGNAL )
 	    nbytes = send( fd, data, size, MSG_NOSIGNAL );
-	#else
+#else
 	    nbytes = write( fd, data, size );
 	#endif
 	  } while ( nbytes == -1 && errno == EINTR );

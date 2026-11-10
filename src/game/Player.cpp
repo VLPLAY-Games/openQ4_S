@@ -25,12 +25,6 @@ static void ResetOpenQ4TestInput( void );
 
 // RAVEN BEGIN
 // nrausch: support for turning the weapon change ui on and off
-#ifdef _XENON
-#include "../ui/Window.h"
-
-// nrausch: support for direct button input
-#include "../sys/xenon/xen_input.h"
-#endif
 // RAVEN END
 
 idCVar net_predictionErrorDecay( "net_predictionErrorDecay", "112", CVAR_FLOAT | CVAR_GAME | CVAR_NOCHEAT, "time in milliseconds it takes to fade away prediction errors", 0.0f, 200.0f );
@@ -57,9 +51,6 @@ idCVar cl_player_brightskin_team_color( "cl_player_brightskin_team_color", "0.05
 ===============================================================================
 */
 
-#ifdef _XENON
-bool g_ObjectiveSystemOpen = false;
-#endif
 
 // distance between ladder rungs (actually is half that distance, but this sounds better)
 const int LADDER_RUNG_DISTANCE = 32;
@@ -86,10 +77,6 @@ const int	POWERUP_BLINK_TIME	= 1000;			// Time between powerup wear off sounds
 const float MIN_BOB_SPEED		= 5.0f;			// minimum speed to bob and play run/walk animations at
 const int	MAX_RESPAWN_TIME	= 10000;
 const int	RAGDOLL_DEATH_TIME	= 3000;
-#ifdef _XENON
-	const int	RAGDOLL_DEATH_TIME_XEN_SP	= 1000;
-	const int	MAX_RESPAWN_TIME_XEN_SP	= 3000;
-#endif
 const int	CORPSE_SINK_TIME_MS	= 1500;
 const float	CORPSE_SINK_DISTANCE = 16.0f;
 const int	STEPUP_TIME			= 200;
@@ -324,23 +311,6 @@ END_CLASS
 
 // RAVEN BEGIN
 // asalmon: Xenon weapon combo system
-#ifdef _XENON
-nextWeaponCombo_t weaponComboChart[12] = {
-	// up, down, left, right
-	{1,3,2,4},	 // 0: empty slot (select none)
-	{10,0,1,1},
-	{2,2,5,0},
-	{0,7,3,3},
-	{4,4,0,9},
-	{5,5,6,2},
-	{6,6,6,5},
-	{3,7,7,7},
-	{8,8,9,8},
-	{9,9,4,8},
-	{10,1,10,10},
-	{0,0,0,0} 
-};
-#endif
 // RAVEN END
 
 #include "gamesys/WeaponWheelLegacy.inl"
@@ -1284,9 +1254,6 @@ idPlayer::idPlayer() {
 	objectiveSystem			= NULL;
 	objectiveSystemOpen		= false;
 	showNewObjectives		= false;
-#ifdef _XENON
-	g_ObjectiveSystemOpen	= false;
-#endif
 	objectiveButtonReleased = false;
 	cinematicHud			= NULL;
 
@@ -2184,9 +2151,6 @@ void idPlayer::Spawn( void ) {
 		if ( !gameLocal.isMultiplayer ) {
 			objectiveSystem = uiManager->FindGui( spawnArgs.GetString( "wristcomm", "guis/wristcomm.gui" ), true, false, true );
 			objectiveSystemOpen = false;
-#ifdef _XENON
-			g_ObjectiveSystemOpen = objectiveSystemOpen;
-#endif
 		}
 
 		// clear votes
@@ -2688,14 +2652,12 @@ void idPlayer::Save( idSaveGame *savefile ) const {
 	// TOSAVE: const idDeclEntityDef*	cachedWeaponDefs [ MAX_WEAPONS ];	// cnicholson: Save these?
 	// TOSAVE: const idDeclEntityDef*	cachedPowerupDefs [ POWERUP_MAX ];
 
-#ifndef _XENON
  	if ( hud ) {
 		// Save notifications mutate the HUD after its payload was written.
 		savefile->InvalidateUserInterface( hud );
 		hud->SetStateString( "message", common->GetLocalizedString( "#str_102916" ) );
 		hud->HandleNamedEvent( "Message" );
  	}
-#endif
 }
 
 /*
@@ -2796,9 +2758,6 @@ void idPlayer::Restore( idRestoreGame *savefile ) {
 	savefile->ReadUserInterface( cinematicHud, &spawnArgs );
 	savefile->ReadBool( objectiveSystemOpen );
 
-#ifdef _XENON
-	g_ObjectiveSystemOpen = objectiveSystemOpen;
-#endif
 
 	objectiveButtonReleased = false;
 	savefile->ReadBool( disableHud );					// cnicholson: Added unrestored var
@@ -4074,11 +4033,6 @@ void idPlayer::UpdateHudWeapon( int displayWeapon ) {
 	weaponChangeIconsUp = true;
 
 	// if previousWeapon is -1, the weaponChange state won't update it, so manually reset it
-#ifdef _XENON
-	if( previousWeapon == -1 ) {
-		ResetHUDWeaponSwitch();
-	}
-#endif
 }
 
 /*
@@ -4275,12 +4229,6 @@ idPlayer::DrawHUD
 ===============
 */
 void idPlayer::DrawHUD( idUserInterface *_hud ) {
-#ifdef __ANDROID__
-	if ( this == gameLocal.GetLocalPlayer() ) {
-		cvarSystem->SetCVarBool( "ui_touchCanReload", weapon && !spectating && weapon->ClipSize() > 0 );
-		cvarSystem->SetCVarBool( "ui_touchCanZoom", weapon && !spectating && weapon->GetZoomFov() > 0 );
-	}
-#endif
 	idUserInterface * cursor = idPlayer::cursor;
 	if ( _hud ) {
 		_hud->SetStateInt( "radio_audio_emitter", GetSoundEmitter() );
@@ -6067,9 +6015,6 @@ void idPlayer::GiveObjective( const char *title, const char *text, const char *s
 		if ( objectiveSystemOpen ) {
 			objectiveSystemOpen = false;
 			ToggleObjectives ( );
-#ifdef _XENON
-			g_ObjectiveSystemOpen = objectiveSystemOpen;
-#endif
 		}
 	}
 }
@@ -6104,9 +6049,6 @@ void idPlayer::CompleteObjective( const char *title ) {
 	if ( objectiveSystemOpen ) {
 		objectiveSystemOpen = false;
 		ToggleObjectives ( );
-#ifdef _XENON
-		g_ObjectiveSystemOpen = objectiveSystemOpen;
-#endif
 	}
 }
 
@@ -6135,15 +6077,9 @@ void idPlayer::FailObjective ( const char* title ) {
 	}
 	fl.takedamage = true;
 	pfl.objectiveFailed = true;
-#ifdef _XENON
-	playerView.Fade( colorBlack, MAX_RESPAWN_TIME_XEN_SP );
-	minRespawnTime = gameLocal.time + RAGDOLL_DEATH_TIME_XEN_SP;
-	maxRespawnTime = minRespawnTime + MAX_RESPAWN_TIME_XEN_SP;
-#else
 	playerView.Fade( colorBlack, 12000 );
 	minRespawnTime = gameLocal.time + RAGDOLL_DEATH_TIME;
 	maxRespawnTime = minRespawnTime + MAX_RESPAWN_TIME;
-#endif
 }
 
 /*
@@ -6272,27 +6208,6 @@ void idPlayer::Reload( void ) {
 	weapon->Reload();
 }
 
-#ifdef _XENON
-/*
-===============
-idPlayer::ScheduleWeaponSwitch
-===============
-*/
-void idPlayer::ScheduleWeaponSwitch(int weapon)
-{
-	CancelEvents(&EV_Player_SelectWeapon);
-	hud->SetStateInt("player_selectedWeapon", weapon-1);
-	hud->HandleNamedEvent( "weaponSelect" );
-	
-	// nrausch: support for turning the weapon change ui on and off
-	hud->SetPresentationValue( "p_weapswitch::visible", "0", false );
-
-	if ( weapon > 0 ) {
-		const char *weap = spawnArgs.GetString( va( "def_weapon%d", weapon-1 ) );
-		PostEventSec(&EV_Player_SelectWeapon, 0.25f, weap);
-	}
-}
-#endif
 
 /*
 ===============
@@ -6390,44 +6305,6 @@ void idPlayer::NextWeapon( void ) {
 		return;
 	}
 
-#ifdef _XENON
-
-	w = idealWeapon;
-	while( 1 ) {
-		w++;
-		if ( w >= MAX_WEAPONS ) {
-			w = 0;
-		} 
- 		weap = spawnArgs.GetString( va( "def_weapon%d", w ) );
-		if ( !spawnArgs.GetBool( va( "weapon%d_cycle", w ) ) ) {
-			continue;
-		}
-		if ( !weap[ 0 ] ) {
-			continue;
-		}
-		if ( ( inventory.weapons & ( 1 << w ) ) == 0 ) {
-			continue;
-		}
-		if ( inventory.HasAmmo( weap ) ) {
-			break;
-		}
-	}
-
-	if ( ( w != currentWeapon ) && ( w != idealWeapon ) ) {		
-		if ( entityNumber == gameLocal.localClientNum ) {
-			hud->SetPresentationValue( "p_weapswitch::visible", "1", false );
-		}
- 		
- 		if ( gameLocal.isClient ) {
-			return;
-		}
-
-		idealWeapon = w;
-		weaponSwitchTime = gameLocal.time + WEAPON_SWITCH_DELAY;
-		UpdateHudWeapon();
-	}
-
-#else
 
  	if ( gameLocal.isClient ) {
 		return;
@@ -6460,7 +6337,6 @@ void idPlayer::NextWeapon( void ) {
 		UpdateHudWeapon();
 	}
 
-#endif
 // RAVEN END
 }
 
@@ -6485,44 +6361,6 @@ void idPlayer::PrevWeapon( void ) {
 		return;
 	}
 
-#ifdef _XENON
-	
-	w = idealWeapon;
-	while( 1 ) {
-		w--;
-		if ( w < 0 ) {
-			w = MAX_WEAPONS - 1;
-		}
- 		weap = spawnArgs.GetString( va( "def_weapon%d", w ) );
-		if ( !spawnArgs.GetBool( va( "weapon%d_cycle", w ) ) ) {
-			continue;
-		}
-		if ( !weap[ 0 ] ) {
-			continue;
-		}
-		if ( ( inventory.weapons & ( 1 << w ) ) == 0 ) {
-			continue;
-		}
-		if ( inventory.HasAmmo( weap ) ) {
-			break;
-		}
-	}
-
-	if ( ( w != currentWeapon ) && ( w != idealWeapon ) ) {
-		if ( entityNumber == gameLocal.localClientNum ) {
-			hud->SetPresentationValue( "p_weapswitch::visible", "1", false );
-		}
- 		
-		if ( gameLocal.isClient ) {
-			return;
-		}
-
-		idealWeapon = w;
-		weaponSwitchTime = gameLocal.time + WEAPON_SWITCH_DELAY;
-		UpdateHudWeapon();
-	}
-
-#else
 
  	if ( gameLocal.isClient ) {
 		return;
@@ -6554,7 +6392,6 @@ void idPlayer::PrevWeapon( void ) {
 		weaponSwitchTime = gameLocal.time + WEAPON_SWITCH_DELAY;
 		UpdateHudWeapon();
 	}
-#endif
 // RAVEN END
 }
 
@@ -6606,7 +6443,6 @@ void idPlayer::SelectWeapon( int num, bool force ) {
 
 // RAVEN BEGIN
 // nrausch: we have no need for weapon swapping on the xenon, and it gets in the way of the quick weapon select ui
-#ifndef _XENON
 		const char* destWeapon = weapDict->GetString( "def_weapon_swap", NULL );
 
 		if( destWeapon != NULL ) {
@@ -6617,7 +6453,6 @@ void idPlayer::SelectWeapon( int num, bool force ) {
 				num = swapNum;
 			}
 		} 
-#endif
 // RAVEN END
 	} 
 
@@ -6885,11 +6720,6 @@ idPlayer::ActiveGui
 ===============
 */
 idUserInterface *idPlayer::ActiveGui( void ) {
-#ifdef _XENON
-	if ( objectiveSystemOpen ) {
-		return 0;
-	}
-#endif
 	return focusUI;
 }
 
@@ -7543,19 +7373,8 @@ void idPlayer::UpdateFocus( void ) {
 		return;
 	}
 
-#ifndef _XENON
 	cvarSystem->SetCVarInteger( "pm_isZoomed", zoomed ? pm_zoomedSlow.GetInteger() : 0 );
-#endif
 
-#ifdef _XENON
-	if ( cursor ) {
-		if ( weapon ) {
-			cursor->SetStateInt( "autoaim", weapon->AllowAutoAim() ? 1 : 0 );
-		} else {
-			cursor->SetStateInt( "autoaim", 0 );
-		}
-	}
-#endif
 	
 	// With nothing focused, looking for something to focus (a clip model query and several
 	// render-model traces) is only needed a few times a second; a focused target is
@@ -7636,153 +7455,6 @@ void idPlayer::UpdateFocus( void ) {
 		}
  	}
  
-#ifdef _XENON
-
-		bboxTrace.fraction = -1;
-		
-		bestEnemy = NULL;
-		if ( gameLocal.isMultiplayer ) {
-			
-			if ( !weapon || !weapon->AllowAutoAim() ) {
-				usercmdGen->SetSlowJoystick( zoomed ? pm_zoomedSlow.GetInteger() : 100 );
-				if ( cursor ) {
-					cursor->SetStateInt("enemyFocus", 0);
-				}
-				return;
-			}
-			
-			idEntity *ent = NULL;
-			idActor *actor = NULL;
-			bool inside;
-			bool showDebug = cvarSystem->GetCVarBool("pm_showAimAssist");
-			float bDist = cvarSystem->GetCVarInteger("pm_AimAssistDistance");
-			float dist;
-			idFrustum aimArea;
-			float dNear, dFar, size;
-			renderView_t *rv = GetRenderView();
-			float fovY, fovX;
-			// field of view
- 			gameLocal.CalcFov( CalcFov( true ), fovX, fovY );
-			
-		
-			dNear = cvarSystem->GetCVarFloat( "r_znear" );
-			dFar = cvarSystem->GetCVarInteger("pm_AimAssistDistance");
-			
-#ifndef _FINAL
-			if ( cvarSystem->GetCVarInteger("pm_AimAssistTest") != 0 ) {
-				size = dFar * idMath::Tan( DEG2RAD( fovY * 0.5f ) ) * pm_AimAssistFOV.GetFloat()/100.0;
-			} else 
-#endif
-			{
-				size = dFar * idMath::Tan( DEG2RAD( fovY * 0.5f ) ) * weapon->GetAutoAimFOV()/100.0;
-			}		
-			
-			aimArea.SetOrigin( GetEyePosition() );
-			aimArea.SetAxis( viewAngles.ToMat3() );
-			aimArea.SetSize( dNear, dFar, size, size );
-		
-
-			if ( showDebug ) {
-				gameRenderWorld->DebugFrustum(colorRed, aimArea, false, 20);
-			}
-
-			idLinkList<idEntity> *entities = &gameLocal.snapshotEntities;
-			if ( gameLocal.isServer ) {
-				entities = &gameLocal.spawnedEntities;
-			}
-			ent = entities->Next();
-			while ( ent != NULL ) {
-
-				bool isOk = true;
-									
-				if ( !ent->IsType(idPlayer::GetClassType()) ) {
-					isOk = false;
-				} else if ( gameLocal.IsTeamGame() && ((idPlayer*)ent)->team == team ) {
-					isOk = false;
-				} else if ( ((idPlayer*)ent)->instance != instance ) {
-					isOk = false;
-				} else if ( ((idPlayer*)ent)->spectating ) {
-					isOk = false;
-				} else if ( !idStr::Icmp(name.c_str(),ent->name.c_str()) ) {
-					isOk = false;
-				} else if ( ent->health <= 0 ) {
-					isOk = false;
-				}
-
-				if ( !isOk ) {
-					if ( gameLocal.isServer ) {
-						ent = ent->spawnNode.Next();
-					} else {
-						ent = ent->snapshotNode.Next();
-					}
-					continue;
-				}
-				
-				const idBounds &bounds = ent->GetPhysics()->GetAbsBounds();
-				if ( showDebug ) {
-					gameRenderWorld->DebugBounds(colorGreen, bounds, vec3_origin, 20);
-				}
-				inside = aimArea.IntersectsBounds(bounds);
-				if ( inside ) {
-					dist = bounds.ShortestDistance(GetEyePosition());
-					if ( bDist > dist ) {
-						if ( bboxTrace.fraction == -1 ) {
-							gameLocal.TracePoint( this, bboxTrace, start, end, MASK_SHOT_BOUNDINGBOX, this );
-						}
-						if ( ( bboxTrace.fraction < 1.0f ) && ( bboxTrace.c.entityNum != ent->entityNumber ) ) {
-							idVec3 v = end - start;
-							if ( ((v.Length() * bboxTrace.fraction) + 5.0f) >= dist ) {
-								// close enough to the bbox
-								bDist = dist;
-								bestEnemy = (idActor *)ent;
-							}
-						} else {
-							// Didn't hit anything, so this must be in view
-							bDist = dist;
-							bestEnemy = (idActor *)ent;
-						}
-					}
-				}					
-
-				if ( gameLocal.isServer ) {
-					ent = ent->spawnNode.Next();
-				} else {
-					ent = ent->snapshotNode.Next();
-				}
-			}
-			
-			if ( !gameLocal.isMultiplayer || (gameLocal.isMultiplayer && entityNumber == gameLocal.localClientNum) ) {
-				if ( bestEnemy ) {
-					if ( cursor ) {
-						cursor->SetStateInt("enemyFocus", 1);
-						idVec3 altEnd = bestEnemy->GetPhysics()->GetOrigin();
-						altEnd[2]+=35.0f; // origin is always below the monster's feet for whatever reason, so aim at this
-						trace_t trace;
-					
-						gameLocal.TracePoint( this, trace, start, altEnd, MASK_SHOT_BOUNDINGBOX, this );
-						if ( ( trace.fraction < 1.0f ) && ( trace.c.entityNum == bestEnemy->entityNumber ) ) {
-							int slow = pm_AimAssistSlow.GetInteger();
-							usercmdGen->SetSlowJoystick( zoomed ? pm_zoomedSlow.GetInteger() : slow );
-						} else {
-							usercmdGen->SetSlowJoystick( zoomed ? pm_zoomedSlow.GetInteger() : 100 );
-						}
-					} else {
-						usercmdGen->SetSlowJoystick( zoomed ? pm_zoomedSlow.GetInteger() : 100 );
-						if ( cursor ) {
-							cursor->SetStateInt("enemyFocus", 0);
-						}
-					}
-				} else {
-					usercmdGen->SetSlowJoystick( zoomed ? pm_zoomedSlow.GetInteger() : 100 );
-					if ( cursor ) {
-						cursor->SetStateInt("enemyFocus", 0);
-					}
-				}
-			}
-			return;
-		}
-
-#endif
 
 	idBounds bounds( start );
 	bounds.AddPoint( end );
@@ -7794,44 +7466,6 @@ void idPlayer::UpdateFocus( void ) {
 	
 //RAVEN BEGIN
 //asalmon: auto-aim for Xenon, finds a best enemy and changes the crosshairs.
-#ifdef _XBOX
-	
-		bool doAimAssist = cvarSystem->GetCVarBool("pm_AimAssist") || gameLocal.isMultiplayer;
-		
-		bestEnemy = NULL;
-		bool showDebug = cvarSystem->GetCVarBool("pm_showAimAssist");
-		float bDist = cvarSystem->GetCVarInteger("pm_AimAssistDistance");
-		float dist;
-		idFrustum aimArea;
-		float dNear, dFar, size;
-		renderView_t *rv = GetRenderView();
-		float fovY, fovX;
-		
-		if ( weapon && doAimAssist ) {
-		
-			// field of view
- 			gameLocal.CalcFov( CalcFov( true ), fovX, fovY );
-		
-			dNear = cvarSystem->GetCVarFloat( "r_znear" );
-			dFar = bDist;
-#ifndef _FINAL
-			if ( cvarSystem->GetCVarInteger("pm_AimAssistTest") != 0 ) {
-				size = dFar * idMath::Tan( DEG2RAD( fovY * 0.5f ) ) * pm_AimAssistFOV.GetFloat()/100.0;
-			} else 
-#endif
-			{
-				size = dFar * idMath::Tan( DEG2RAD( fovY * 0.5f ) ) * weapon->GetAutoAimFOV()/100.0;
-			}
-			aimArea.SetOrigin( GetEyePosition() );
-			aimArea.SetAxis( viewAngles.ToMat3() );
-			aimArea.SetSize( dNear, dFar, size, size );
-	
-			if ( showDebug ) {
-				gameRenderWorld->DebugFrustum( colorRed, aimArea, false, 20 );
-			}
-		}
-
-#endif
 //RAVEN END
 
 	// dluetscher: added optimization to eliminate redundant traces
@@ -7906,42 +7540,6 @@ void idPlayer::UpdateFocus( void ) {
 
 // RAVEN BEGIN
 
-#ifdef _XENON
-		if ( doAimAssist ) {
-			if ( isAI && !isFriendly && (ent->health > 0) ) {
-				
-				if ( idStr::Icmp( name.c_str(),ent->name.c_str() ) != 0 ) {
-				
-					const idBounds &bounds = ent->GetPhysics()->GetAbsBounds();
-					//if ( showDebug ) {
-						//gameRenderWorld->DebugBounds(colorGreen, bounds, vec3_origin, 20);
-					//}
-					bool inside = aimArea.IntersectsBounds(bounds);
-					
-					if ( inside ) {
-						dist = bounds.ShortestDistance(GetEyePosition());
-						if ( bDist > dist ) {
-							if ( bboxTrace.fraction == -1 ) {
-								gameLocal.TracePoint( this, bboxTrace, start, end, MASK_SHOT_BOUNDINGBOX, this );
-							}
-							if ( ( bboxTrace.fraction < 1.0f ) && ( bboxTrace.c.entityNum != ent->entityNumber ) ) {
-								idVec3 v = end - start;
-								if ( ((v.Length() * bboxTrace.fraction) + 5.0f) >= dist ) {
-									// close enough to the bbox
-									bDist = dist;
-									bestEnemy = (idActor *)ent;
-								}
-							} else {
-								// Didn't hit anything, so this must be in view
-								bDist = dist;
-								bestEnemy = (idActor *)ent;
-							}
-						}
-					}					
-				}
-			}
-		}
-#endif
 
 // mekberg: allowFocus removed
 		if ( focusLength < (g_crosshairCharInfoFar.GetBool()?256.0f:80.0f) ) {
@@ -8069,11 +7667,6 @@ void idPlayer::UpdateFocus( void ) {
 			} else if ( guiFocusLength > 80.0f ) {
 				ClearFocus ( );
 				focusType = FOCUS_BRACKETS;
-#ifdef _XENON
-				// Hide the "press whatever" text
-				hud->SetStateInt( "GUIIsNotUsingDPad", 3 );
-				hud->SetStateInt( "hideInteractive", 1 );
-#endif
 				break;
 			}
 
@@ -8136,56 +7729,12 @@ void idPlayer::UpdateFocus( void ) {
 			command = ui->HandleEvent( &ev, gameLocal.time );
  			HandleGuiCommands( ent, command );
 			
-#ifdef _XENON
-			int usepad = 0;
-			if ( focusUI ) {
-				idStr value;
-				if ( ui->GetPresentationValue( "dpadGUI", value ) ) {
-					usepad = atoi( value.c_str() );
-				}
-			}
-			hud->SetStateInt( "GUIIsNotUsingDPad", (usepad) ? 0 : 1 );
-			hud->SetStateInt( "hideInteractive", 0 );
-#endif
 
 			SetFocus ( FOCUS_GUI, FOCUS_GUI_TIME, ent, ui );
 			break;
 		}
 	}
 
-#ifdef _XENON
-	if ( !gameLocal.isMultiplayer || (gameLocal.isMultiplayer && entityNumber == gameLocal.localClientNum) ) {
-		
-		if ( !weapon || !weapon->AllowAutoAim() ) {
-			if ( cursor ) {
-				cursor->SetStateInt("enemyFocus", 0);
-			}
-			usercmdGen->SetSlowJoystick( zoomed ? pm_zoomedSlow.GetInteger() : 100 );
-		} else {		
-		
-			if ( bestEnemy && doAimAssist ) {
-				if ( cursor ) {
-					cursor->SetStateInt("enemyFocus", 1);
-				}
-				trace_t trace;
-				idVec3 altEnd = bestEnemy->GetPhysics()->GetOrigin();
-				altEnd[2]+=35.0f; // origin is always below the monster's feet for whatever reason, so aim at this
-				gameLocal.TracePoint( this, trace, start, altEnd, MASK_SHOT_BOUNDINGBOX, this );
-				if ( ( trace.fraction < 1.0f ) && ( trace.c.entityNum == bestEnemy->entityNumber ) ) {
-					int slow = pm_AimAssistSlow.GetInteger();
-					usercmdGen->SetSlowJoystick( zoomed ? pm_zoomedSlow.GetInteger() : slow );
-				} else {
-					usercmdGen->SetSlowJoystick( zoomed ? pm_zoomedSlow.GetInteger() : 100 );
-				}
-			} else {
-				usercmdGen->SetSlowJoystick( zoomed ? pm_zoomedSlow.GetInteger() : 100 );
-				if ( cursor ) {
-					cursor->SetStateInt("enemyFocus", 0);
-				}
-			}
-		}
-	}
-#endif
 
 	if ( !gameLocal.isMultiplayer || (gameLocal.isMultiplayer && entityNumber == gameLocal.localClientNum) ) {
 		if ( wasTargetFriendly && !targetFriendly && focusType == FOCUS_NONE ) {
@@ -9746,16 +9295,7 @@ void idPlayer::PerformImpulse( int impulse ) {
 
 //RAVEN BEGIN
 // nrausch: Don't send xenon dpad impulses over the network
-#ifdef _XENON
-	
-	if ( objectiveSystemOpen ) {
-		return;
-	}
-	
-	if ( gameLocal.isClient && (impulse < IMPULSE_70) ) {
-#else
 	if ( gameLocal.isClient ) {
-#endif
 //RAVEN END
 		idBitMsg	msg;
 		byte		msgBuf[MAX_EVENT_PARAM_SIZE];
@@ -9774,17 +9314,6 @@ void idPlayer::PerformImpulse( int impulse ) {
 
 //RAVEN BEGIN
 //asalmon: D-pad events for in game guis on Xenon
-#ifdef _XBOX
-	sysEvent_t ev;
-	ev.evType = SE_KEY;
-	ev.evValue2 = 1;
-	ev.evPtrLength = 0;
-	ev.evPtr = NULL;
-
-	const char *command = NULL;
-	idUserInterface *ui = ActiveGui();
-	bool updateVisuals = false;
-#endif
 //RAVEN END
 
 	switch( impulse ) {
@@ -9932,24 +9461,6 @@ void idPlayer::PerformImpulse( int impulse ) {
 
 //RAVEN BEGIN
 //asalmon: route d-pad input to the active gui.
-#ifdef _XBOX
-	if (ui && ev.evValue != 0 && !objectiveSystemOpen ) {
-		command = ui->HandleEvent( &ev, gameLocal.time, &updateVisuals );
-		if ( updateVisuals && focusEnt && ui == focusUI ) {
-			focusEnt->UpdateVisuals();
-		}
-
-		if ( gameLocal.isClient ) {
-			// we predict enough, but don't want to execute commands
-			return;
-		} 
-		if ( focusEnt ) {
-			HandleGuiCommands( focusEnt, command );
-		} else {
-			HandleGuiCommands( this, command );
-		}
-	}
-#endif
 //RAVEN END
 }
    
@@ -9965,7 +9476,6 @@ bool idPlayer::HandleESC( void ) {
 	}
 
 // jdischler: Straight from the top, cinematic skipping on xenon is OFFICIALLY OUT.  Too many problems with it and not enough time to properly address them.
-#ifndef _XENON
 	if ( gameLocal.inCinematic ) {
 		if ( gameLocal.time < gameLocal.cinematicSkipTime ) {
 			// ignore skip input briefly when a cinematic starts
@@ -9973,7 +9483,6 @@ bool idPlayer::HandleESC( void ) {
 		}
 		return SkipCinematic();
 	}
-#endif
 	ResetWeaponWheel( true );
 	return false;
 }
@@ -9984,22 +9493,6 @@ idPlayer::HandleObjectiveInput
 ==============
 */
 void idPlayer::HandleObjectiveInput() {
-#ifdef _XENON
-	if ( gameLocal.inCinematic ) {
-		return;
-	}
-	if ( !objectiveButtonReleased ) {
-		if ( ( usercmd.buttons &	BUTTON_SCORES ) == 0 ) {
-			objectiveButtonReleased = true;
-		}
-	} else {
-		if ( ( usercmd.buttons & BUTTON_SCORES ) != 0 ) {
-			ToggleObjectives ( );
-			g_ObjectiveSystemOpen = objectiveSystemOpen;
-			objectiveButtonReleased = false;
-		}
-	}
-#else
 	// openQ4: with g_objectivesToggle (Settings > Game Options > HUD > Toggle
 	// Objectives) each press of the scores button opens or closes the display,
 	// as the Xbox 360 edition's did; otherwise it shows while the button is held.
@@ -10026,7 +9519,6 @@ void idPlayer::HandleObjectiveInput() {
 	} else if ( objectiveSystemOpen && gameLocal.inCinematic ) {
 		ToggleObjectives ( );
 	}
-#endif
 }
 
 /*
@@ -10809,9 +10301,6 @@ void idPlayer::Think( void ) {
 	}
 
 	if ( gameLocal.inCinematic || influenceActive 
-#ifdef _XENON
-		|| objectiveSystemOpen 
-#endif
 		) {
 		usercmd.forwardmove = 0;
 		usercmd.rightmove = 0;
@@ -10835,11 +10324,7 @@ void idPlayer::Think( void ) {
 		}
 
 		if ( vehicleController.IsDriving( ) ) {
-#ifdef _XENON
-			usercmdGen->SetSlowJoystick( zoom ? pm_zoomedSlow.GetInteger() : 100 );
-#else
 			cvarSystem->SetCVarInteger( "pm_isZoomed", zoom ? pm_zoomedSlow.GetInteger() : 0 );
-#endif
 		}
 
 	}
@@ -11459,11 +10944,7 @@ void idPlayer::Killed( idEntity *inflictor, idEntity *attacker, int damage, cons
 	}
 
 	if ( !g_testDeath.GetBool() && !gameLocal.isMultiplayer ) {
-#ifdef _XENON
-		playerView.Fade( colorBlack, MAX_RESPAWN_TIME_XEN_SP );
-#else
 		playerView.Fade( colorBlack, 12000 );
-#endif
 	}
 
 
@@ -11475,22 +10956,8 @@ void idPlayer::Killed( idEntity *inflictor, idEntity *attacker, int damage, cons
 
 	if ( StartRagdoll() ) {
 		pm_modelView.SetInteger( 0 );
-#ifdef _XENON
-		if ( gameLocal.isMultiplayer )
-		{
-			// didn't want to have any chance of affecting multiplayer...
-			minRespawnTime = gameLocal.time + RAGDOLL_DEATH_TIME;
-			maxRespawnTime = minRespawnTime + MAX_RESPAWN_TIME;
-		}
-		else
-		{
-			minRespawnTime = gameLocal.time + RAGDOLL_DEATH_TIME_XEN_SP;
-			maxRespawnTime = minRespawnTime + MAX_RESPAWN_TIME_XEN_SP;
-		}
-#else
 		minRespawnTime = gameLocal.time + RAGDOLL_DEATH_TIME;
 		maxRespawnTime = minRespawnTime + MAX_RESPAWN_TIME;
-#endif
 	} else {
 		// don't allow respawn until the death anim is done
 		// g_forcerespawn may force spawning at some later time
@@ -11895,9 +11362,7 @@ void idPlayer::Damage( idEntity *inflictor, idEntity *attacker, const idVec3 &di
 
 //RAVEN BEGIN
 //asalmon: Xenon needs stats in singleplayer
-#ifndef _XENON
 	if( gameLocal.isMultiplayer )
-#endif 
 	{
 //RAVEN END
 		idEntity* attacker = NULL;
@@ -14632,14 +14097,10 @@ void idPlayer::NonLocalClientPredictionThink( void ) {
 		}
  	}
 
-#if defined( _XENON )
-	UpdateFocus();
-#else
 	if ( fullRemotePrediction ) {
 		// update GUIs, Items, and character interactions
 		UpdateFocus();
 	}
-#endif
 
 	// service animations
  	if ( !spectating && !af.IsActive() ) {
@@ -16263,7 +15724,6 @@ idPlayer::SaveMessage
 =====================
 */
 void idPlayer::SaveMessage( void ) {
-#ifndef _XENON
 	if ( GetHud( ) ) {
 		GetHud()->HandleNamedEvent( "saveMessage" );
 	}
@@ -16271,7 +15731,6 @@ void idPlayer::SaveMessage( void ) {
 	if ( objectiveSystem ) {
 		objectiveSystem->HandleNamedEvent( "saveMessage" );
 	}
-#endif
 }
 
 // mekberg: set pm_ cvars

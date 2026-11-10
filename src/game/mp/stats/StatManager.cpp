@@ -878,9 +878,6 @@ void rvStatManager::ClearStats( void ) {
 		lastRailShot[ q ] = -2;
 		lastRailShotHits[ q ] = 0;
 	}
-#ifdef _XENON
-	lastFullUpdate = -50000;
-#endif
 }
 
 void rvStatManager::CalculateEndGameStats( void ) {
@@ -993,15 +990,9 @@ void rvStatManager::CalculateEndGameStats( void ) {
 
 		// frags award
 //asalmon: Made the limit more reasonable for the shorter time limits and less players of Xenon
-#ifdef _XENON
-		if( playerStats[ i ].kills >= 50 ) {
-			playerStats[ i ].endGameAwards.Append( EGA_FRAGS );
-		}
-#else
 		if( playerStats[ i ].kills >= 100 ) {
 			playerStats[ i ].endGameAwards.Append( EGA_FRAGS );
 		}
-#endif
 
 
 		if( playerStats[ i ].kills > maxKills ) {
@@ -1042,13 +1033,6 @@ void rvStatManager::CalculateEndGameStats( void ) {
 
 
 //asalmon: hack to test certain achievement awards.
-#ifdef _XENON
-		if(cvarSystem->GetCVarInteger("si_overrideFrags"))
-		{
-			common->Printf("Overriding Frags to: %i for player %i\n", cvarSystem->GetCVarInteger("si_overrideFrags"), i);
-			playerStats[i].kills = cvarSystem->GetCVarInteger("si_overrideFrags");
-		}
-#endif
 
 	}
 

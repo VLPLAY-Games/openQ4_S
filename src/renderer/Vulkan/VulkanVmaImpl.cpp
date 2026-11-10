@@ -19,10 +19,7 @@
 #define UINT_MAX	0xffffffffu
 #endif
 
-#if defined( _MSC_VER )
-	#pragma warning( push )
-	#pragma warning( disable : 4100 4127 4189 4324 4505 )
-#elif defined( __GNUC__ ) || defined( __clang__ )
+#if defined( __GNUC__ ) || defined( __clang__ )
 	#pragma GCC diagnostic push
 	#pragma GCC diagnostic ignored "-Wunused-parameter"
 	#pragma GCC diagnostic ignored "-Wunused-variable"
@@ -36,8 +33,6 @@
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 
-#if defined( _MSC_VER )
-	#pragma warning( pop )
-#elif defined( __GNUC__ ) || defined( __clang__ )
+#if defined( __GNUC__ ) || defined( __clang__ )
 	#pragma GCC diagnostic pop
 #endif

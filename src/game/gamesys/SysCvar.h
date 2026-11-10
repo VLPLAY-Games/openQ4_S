@@ -276,23 +276,6 @@ extern idCVar	g_liquidTestVolumeSize;
 
 // RAVEN BEGIN
 // asalmon: parameters for aim assistance on Xenon
-#ifdef _XBOX
-extern idCVar pm_AimAssist;
-extern idCVar pm_AimAssistDistance;
-extern idCVar pm_AimAssistThreshold;
-extern idCVar pm_AimAssistFOV;
-extern idCVar pm_AimAssistBump;
-extern idCVar pm_AimAssistShow;
-extern idCVar pm_AimAssistSlow;
-
-extern idCVar pm_ThumbstickConfig;
-extern idCVar pm_ButtonConfig;
-
-extern idCVar pm_RocketJumpAutocenter;
-extern idCVar pm_IAmACheater;
-
-
-#endif
 // nmckenzie: added ability to try alternate accelerations.
 extern idCVar	pm_acceloverride;
 extern idCVar	pm_frictionoverride;

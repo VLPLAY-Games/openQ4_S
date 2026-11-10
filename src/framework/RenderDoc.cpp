@@ -28,17 +28,11 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "RenderDoc.h"
 
-#if defined( _WIN32 )
-#include <windows.h>
-#elif defined( __linux__ ) || defined( __APPLE__ )
+#if defined( __linux__ ) || defined( __APPLE__ )
 #include <dlfcn.h>
 #endif
 
-#if defined( _WIN32 )
-#define OPENQ4_RENDERDOC_CC __cdecl
-#else
 #define OPENQ4_RENDERDOC_CC
-#endif
 
 typedef void *RENDERDOC_DevicePointer;
 typedef void *RENDERDOC_WindowHandle;
@@ -105,25 +99,12 @@ struct openq4RenderDocState_t {
 static openq4RenderDocState_t renderDocState;
 
 static bool RenderDoc_ModuleLoaded( void ) {
-#if defined( _WIN32 )
-	return GetModuleHandleA( "renderdoc.dll" ) != NULL;
-#elif defined( __linux__ )
+#if defined( __linux__ )
 #if defined( RTLD_NOLOAD )
 	void *handle = dlopen( "librenderdoc.so", RTLD_NOW | RTLD_NOLOAD );
 	if ( handle == NULL ) {
 		handle = dlopen( "librenderdoc.so.1", RTLD_NOW | RTLD_NOLOAD );
 	}
-	if ( handle != NULL ) {
-		dlclose( handle );
-		return true;
-	}
-	return false;
-#else
-	return false;
-#endif
-#elif defined( __APPLE__ )
-#if defined( RTLD_NOLOAD )
-	void *handle = dlopen( "librenderdoc.dylib", RTLD_NOW | RTLD_NOLOAD );
 	if ( handle != NULL ) {
 		dlclose( handle );
 		return true;
@@ -138,21 +119,13 @@ static bool RenderDoc_ModuleLoaded( void ) {
 }
 
 static void *RenderDoc_FindModule( void ) {
-#if defined( _WIN32 )
-	return (void *)GetModuleHandleA( "renderdoc.dll" );
-#elif defined( __linux__ )
+#if defined( __linux__ )
 #if defined( RTLD_NOLOAD )
 	void *handle = dlopen( "librenderdoc.so", RTLD_NOW | RTLD_NOLOAD );
 	if ( handle == NULL ) {
 		handle = dlopen( "librenderdoc.so.1", RTLD_NOW | RTLD_NOLOAD );
 	}
 	return handle;
-#else
-	return NULL;
-#endif
-#elif defined( __APPLE__ )
-#if defined( RTLD_NOLOAD )
-	return dlopen( "librenderdoc.dylib", RTLD_NOW | RTLD_NOLOAD );
 #else
 	return NULL;
 #endif
@@ -166,9 +139,7 @@ static void *RenderDoc_GetProcAddress( void *moduleHandle, const char *name ) {
 		return NULL;
 	}
 
-#if defined( _WIN32 )
-	return (void *)GetProcAddress( (HMODULE)moduleHandle, name );
-#elif defined( __linux__ ) || defined( __APPLE__ )
+#if defined( __linux__ ) || defined( __APPLE__ )
 	return dlsym( moduleHandle, name );
 #else
 	return NULL;

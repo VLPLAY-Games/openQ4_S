@@ -11,9 +11,6 @@
 #include "gamesys/Subtitles.inl"
 #include "awakening/M01Feedback.inl"
 
-#if defined(_XENON) && (defined(_PROFILE) || defined(_DEBUG))
-#include "../sys/xenon/ProfilingSupport.h"
-#endif
 
 const int IMPULSE_DELAY = 150;
 static idCVar ui_retainedPauseCache( "ui_retainedPauseCache", "1", CVAR_GUI | CVAR_BOOL | CVAR_NOCHEAT,

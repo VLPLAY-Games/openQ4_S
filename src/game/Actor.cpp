@@ -2565,24 +2565,6 @@ void idActor::Damage( idEntity *inflictor, idEntity *attacker, const idVec3 &dir
 
 // RAVEN BEGIN
 // jnewquist: FIXME - Was this removed from Xenon intentionally?
-#ifdef _XENON
-	// singleplayer stat reporting.
-	if(!gameLocal.isMultiplayer) {
-		int methodOfDeath = -1;
-		// jnewquist: Use accessor for static class type 
-		if ( inflictor->IsType( idProjectile::GetClassType() ) ) {
-		// RAVEN END
-			methodOfDeath = static_cast<idProjectile*>(inflictor)->methodOfDeath;
-		} else if ( inflictor->IsType( idPlayer::GetClassType() ) ) {
-			// hitscan weapon
-			methodOfDeath = static_cast<idPlayer*>(inflictor)->GetCurrentWeapon();
-		}
-		if( methodOfDeath != -1 && attacker && attacker->IsType( idActor::Type ) ) {
-// jnewquist: Fix Xenon compile warning
-			statManager->WeaponHit( static_cast<idActor*> (attacker) , this, methodOfDeath, !!damage );
-		}
-	}
-#endif
 // RAVEN END
 
 // RAVEN BEGIN

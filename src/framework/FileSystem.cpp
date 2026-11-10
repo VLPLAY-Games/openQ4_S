@@ -53,26 +53,20 @@ If you have questions concerning this license or the applicable additional terms
 	#include <SDL3/SDL_error.h>
 #endif
 
-#ifdef WIN32
-	#include <windows.h>
-	#include <io.h>	// for _read
-	#include <direct.h> // for _getcwd
-#else
 	#if !defined( __MACH__ ) && defined( __MWERKS__ )
 		#include <types.h>
 		#include <stat.h>
-	#else
+#else
 		#include <sys/types.h>
 		#include <sys/stat.h>
 	#endif
 	#include <unistd.h>
-#endif
 
 #if ID_ENABLE_CURL
 	#include "../curl/include/curl/curl.h"
 	#if defined( LIBCURL_VERSION_NUM ) && LIBCURL_VERSION_NUM >= 0x071304 && defined( CURL_VERSION_ASYNCHDNS )
 		#define OPENQ4_CURL_CAPABLE_BUILD 1
-	#else
+#else
 		#define OPENQ4_CURL_CAPABLE_BUILD 0
 	#endif
 #endif
@@ -776,11 +770,7 @@ static void FS_AddUniquePath( idStrList &paths, const char *path ) {
 }
 
 static bool FS_IsEnvPathListSeparator( char c ) {
-#ifdef WIN32
-	return c == ';';
-#else
 	return c == ':' || c == ';';
-#endif
 }
 
 static void FS_AppendEnvPathList( idStrList &paths, const char *envName ) {
@@ -874,15 +864,9 @@ static bool FS_HasGameFilesAtBasePath( const char *basePath ) {
 
 static bool FS_GetCurrentWorkingDirectory( idStr &cwd ) {
 	char buf[ MAX_OSPATH ];
-#ifdef WIN32
-	if ( !_getcwd( buf, sizeof( buf ) - 1 ) ) {
-		return false;
-	}
-#else
 	if ( !getcwd( buf, sizeof( buf ) - 1 ) ) {
 		return false;
 	}
-#endif
 	buf[ sizeof( buf ) - 1 ] = '\0';
 	cwd = buf;
 	return true;
@@ -920,165 +904,6 @@ static void FS_ExtractQuotedTokens( const char *line, idStrList &tokens ) {
 	}
 }
 
-#ifdef WIN32
-static bool FS_ReadRegistryString( HKEY root, const char *subKey, const char *valueName, REGSAM accessFlags, idStr &result ) {
-	HKEY	hKey;
-	LONG	status;
-	BYTE	buffer[ 4096 ];
-	DWORD	type;
-	DWORD	size;
-
-	result.Clear();
-	if ( !subKey || !subKey[ 0 ] || !valueName || !valueName[ 0 ] ) {
-		return false;
-	}
-
-	status = RegOpenKeyExA( root, subKey, 0, KEY_READ | accessFlags, &hKey );
-	if ( status != ERROR_SUCCESS ) {
-		return false;
-	}
-
-	type = 0;
-	size = sizeof( buffer ) - 1;
-	status = RegQueryValueExA( hKey, valueName, NULL, &type, buffer, &size );
-	RegCloseKey( hKey );
-	if ( status != ERROR_SUCCESS || size == 0 ) {
-		return false;
-	}
-	if ( type != REG_SZ && type != REG_EXPAND_SZ ) {
-		return false;
-	}
-
-	buffer[ size < sizeof( buffer ) ? size : ( sizeof( buffer ) - 1 ) ] = '\0';
-	result = (const char *)buffer;
-	if ( type == REG_EXPAND_SZ ) {
-		char expanded[ 4096 ];
-		DWORD expandedLen = ExpandEnvironmentStringsA( result.c_str(), expanded, sizeof( expanded ) );
-		if ( expandedLen > 0 && expandedLen <= sizeof( expanded ) ) {
-			expanded[ sizeof( expanded ) - 1 ] = '\0';
-			result = expanded;
-		}
-	}
-	result.Replace( "\\\\", "\\" );
-	result.BackSlashesToSlashes();
-	result.StripTrailing( '/' );
-	return result.Length() > 0;
-}
-
-static void FS_AppendGogPathsFromRegistryGamesBranch( HKEY root, const char *branch, idStrList &candidates, REGSAM accessFlags ) {
-	HKEY	hKey;
-	LONG	status;
-	DWORD	index;
-	char	subKeyName[ 256 ];
-	DWORD	subKeyNameLen;
-	idStr	subKeyPath;
-	idStr	pathValue;
-
-	if ( !branch || !branch[ 0 ] ) {
-		return;
-	}
-
-	status = RegOpenKeyExA( root, branch, 0, KEY_READ | accessFlags, &hKey );
-	if ( status != ERROR_SUCCESS ) {
-		return;
-	}
-
-	index = 0;
-	for ( ;; ) {
-		subKeyNameLen = sizeof( subKeyName );
-		status = RegEnumKeyExA( hKey, index, subKeyName, &subKeyNameLen, NULL, NULL, NULL, NULL );
-		if ( status != ERROR_SUCCESS ) {
-			break;
-		}
-
-		subKeyPath = branch;
-		subKeyPath += "\\";
-		subKeyPath += subKeyName;
-		if ( FS_ReadRegistryString( root, subKeyPath.c_str(), "path", accessFlags, pathValue ) ) {
-			FS_AddUniquePath( candidates, pathValue.c_str() );
-		}
-
-		index++;
-	}
-
-	RegCloseKey( hKey );
-}
-
-static void FS_AppendGogPathsFromRegistryUninstallBranch( HKEY root, const char *branch, idStrList &candidates, REGSAM accessFlags ) {
-	HKEY	hKey;
-	LONG	status;
-	DWORD	index;
-	char	subKeyName[ 256 ];
-	DWORD	subKeyNameLen;
-	idStr	subKeyPath;
-	idStr	displayName;
-	idStr	publisher;
-	idStr	installLocation;
-	bool	matchesQuake4;
-	bool	matchesGog;
-
-	if ( !branch || !branch[ 0 ] ) {
-		return;
-	}
-
-	status = RegOpenKeyExA( root, branch, 0, KEY_READ | accessFlags, &hKey );
-	if ( status != ERROR_SUCCESS ) {
-		return;
-	}
-
-	index = 0;
-	for ( ;; ) {
-		subKeyNameLen = sizeof( subKeyName );
-		status = RegEnumKeyExA( hKey, index, subKeyName, &subKeyNameLen, NULL, NULL, NULL, NULL );
-		if ( status != ERROR_SUCCESS ) {
-			break;
-		}
-
-		subKeyPath = branch;
-		subKeyPath += "\\";
-		subKeyPath += subKeyName;
-		if ( !FS_ReadRegistryString( root, subKeyPath.c_str(), "InstallLocation", accessFlags, installLocation ) ) {
-			index++;
-			continue;
-		}
-
-		displayName.Clear();
-		publisher.Clear();
-		FS_ReadRegistryString( root, subKeyPath.c_str(), "DisplayName", accessFlags, displayName );
-		FS_ReadRegistryString( root, subKeyPath.c_str(), "Publisher", accessFlags, publisher );
-
-		matchesQuake4 =
-			( displayName.Find( "Quake 4", false ) >= 0 ) ||
-			( displayName.Find( "Quake IV", false ) >= 0 ) ||
-			( subKeyPath.Find( "Quake 4", false ) >= 0 ) ||
-			( subKeyPath.Find( "Quake IV", false ) >= 0 );
-		matchesGog =
-			( publisher.Find( "GOG", false ) >= 0 ) ||
-			( subKeyPath.Find( "GOG", false ) >= 0 );
-
-		if ( matchesQuake4 || ( matchesGog && installLocation.Find( "Quake", false ) >= 0 ) ) {
-			FS_AddUniquePath( candidates, installLocation.c_str() );
-		}
-
-		index++;
-	}
-
-	RegCloseKey( hKey );
-}
-
-static void FS_AppendGogInstallCandidatesFromRegistry( idStrList &candidates ) {
-	FS_AppendGogPathsFromRegistryGamesBranch( HKEY_LOCAL_MACHINE, "SOFTWARE\\GOG.com\\Games", candidates, KEY_WOW64_64KEY );
-	FS_AppendGogPathsFromRegistryGamesBranch( HKEY_LOCAL_MACHINE, "SOFTWARE\\GOG.com\\Games", candidates, KEY_WOW64_32KEY );
-	FS_AppendGogPathsFromRegistryGamesBranch( HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\GOG.com\\Games", candidates, 0 );
-	FS_AppendGogPathsFromRegistryGamesBranch( HKEY_CURRENT_USER, "SOFTWARE\\GOG.com\\Games", candidates, KEY_WOW64_64KEY );
-	FS_AppendGogPathsFromRegistryGamesBranch( HKEY_CURRENT_USER, "SOFTWARE\\GOG.com\\Games", candidates, KEY_WOW64_32KEY );
-
-	FS_AppendGogPathsFromRegistryUninstallBranch( HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", candidates, KEY_WOW64_64KEY );
-	FS_AppendGogPathsFromRegistryUninstallBranch( HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", candidates, KEY_WOW64_32KEY );
-	FS_AppendGogPathsFromRegistryUninstallBranch( HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", candidates, KEY_WOW64_64KEY );
-	FS_AppendGogPathsFromRegistryUninstallBranch( HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", candidates, KEY_WOW64_32KEY );
-}
-#endif
 
 static void FS_AppendSteamLibrariesFromVdf( const char *steamRoot, idStrList &libraryRoots ) {
 	idStr		vdfPath;
@@ -1142,44 +967,6 @@ static void FS_BuildSteamInstallCandidates( idStrList &candidates ) {
 	FS_AppendEnvPathList( explicitLibraryRoots, "OPENQ4_STEAM_LIBRARY" );
 	FS_AppendEnvPathList( explicitLibraryRoots, "OPENQ4_STEAM_LIBRARIES" );
 
-#ifdef WIN32
-	FS_AddUniquePath( steamRoots, "C:/Program Files (x86)/Steam" );
-	FS_AddUniquePath( steamRoots, "C:/Program Files/Steam" );
-
-	envPath = getenv( "ProgramFiles(x86)" );
-	if ( envPath && envPath[ 0 ] ) {
-		path = envPath;
-		path.AppendPath( "Steam" );
-		FS_AddUniquePath( steamRoots, path.c_str() );
-	}
-	envPath = getenv( "ProgramFiles" );
-	if ( envPath && envPath[ 0 ] ) {
-		path = envPath;
-		path.AppendPath( "Steam" );
-		FS_AddUniquePath( steamRoots, path.c_str() );
-	}
-	envPath = getenv( "ProgramW6432" );
-	if ( envPath && envPath[ 0 ] ) {
-		path = envPath;
-		path.AppendPath( "Steam" );
-		FS_AddUniquePath( steamRoots, path.c_str() );
-	}
-	envPath = getenv( "LOCALAPPDATA" );
-	if ( envPath && envPath[ 0 ] ) {
-		path = envPath;
-		path.AppendPath( "Steam" );
-		FS_AddUniquePath( steamRoots, path.c_str() );
-	}
-#elif defined( __APPLE__ )
-	envPath = getenv( "HOME" );
-	if ( envPath && envPath[ 0 ] ) {
-		path = envPath;
-		path.AppendPath( "Library" );
-		path.AppendPath( "Application Support" );
-		path.AppendPath( "Steam" );
-		FS_AddUniquePath( steamRoots, path.c_str() );
-	}
-#else
 	envPath = getenv( "XDG_DATA_HOME" );
 	if ( envPath && envPath[ 0 ] ) {
 		path = envPath;
@@ -1213,7 +1000,6 @@ static void FS_BuildSteamInstallCandidates( idStrList &candidates ) {
 		path.AppendPath( "Steam" );
 		FS_AddUniquePath( steamRoots, path.c_str() );
 	}
-#endif
 
 	for ( int i = 0; i < explicitLibraryRoots.Num(); i++ ) {
 		FS_AddUniquePath( discoveryLibraryRoots, explicitLibraryRoots[ i ] );
@@ -1250,37 +1036,6 @@ static void FS_BuildGogInstallCandidates( idStrList &candidates ) {
 
 	candidates.Clear();
 
-#ifdef WIN32
-	FS_AppendGogInstallCandidatesFromRegistry( candidates );
-
-	FS_AddUniquePath( candidates, "C:/Program Files (x86)/GOG Galaxy/Games/Quake 4" );
-	FS_AddUniquePath( candidates, "C:/Program Files/GOG Galaxy/Games/Quake 4" );
-	FS_AddUniquePath( candidates, "C:/GOG Games/Quake 4" );
-
-	envPath = getenv( "ProgramFiles(x86)" );
-	if ( envPath && envPath[ 0 ] ) {
-		path = envPath;
-		path.AppendPath( "GOG Galaxy" );
-		path.AppendPath( "Games" );
-		path.AppendPath( "Quake 4" );
-		FS_AddUniquePath( candidates, path.c_str() );
-	}
-	envPath = getenv( "ProgramFiles" );
-	if ( envPath && envPath[ 0 ] ) {
-		path = envPath;
-		path.AppendPath( "GOG Galaxy" );
-		path.AppendPath( "Games" );
-		path.AppendPath( "Quake 4" );
-		FS_AddUniquePath( candidates, path.c_str() );
-	}
-	envPath = getenv( "SystemDrive" );
-	if ( envPath && envPath[ 0 ] ) {
-		path = envPath;
-		path.AppendPath( "GOG Games" );
-		path.AppendPath( "Quake 4" );
-		FS_AddUniquePath( candidates, path.c_str() );
-	}
-#else
 	envPath = getenv( "HOME" );
 	if ( envPath && envPath[ 0 ] ) {
 		path = envPath;
@@ -1294,7 +1049,6 @@ static void FS_BuildGogInstallCandidates( idStrList &candidates ) {
 		path.AppendPath( "Quake 4" );
 		FS_AddUniquePath( candidates, path.c_str() );
 	}
-#endif
 }
 
 static bool FS_FindFirstValidInstallPath( const idStrList &candidates, idStr &result ) {
@@ -1926,13 +1680,8 @@ through directory listings, so the memo stays off there.
 ===========
 */
 static bool FS_IsOSDirectory( const char *osPath ) {
-#ifdef _WIN32
-	struct _stat64 info;
-	return _stat64( osPath, &info ) == 0 && ( info.st_mode & _S_IFMT ) == _S_IFDIR;
-#else
 	struct stat info;
 	return stat( osPath, &info ) == 0 && S_ISDIR( info.st_mode );
-#endif
 }
 
 static void FS_AppendLooseDirectoryKey( std::string &key, const char *text, size_t length ) {
@@ -2195,13 +1944,11 @@ FILE *idFileSystemLocal::OpenOSFile( const char *fileName, const char *mode, idS
 	idStrList list;
 
 #ifndef __MWERKS__
-#ifndef WIN32 
 	// some systems will let you fopen a directory
 	struct stat buf;
 	if ( stat( fileName, &buf ) != -1 && !S_ISREG(buf.st_mode) ) {
 		return NULL;
 	}
-#endif
 #endif
 	fp = fopen( fileName, mode );
 	if ( !fp && fs_caseSensitiveOS.GetBool() ) {
@@ -2523,18 +2270,11 @@ bool idFileSystemLocal::ResolveCaseInsensitiveOSPath( const char *path, idStr &r
 		// Most mixed-case stock paths already use the exact on-disk spelling.  A
 		// direct stat avoids enumerating every parent directory for every loose-
 		// file probe (including probes for assets that ultimately live in PK4s).
-#ifndef WIN32
 		idStr exactPath = resolvedPath;
 		exactPath.AppendPath( segment );
 		struct stat exactStat;
 		const bool exactEntryMatches = stat( exactPath.c_str(), &exactStat ) == 0 &&
 			( directoryOnly ? S_ISDIR( exactStat.st_mode ) : !S_ISDIR( exactStat.st_mode ) );
-#else
-		// Windows has no S_ISDIR and does not need this optimization on its
-		// case-insensitive filesystem. Preserve the existing enumeration fallback
-		// if case recovery is explicitly enabled there.
-		const bool exactEntryMatches = false;
-#endif
 		if ( exactEntryMatches ) {
 			resolvedSegment = segment;
 		} else if ( !FindCaseInsensitiveOSPathEntry( parentDirectory, segment.c_str(), directoryOnly, resolvedSegment ) ) {
@@ -3166,13 +2906,6 @@ bool idFileSystemLocal::PromoteFile( const char *stagedRelativePath,
 	if ( !promoted ) {
 		common->Warning( "Could not atomically promote '%s' to '%s': %s",
 			stagedRelativePath, finalRelativePath, SDL_GetError() );
-	}
-#elif defined( WIN32 )
-	promoted = MoveFileExA( stagedOS.c_str(), finalOS.c_str(),
-		MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH ) != FALSE;
-	if ( !promoted ) {
-		common->Warning( "Could not atomically promote '%s' to '%s' (error %lu)",
-			stagedRelativePath, finalRelativePath, static_cast<unsigned long>( GetLastError() ) );
 	}
 #else
 	promoted = rename( stagedOS.c_str(), finalOS.c_str() ) == 0;
@@ -5821,11 +5554,9 @@ static const char * const	FS_VERIFIED_PAKS_HEADER = "openQ4 verified runtime pac
 static const size_t			FS_VERIFIED_PAKS_MAX = 16;
 static const int			FS_VERIFIED_PAKS_MAX_BYTES = 64 * 1024;
 
-#ifndef _WIN32
 static uint64_t FS_StampTime( const struct timespec &value ) {
 	return static_cast<uint64_t>( value.tv_sec ) * 1000000000ull + static_cast<uint64_t>( value.tv_nsec );
 }
-#endif
 
 /*
 ================
@@ -5841,37 +5572,16 @@ static bool FS_StampOpenQ4Pak( const pack_t *pack, openQ4PakStamp_t &stamp ) {
 		return false;
 	}
 	bool stamped = false;
-#ifdef _WIN32
-	const HANDLE handle = reinterpret_cast<HANDLE>( _get_osfhandle( _fileno( file ) ) );
-	BY_HANDLE_FILE_INFORMATION info;
-	FILE_BASIC_INFO basic;
-	if ( handle != INVALID_HANDLE_VALUE &&
-		 GetFileInformationByHandle( handle, &info ) &&
-		 GetFileInformationByHandleEx( handle, FileBasicInfo, &basic, sizeof( basic ) ) ) {
-		stamp.size = ( static_cast<uint64_t>( info.nFileSizeHigh ) << 32 ) | info.nFileSizeLow;
-		stamp.modified = static_cast<uint64_t>( basic.LastWriteTime.QuadPart );
-		stamp.changed = static_cast<uint64_t>( basic.ChangeTime.QuadPart );
-		stamp.volume = info.dwVolumeSerialNumber;
-		stamp.fileId = ( static_cast<uint64_t>( info.nFileIndexHigh ) << 32 ) | info.nFileIndexLow;
-		stamped = true;
-	}
-#else
 	struct stat info;
 	if ( fstat( fileno( file ), &info ) == 0 && S_ISREG( info.st_mode ) ) {
 		stamp.size = static_cast<uint64_t>( info.st_size );
-#if defined( __APPLE__ )
-		stamp.modified = FS_StampTime( info.st_mtimespec );
-		stamp.changed = FS_StampTime( info.st_ctimespec );
-#else
 		stamp.modified = FS_StampTime( info.st_mtim );
 		stamp.changed = FS_StampTime( info.st_ctim );
-#endif
 		// The device number stays out: btrfs subvolumes and network mounts
 		// get a new one at each mount, and the path and inode pin the file.
 		stamp.fileId = static_cast<uint64_t>( info.st_ino );
 		stamped = true;
 	}
-#endif
 	fclose( file );
 	stamp.zipChecksum = static_cast<uint32_t>( pack->checksum );
 	stamp.zipFiles = static_cast<uint32_t>( pack->numfiles );
@@ -6071,11 +5781,7 @@ sharing fs_cachepath never read a partial record.
 bool idFileSystemLocal::WriteVerifiedOpenQ4Paks( const std::vector<verifiedOpenQ4Pak_t> &records ) {
 	std::string text;
 	FS_FormatVerifiedPaks( records, text );
-#ifdef _WIN32
-	const unsigned long processId = static_cast<unsigned long>( GetCurrentProcessId() );
-#else
 	const unsigned long processId = static_cast<unsigned long>( getpid() );
-#endif
 	const idStr staged = va( "generated/packs/verified.%lu.tmp", processId );
 	const int length = static_cast<int>( text.size() );
 	if ( WriteFile( staged, text.data(), length, "fs_cachepath" ) == length &&
@@ -7128,15 +6834,8 @@ void idFileSystemLocal::Init( void ) {
 	// 4) GOG install paths
 	if ( fs_basepath.GetString()[0] ) {
 		if ( !FS_HasGameFilesAtBasePath( fs_basepath.GetString() ) ) {
-#if defined( __ANDROID__ )
-			// The Android host supplies its accessible retail-data directory.
-			// Preserve it through missing/incomplete onboarding; desktop install
-			// discovery would replace it with the process working directory.
-			common->Warning( "fs_basepath '%s' has no %s game files", fs_basepath.GetString(), BASE_GAMEDIR );
-#else
 			common->Warning( "fs_basepath '%s' has no %s game files, auto-discovery will be attempted", fs_basepath.GetString(), BASE_GAMEDIR );
 			fs_basepath.SetString( "" );
-#endif
 		}
 	}
 	if ( fs_basepath.GetString()[0] == '\0' ) {

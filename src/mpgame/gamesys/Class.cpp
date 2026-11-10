@@ -10,19 +10,7 @@ instancing of objects.
 
 #include "../Game_local.h"
 
-#if defined(_WIN32)
-	#if defined(__has_include)
-		#if __has_include("TypeInfo.h")
-			#include "TypeInfo.h"
-		#else
-			#include "NoGameTypeInfo.h"
-		#endif
-	#else
-		#include "TypeInfo.h"
-	#endif
-#else
 	#include "NoGameTypeInfo.h"
-#endif
 
 /***********************************************************************
 
@@ -695,12 +683,6 @@ bool idClass::PostEventArgs( const idEventDef *ev, int time, int numargs, ... ) 
 // jnewquist: Use accessor for static class type 
 	bool isClient = !IsClient() && gameLocal.isClient;
 
-#ifdef _XENON
-	// nrausch: We want to allow selectWeapon to pass through, but that's all
-	if ( idStr::Cmp( ev->GetName(), "selectWeapon" ) == 0 ) {
-		isClient = false;
-	}
-#endif
 
 	if(  isClient && ( gameLocal.GameState() != GAMESTATE_STARTUP ) && ( gameLocal.GameState() != GAMESTATE_RESTART ) && !IsType( idThread::GetClassType() ) ) {
 // RAVEN END

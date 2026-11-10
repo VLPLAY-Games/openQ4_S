@@ -59,12 +59,8 @@ class idLocationEntity;
 
 // RAVEN BEGIN
 // dluetscher: reduced max clients for memory usage
-#ifdef _XENON
-#define	MAX_CLIENTS				16
-#else
 // RAVEN END
 #define	MAX_CLIENTS				32
-#endif
 
 #define	GENTITYNUM_BITS			12
 #define	MAX_GENTITIES			(1<<GENTITYNUM_BITS)
@@ -1668,11 +1664,7 @@ const int	CINEMATIC_SKIP_DELAY	= SEC2MS( 2.0f );
 #include "script/Script_Interpreter.h"
 #include "script/Script_Thread.h"
 
-#ifdef _XENON
-#define PACIFIER_UPDATE session->PacifierUpdate()
-#else
 #define PACIFIER_UPDATE
-#endif
 
 ID_INLINE rvClientEffect* idGameLocal::PlayEffect( const idDict& args, const char* effectName, const idVec3& origin, const idMat3& axis, bool loop, const idVec3& endOrigin, bool broadcast, bool predictBit, effectCategory_t category, const idVec4& effectTint ) {
 	return PlayEffect( GetEffect( args, effectName ), origin, axis, loop, endOrigin, broadcast, predictBit, category, effectTint );

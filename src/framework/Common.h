@@ -155,13 +155,6 @@ extern volatile int	com_ticNumber;			// 60 hz tics, incremented by async functio
 extern int			com_editors;			// current active editor(s)
 extern bool			com_editorActive;		// true if an editor has focus
 
-#ifdef _WIN32
-const char			DMAP_MSGID[] = "DMAPOutput";
-const char			DMAP_DONE[] = "DMAPDone";
-extern HWND			com_hwndMsg;
-extern bool			com_outputMsg;
-#endif
-
 struct MemInfo_t {
 	idStr			filebase;
 

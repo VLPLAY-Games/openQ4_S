@@ -13,9 +13,6 @@
 #include "../tr_local.h"
 #include "../TemporalPresentation.h"
 
-#if defined( OPENQ4_RENDERER_GL_MODULE ) && defined( _WIN32 )
-#include <windows.h>
-#endif
 #if defined( OPENQ4_RENDERER_GL_MODULE ) && defined( __linux__ )
 #include <dlfcn.h>
 #endif
@@ -166,12 +163,7 @@ bool R_VR_QueryGraphicsBinding( renderVRGraphicsBinding_t &binding ) {
 	}
 	R_VR_ContextVersion( binding );
 
-#if defined( _WIN32 )
-	binding.kind = RENDER_VR_BINDING_WGL;
-	binding.wglDC = wglGetCurrentDC();
-	binding.wglContext = wglGetCurrentContext();
-	return binding.wglDC != NULL && binding.wglContext != NULL;
-#elif defined( __linux__ )
+#if defined( __linux__ )
 	typedef void *( *getCurrentContext_t )( void );
 	typedef void *( *getCurrentDisplay_t )( void );
 	typedef unsigned long ( *getCurrentDrawable_t )( void );
@@ -488,7 +480,7 @@ void R_VR_ShutdownTargets( void ) {
 	rb_vrTarget = -2;
 }
 
-#else // !OPENQ4_VR_GL_PRESENTATION
+#else
 
 bool R_VR_BackendCanPresent( void ) {
 	return false;

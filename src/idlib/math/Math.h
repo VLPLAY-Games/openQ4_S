@@ -944,13 +944,11 @@ ID_INLINE int idMath::FtoiFast( float f ) {
 						  "fistpl	%0\n\t"
 						  : "=m"(i) : "m"(f));
 		return i;
-	#else
+#else
 		// lrintf is equivalent but only inlines at -O3
 		// although that should be more portable
 		return lrintf( f );
 	#endif
-#elif defined( MACOS_X )
-	return lrintf( f );
 #else
 	return (int) f;
 #endif

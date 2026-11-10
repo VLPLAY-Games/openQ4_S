@@ -39,10 +39,6 @@ public:
 	virtual void			FreeData( void );
 // RAVEN BEGIN
 // mwhitlock: Xenon texture streaming
-#if defined(_XENON)
-	void					StreamAllSkinTargets(bool inBackground);
-	void					GetSkinTargetsList(idList<const idMaterial*>& outList) const;
-#endif
 // RAVEN END
 	// virtual so the renderer module reaches it across the DLL boundary
 	// (Phase B8, docs/dev/archive/2026-10-18/plans/2026-07-16-vulkan-renderer-phase-b.md)

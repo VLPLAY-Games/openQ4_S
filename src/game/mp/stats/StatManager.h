@@ -321,9 +321,6 @@ private:
 	// shouchard:  stat allocator to avoid lots of little news
 	rvStatAllocator				statAllocator;
 
-#ifdef _XENON
-	int							lastFullUpdate;
-#endif
 
 #if ID_TRAFFICSTATS
 	int							startSent;

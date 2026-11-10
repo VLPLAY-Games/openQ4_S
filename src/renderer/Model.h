@@ -411,10 +411,6 @@ public:
 	modelCallback_t				callback;
 
 // mwhitlock: Xenon texture streaming
-#if defined(_XENON)
-	// All the materials that are referenced by an instance of an idRenderModel.
-	idList<idMaterial*>			allMaterials;
-#endif
 
 // AReis: Specific just to a fluid model.
 	// Dampen a grid element that intersects the world.

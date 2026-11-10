@@ -34,15 +34,15 @@
 		#ifdef _DEBUG
 			#pragma comment(lib, "PropTreeDU")
 			#pragma message("Automatically linking with PropTreeDU.dll (Debug Unicode)")
-		#else
+#else
 			#pragma comment(lib, "PropTreeU")
 			#pragma message("Automatically linking with PropTreeU.dll (Release Unicode)")
 		#endif
-	#else
+#else
 		#ifdef _DEBUG
 			#pragma comment(lib, "PropTreeD")
 			#pragma message("Automatically linking with PropTreeD.dll (Debug)")
-		#else
+#else
 			#pragma comment(lib, "PropTree")
 			#pragma message("Automatically linking with PropTree.dll (Release)")
 		#endif

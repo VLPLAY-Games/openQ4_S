@@ -29,12 +29,6 @@ If you have questions concerning this license or the applicable additional terms
 
 
 
-#ifdef WIN32
-#include <windows.h>
-#include <GL/gl.h>
-#include <GL/glu.h>
-#include "../../../sys/win32/win_local.h"
-#endif
 
 #include "../../../renderer/tr_local.h"
 
@@ -123,29 +117,6 @@ ResizeWindow
 ===============
 */
 static void ResizeWindow( int width, int height ) {
-#ifdef WIN32
-	int	winWidth, winHeight;
-	if ( glConfig.isFullscreen ) {
-		winWidth = width;
-		winHeight = height;
-	} else {
-		RECT	r;
-
-		// adjust width and height for window border
-		r.bottom = height;
-		r.left = 0;
-		r.top = 0;
-		r.right = width;
-
-		AdjustWindowRect (&r, WINDOW_STYLE|WS_SYSMENU, FALSE);
-		winHeight = r.bottom - r.top;
-		winWidth = r.right - r.left;
-
-	}
-	SetWindowPos( win32.hWnd, HWND_TOP, 0, 0, winWidth, winHeight, SWP_SHOWWINDOW );
-
-	qwglMakeCurrent( win32.hDC, win32.hGLRC );
-#endif
 }
 
 /*
@@ -154,26 +125,6 @@ RestoreWindow
 ===============
 */
 static void RestoreWindow( void ) {
-#ifdef WIN32
-	int	winWidth, winHeight;
-	if ( glConfig.isFullscreen ) {
-		winWidth = oldWidth;
-		winHeight = oldHeight;
-	} else {
-		RECT	r;
-
-		// adjust width and height for window border
-		r.bottom = oldHeight;
-		r.left = 0;
-		r.top = 0;
-		r.right = oldWidth;
-
-		AdjustWindowRect (&r, WINDOW_STYLE|WS_SYSMENU, FALSE);
-		winHeight = r.bottom - r.top;
-		winWidth = r.right - r.left;
-	}
-	SetWindowPos( win32.hWnd, HWND_TOP, 0, 0, winWidth, winHeight, SWP_SHOWWINDOW );
-#endif
 }
 
 /*

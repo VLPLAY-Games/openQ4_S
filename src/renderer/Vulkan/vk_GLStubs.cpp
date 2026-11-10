@@ -451,26 +451,6 @@ extern "C" openQ4GlewProcAddress_t OpenQ4_GlewGetProcAddress(const unsigned char
 	return NULL;
 }
 
-#if defined( _WIN32 )
-// the qgl loader surface the mixed TUs reference on Windows
-PROC ( WINAPI *qwglGetProcAddress )( LPCSTR ) = NULL;
-
-// wgl extension pointers RenderSystem_init externs
-#include "../wglext.h"
-PFNWGLGETEXTENSIONSSTRINGARBPROC wglGetExtensionsStringARB = NULL;
-PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT = NULL;
-PFNWGLGETPIXELFORMATATTRIBIVARBPROC wglGetPixelFormatAttribivARB = NULL;
-PFNWGLGETPIXELFORMATATTRIBFVARBPROC wglGetPixelFormatAttribfvARB = NULL;
-PFNWGLCHOOSEPIXELFORMATARBPROC wglChoosePixelFormatARB = NULL;
-PFNWGLCREATEPBUFFERARBPROC wglCreatePbufferARB = NULL;
-PFNWGLGETPBUFFERDCARBPROC wglGetPbufferDCARB = NULL;
-PFNWGLRELEASEPBUFFERDCARBPROC wglReleasePbufferDCARB = NULL;
-PFNWGLDESTROYPBUFFERARBPROC wglDestroyPbufferARB = NULL;
-PFNWGLQUERYPBUFFERARBPROC wglQueryPbufferARB = NULL;
-PFNWGLBINDTEXIMAGEARBPROC wglBindTexImageARB = NULL;
-PFNWGLRELEASETEXIMAGEARBPROC wglReleaseTexImageARB = NULL;
-PFNWGLSETPBUFFERATTRIBARBPROC wglSetPbufferAttribARB = NULL;
-#endif
 
 bool QGL_Init( const char *dllname ) {
 	(void)dllname;

@@ -86,7 +86,7 @@
 #ifndef MAX_MEM_LEVEL
 #  ifdef MAXSEG_64K
 #    define MAX_MEM_LEVEL 8
-#  else
+#else
 #    define MAX_MEM_LEVEL 9
 #  endif
 #endif
@@ -2769,19 +2769,7 @@ int inflate_blocks(inflate_blocks_statef *s, z_streamp z, int r)
       t = s->sub.left;
       if (t > n) t = n;
       if (t > m) t = m;
-#ifdef MACOS_X // Optimization
-	  if (t>64) {
-		zmemcpy(q, p, t);
-      }
-	  else {
-		int t1;
-		for (t1=0; t1<t; t1++) {
-			q[t1] = p[t1];
-		}
-	  }
-#else
       zmemcpy(q, p, t);
-#endif
       p += t;  n -= t;
       q += t;  m -= t;
       if ((s->sub.left -= t) != 0)
@@ -2994,19 +2982,7 @@ int inflate_flush(inflate_blocks_statef *s, z_streamp z, int r)
     z->adler = s->check = (*s->checkfn)(s->check, q, n);
 
   /* copy as as end of window */
-#ifdef MACOS_X // Optimization
-  if (n>64) {
-	zmemcpy(p, q, n);
-  }
-  else {
-	int t1;
-	for (t1=0; t1<n; t1++) {
-		p[t1] = q[t1];
-	}
-  }
-#else
   zmemcpy(p, q, n);
-#endif
   p += n;
   q += n;
 
@@ -3032,19 +3008,7 @@ int inflate_flush(inflate_blocks_statef *s, z_streamp z, int r)
       z->adler = s->check = (*s->checkfn)(s->check, q, n);
 
     /* copy */
-#ifdef MACOS_X // Optimization
-	if (n>64) {
-	  zmemcpy(p, q, n);
-	}
-	else {
-	  int t1;
-	  for (t1=0; t1<n; t1++) {
-		p[t1] = q[t1];
-	  }
-	}
-#else
     zmemcpy(p, q, n);
-#endif
     p += n;
     q += n;
   }

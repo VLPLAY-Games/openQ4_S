@@ -37,9 +37,6 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
-#if defined( MACOS_X )
-#include <dlfcn.h>
-#endif
 #include "volk.h"
 #include "vk_mem_alloc.h"
 
@@ -540,49 +537,8 @@ that looked only where volk looks would find no MoltenVK inside the app bundle
 and send every packaged Mac back to OpenGL.
 ====================
 */
-#if defined( MACOS_X )
-static bool VK_Device_AdoptLoaderAt( const char *path ) {
-	void *handle = dlopen( path, RTLD_NOW | RTLD_LOCAL );
-	if ( handle == NULL ) {
-		return false;
-	}
-	PFN_vkGetInstanceProcAddr getInstanceProcAddr =
-			(PFN_vkGetInstanceProcAddr)dlsym( handle, "vkGetInstanceProcAddr" );
-	if ( getInstanceProcAddr == NULL ) {
-		dlclose( handle );
-		return false;
-	}
-	volkInitializeCustom( getInstanceProcAddr );
-	common->Printf( "Vulkan: loader %s\n", path );
-	return true;
-}
-#endif
 
 bool VK_Device_InitLoader( void ) {
-#if defined( MACOS_X )
-	const char *pinned = getenv( "SDL_VULKAN_LIBRARY" );
-	if ( pinned != NULL && pinned[ 0 ] != '\0' && VK_Device_AdoptLoaderAt( pinned ) ) {
-		return true;
-	}
-
-	idStr exeDir = Sys_EXEPath();
-	exeDir.StripFilename();
-
-	// openQ4.app/Contents/MacOS/openQ4 -> openQ4.app/Contents/Frameworks, then
-	// either supported loose package layout: Frameworks/ or executable-adjacent.
-	const idStr bundled = exeDir + "/../Frameworks/libMoltenVK.dylib";
-	if ( VK_Device_AdoptLoaderAt( bundled.c_str() ) ) {
-		return true;
-	}
-	const idStr looseFramework = exeDir + "/Frameworks/libMoltenVK.dylib";
-	if ( VK_Device_AdoptLoaderAt( looseFramework.c_str() ) ) {
-		return true;
-	}
-	const idStr adjacent = exeDir + "/libMoltenVK.dylib";
-	if ( VK_Device_AdoptLoaderAt( adjacent.c_str() ) ) {
-		return true;
-	}
-#endif
 	return volkInitialize() == VK_SUCCESS;
 }
 

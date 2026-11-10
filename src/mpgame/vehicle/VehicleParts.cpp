@@ -608,9 +608,6 @@ rvVehicleWeapon::rvVehicleWeapon
 */
 rvVehicleWeapon::rvVehicleWeapon ( void ) {
 	zoomGui = NULL;
-#ifdef _XENON
-	bestEnemy		= 0;
-#endif
 	nextFireTime	= 0;
 	fireDelay		= 0;
 	hitScanDef		= NULL;
@@ -646,9 +643,6 @@ void rvVehicleWeapon::Spawn ( void ) {
 	idStr	temp;
 	idVec3	color;
 
-#ifdef _XENON
-	bestEnemy = 0;
-#endif
 
 	launchFromJoint = spawnArgs.GetBool ( "launchFromJoint", "0" );
 	lockScanning = spawnArgs.GetBool ( "lockScanning", "0" );
@@ -764,9 +758,6 @@ void rvVehicleWeapon::Activate ( bool activate ) {
 	
 	nextFireTime = gameLocal.time + WEAPON_DELAY_FIRE;
 
-#ifdef _XENON
-	bestEnemy = 0;
-#endif
 }
 
 /*
@@ -803,76 +794,6 @@ void rvVehicleWeapon::UpdateRetainedScope( void ) {
 
 void rvVehicleWeapon::UpdateLock ( void ) {
 	
-#ifdef _XENON
-
-	bestEnemy = 0;
-	
-	// Handle auto-aim if it's enabled
-	if ( cvarSystem->GetCVarBool("pm_AimAssist") ) {
-	
-		const float testDist = 2000.0f; // huge because we're outdoors
-		
-		idPlayer *player = gameLocal.GetLocalPlayer();
-		if ( player && position->GetDriver() == player ) {
-		
-			idVec3 start = position->GetEyeOrigin();
-			idVec3 end = start + (position->GetEyeAxis().ToAngles().ToForward() * testDist);
-
-			idBounds bounds( start );
-			bounds.AddPoint( end );
-
-			idClipModel *clipModelList[ MAX_GENTITIES ];
-			int numClipModels = gameLocal.ClipModelsTouchingBounds( player, bounds, -1, clipModelList, MAX_GENTITIES );
-			
-			float bDist = testDist;
-			
- 			float fovX, fovY;
- 			gameLocal.CalcFov( player->CalcFov( true ), fovX, fovY );
-			float dNear = cvarSystem->GetCVarFloat( "r_znear" );
-			float dFar = testDist;
-			float size = dFar * idMath::Tan( DEG2RAD( fovY * 0.5f ) ) * float(cvarSystem->GetCVarInteger("pm_AimAssistFOV")) / 100.0f;
-			
-			idFrustum aimArea;
-			aimArea.SetOrigin( start );
-			aimArea.SetAxis( position->GetEyeAxis() );
-			aimArea.SetSize( dNear, dFar, size, size );
-
-			for ( int i = 0; i < numClipModels; i++ ) {
-				
-				idClipModel *clip = clipModelList[ i ];
-				idEntity *ent = clip->GetEntity();
-
-				if ( ent->IsHidden() ) {
-					continue;
-				}
-
-				bool isAI = ent->IsType( idAI::GetClassType() );
-				bool isFriendly = false;
-				
-				if ( isAI ) {
-					if ( static_cast<idAI *>( ent )->team == player->team ) {
-						continue;
-					}
-				} else {
-					continue;
-				}
-				
-				float focusLength = (ent->GetPhysics()->GetOrigin() - start).LengthFast() - ent->GetPhysics()->GetBounds().GetRadius();
-			
-				const idBounds &b = ent->GetPhysics()->GetAbsBounds();
-				bool inside = aimArea.IntersectsBounds(b);
-				
-				if ( inside ) {
-					float dist = b.ShortestDistance(start);
-					if ( bDist > dist ) {
-						bDist = dist;
-						bestEnemy = (idActor *)ent;
-					}
-				}
-			}
-		}
-	}
-#endif
 	
 	if ( !position->GetDriver() || parent->health <= 0 || !lockScanning) {
 		StopTargetEffect( );
@@ -1094,9 +1015,6 @@ void rvVehicleWeapon::Restore ( idRestoreGame* savefile ) {
 	int		num;
 	idStr	temp;
 
-#ifdef _XENON
-	bestEnemy = 0;
-#endif
 
 	savefile->ReadInt ( nextFireTime );
 	savefile->ReadInt ( fireDelay );
@@ -1202,53 +1120,6 @@ bool rvVehicleWeapon::Fire() {
 	return true;
 }
  
-#ifdef _XENON
-/*
-=====================
-rvVehicleWeapon::AutoAim
-=====================
-*/
-void rvVehicleWeapon::AutoAim( idPlayer* player, const idVec3& origin, idVec3& dir ) {
-	
-	if ( player ) {
-	
-		// If we have a enemy selected, handle aim correction
-		if ( bestEnemy ) {
-		
-			idVec3 dif = bestEnemy->GetRenderEntity()->origin - origin;
-			idVec3 muzzleDest = origin + (dir * dif.Length() );
-			
-			// Transform start and end into the enemy's body space
-			idVec3 localStart = bestEnemy->GetRenderEntity()->axis / (origin - bestEnemy->GetRenderEntity()->origin);
-			idVec3 localEnd = bestEnemy->GetRenderEntity()->axis / (muzzleDest - bestEnemy->GetRenderEntity()->origin);
-			
-			if ( bestEnemy->GetAnimator() ) {
-				int numJoints = bestEnemy->GetAnimator()->NumJoints();
-				
-				if ( numJoints ) {
-				
-					jointHandle_t nearJoint = bestEnemy->GetAnimator()->GetNearestJoint( localStart, localEnd, gameLocal.time, 0, numJoints );
-			
-					// If we found a valid joint to snap to...
-					if ( nearJoint > 0 ) {
-						idMat3 dummy;
-						bestEnemy->GetJointWorldTransform( nearJoint, gameLocal.time, muzzleDest, dummy );
-						dir = muzzleDest - origin;
-						dir.Normalize();
-					} else {
-						dir = bestEnemy->GetRenderEntity()->origin - origin;
-						dir.Normalize();
-					}
-				}
-			} else {
-				dir = bestEnemy->GetRenderEntity()->origin - origin;
-				dir.Normalize();
-			}
-			
-		}
-	}
-}
-#endif
 
 /*
 =====================
@@ -1270,11 +1141,6 @@ void rvVehicleWeapon::LaunchHitScan( const idVec3& origin, const idVec3& _dir, c
 		}
 	}
 	
-#ifdef _XENON
-
-	AutoAim( player, origin, dir );
-
-#endif
 	
 	gameLocal.HitScan ( *hitScanDef, origin, dir, jointOrigin, position->GetDriver(), false, 1.0f, parent );
 }
@@ -1306,11 +1172,6 @@ void rvVehicleWeapon::LaunchProjectile( const idVec3& origin, const idVec3& _dir
 		}
 	}
 	
-#ifdef _XENON
-
-	AutoAim( player, origin, dir );
-
-#endif
 
 
 	projectile = ( idProjectile * )ent;
@@ -1320,15 +1181,7 @@ void rvVehicleWeapon::LaunchProjectile( const idVec3& origin, const idVec3& _dir
 	
 	if ( projectile->IsType ( idGuidedProjectile::GetClassType() ) ) {
 		if ( spawnArgs.GetBool("guideTowardsDir") && (!targetEnt || targetJoint == INVALID_JOINT) ) {
-#ifndef _XENON			
 			static_cast<idGuidedProjectile*>(projectile)->GuideTo ( position->GetEyeOrigin(), position->GetEyeAxis()[0] );
-#else
-			if ( bestEnemy ) {
-				static_cast<idGuidedProjectile*>(projectile)->GuideTo ( origin, dir );
-			} else {
-				static_cast<idGuidedProjectile*>(projectile)->GuideTo ( position->GetEyeOrigin(), position->GetEyeAxis()[0] );
-			}
-#endif
 		
 		} else if ( targetEnt ) {
 			static_cast<idGuidedProjectile*>(projectile)->GuideTo ( targetEnt, targetJoint, targetPos );

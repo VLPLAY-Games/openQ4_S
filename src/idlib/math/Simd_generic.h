@@ -13,13 +13,8 @@
 // RAVEN BEGIN
 // jsinger: should not be virtual on xenon otherwise the mispredicted branch far outways the
 //          savings we get from doing SIMD in the first place.  Also inheritence is unnecessary
-#ifdef _XENON
-#define VIRTUAL
-class idSIMD_Generic {
-#else
 #define VIRTUAL virtual
 class idSIMD_Generic : public idSIMDProcessor {
-#endif
 public:
 	VIRTUAL const char * VPCALL GetName( void ) const;
 

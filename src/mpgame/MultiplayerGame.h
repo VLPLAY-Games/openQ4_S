@@ -265,9 +265,6 @@ const int RCON_HISTORY_SIZE = 4096;
 const int KILL_NOTIFICATION_LEN = 256;
 //RAVEN BEGIN
 //asalmon: update stats for Xenon
-#ifdef _XENON
-const int XENON_STAT_UPDATE_INTERVAL = 1000;
-#endif
 
 const int ASYNC_PLAYER_FRAG_BITS = -idMath::BitsForInteger( MP_PLAYER_MAXFRAGS - MP_PLAYER_MINFRAGS );	// player can have negative frags
 const int ASYNC_PLAYER_WINS_BITS = idMath::BitsForInteger( MP_PLAYER_MAXWINS );
@@ -760,12 +757,6 @@ public:
 
 //RAVEN BEGIN
 //asalmon: Xenon scoreboard update
-#ifdef _XENON
-	void			UpdateXenonScoreboard( idUserInterface *scoreBoard );
-	int				lastScoreUpdate;
-// mekberg: for selecting local player
-	void			SelectLocalPlayer( idUserInterface *scoreBoard );
-#endif
 //RAVEN END
 	int				VerifyTeamSwitch( int wantTeam, idPlayer *player );
 

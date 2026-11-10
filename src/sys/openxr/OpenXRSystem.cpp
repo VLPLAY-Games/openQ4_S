@@ -36,11 +36,6 @@
 #include "../../framework/PresentationClock.h"
 #include "../../ui/RetainedUI.h"
 
-#if defined( _WIN32 )
-#include <windows.h>
-#include <unknwn.h>		// openxr_platform.h's Win32 section names IUnknown
-#define XR_USE_PLATFORM_WIN32
-#endif
 #define XR_USE_GRAPHICS_API_OPENGL
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
@@ -1233,12 +1228,8 @@ bool idVRSystemOpenXR::CreateSession( void ) {
 	memset( &createInfo, 0, sizeof( createInfo ) );
 	createInfo.type = XR_TYPE_SESSION_CREATE_INFO;
 	createInfo.systemId = systemId;
-#if defined( _WIN32 )
-	XrGraphicsBindingOpenGLWin32KHR win32Binding;
-#else
 	vrXlibGraphicsBinding_t xlibBinding;
 	vrEGLGraphicsBinding_t eglBinding;
-#endif
 	vrVulkanGraphicsBinding_t vulkanBinding;
 
 	if ( binding.kind == RENDER_VR_BINDING_VULKAN ) {
@@ -1306,13 +1297,6 @@ bool idVRSystemOpenXR::CreateSession( void ) {
 				binding.glMajor, binding.glMinor );
 			return false;
 		}
-#if defined( _WIN32 )
-		memset( &win32Binding, 0, sizeof( win32Binding ) );
-		win32Binding.type = XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR;
-		win32Binding.hDC = static_cast<HDC>( binding.wglDC );
-		win32Binding.hGLRC = static_cast<HGLRC>( binding.wglContext );
-		createInfo.next = &win32Binding;
-#else
 		if ( binding.kind == RENDER_VR_BINDING_EGL ) {
 			memset( &eglBinding, 0, sizeof( eglBinding ) );
 			eglBinding.type = XR_TYPE_GRAPHICS_BINDING_EGL_MNDX;
@@ -1331,7 +1315,6 @@ bool idVRSystemOpenXR::CreateSession( void ) {
 			xlibBinding.glxContext = binding.glxContext;
 			createInfo.next = &xlibBinding;
 		}
-#endif
 		graphicsApi = VR_GRAPHICS_OPENGL;
 	}
 	if ( !Check( xrCreateSession( instance, &createInfo, &session ), "xrCreateSession" ) ) {

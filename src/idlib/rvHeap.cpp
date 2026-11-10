@@ -130,13 +130,6 @@ void rvHeap::Init( rvHeapArena &heapArena, uint maxHeapSizeBytes, uint flags )
 		protection |= PAGE_NOCACHE;
 	}
 	allocType = MEM_RESERVE;
-#ifdef _XENON
-	if ( PAGE_SIZE_SHIFT == 16 )
-	{
-		allocType |= MEM_LARGE_PAGES;
-	}
-	allocType |= MEM_NOZERO;
-#endif
 	m_baseAddress = (byte *) VirtualAlloc( NULL, numPageTableBytes+m_heapRangeBytes, allocType, protection );
 	if ( NULL == m_baseAddress )
 	{
@@ -149,12 +142,6 @@ void rvHeap::Init( rvHeapArena &heapArena, uint maxHeapSizeBytes, uint flags )
 	// commit the initial block of that range for use by the page table
 	// Note: We want this to zero the memory for the page table init!
 	allocType = MEM_COMMIT;
-#ifdef _XENON
-	if ( PAGE_SIZE_SHIFT == 16 )
-	{
-		allocType |= MEM_LARGE_PAGES;
-	}
-#endif
 	pageTableData = (byte *) VirtualAlloc( m_baseAddress, numPageTableBytes, allocType, PAGE_READWRITE );
 	if ( NULL == pageTableData )
 	{
@@ -1251,13 +1238,6 @@ void *rvHeap::CommitPageRange( uint startPageOffset, uint numPages )
 	m_committedSizeBytes += commitSize;
 
 	allocType = MEM_COMMIT;
-#ifdef _XENON
-	if ( PAGE_SIZE_SHIFT == 16 )
-	{
-		allocType |= MEM_LARGE_PAGES;
-	}
-	allocType |= MEM_NOZERO;
-#endif
 	committedBaseAddress = VirtualAlloc( m_heapStorageStart + (startPageOffset << PAGE_SIZE_SHIFT), commitSize, allocType, PAGE_READWRITE );
 	if ( NULL == committedBaseAddress)
 	{

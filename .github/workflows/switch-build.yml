@@ -1,0 +1,31 @@
+name: Switch build
+
+# Manual only: the build needs the whole devkitPro toolchain and a host Meson tree,
+# so it is run on demand rather than on every push. Not yet verified on GitHub runners.
+on:
+  workflow_dispatch:
+
+jobs:
+  nro:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends meson ninja-build python3 g++ pkg-config libwayland-dev wayland-protocols libx11-dev libxext-dev
+          dkp-pacman -Syu --noconfirm
+          dkp-pacman -S --noconfirm switch-mesa switch-sdl2 switch-openal-soft switch-libvorbis switch-zlib
+      - name: Configure host tree
+        run: |
+          meson setup build-host --buildtype release -Dplatform_backend=sdl3 -Dbuild_renderer_gles=enabled
+          ninja -C build-host
+      - name: Generate and build the NRO
+        run: |
+          python3 tools/switch/gen_ninja.py --host-build build-host --out build-switch
+          ninja -C build-switch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openQ4-nro
+          path: build-switch/openQ4.nro

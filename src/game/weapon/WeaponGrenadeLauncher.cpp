@@ -15,9 +15,6 @@ public:
 	void					PreSave				( void );
 	void					PostSave			( void );
 
-#ifdef _XENON
-	virtual bool		AllowAutoAim			( void ) const { return false; }
-#endif
 
 private:
 

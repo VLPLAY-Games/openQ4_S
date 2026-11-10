@@ -36,21 +36,9 @@
 #include "../framework/EventLoop.h"
 #include "../framework/Console.h"
 
-#if defined( _WIN32 )
-#include <windows.h>
-#else
 #include <pthread.h>
 #include <string.h>
-#endif
 
-#if defined( MACOS_X )
-#include <limits.h>
-#include <mach-o/dyld.h>
-// same defensive fallback the macOS platform sources carry
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif
-#endif
 
 /*
 ====================
@@ -170,38 +158,6 @@ const char *Sys_GetProcessorString( void ) {
 	return rgm_services->CVar_GetString( "sys_cpustring" );
 }
 
-#if defined( MACOS_X )
-/*
-====================
-Sys_EXEPath
-
-macOS only, and required rather than merely convenient: the ELF modules can
-leave this undefined and let dlopen bind the engine's copy, but Mach-O resolves
-every undefined symbol when the dylib is *linked*, so renderer-vk fails to link
-outright without a module-local definition. The reference comes from the
-MoltenVK loader search in VulkanDevice.cpp, which anchors its bundle-relative
-lookup on the executable directory.
-
-_NSGetExecutablePath is exactly what the engine's own macOS Sys_EXEPath is built
-on (src/sys/macos/macos_compat.mm), so both halves resolve the same MoltenVK
-image - which is the whole point of that search, since two libraries behind one
-VkInstance is undefined behavior. The engine's NSBundle fallback is dropped
-here: it needs Objective-C, and it only ever runs when _NSGetExecutablePath
-itself fails.
-====================
-*/
-const char *Sys_EXEPath( void ) {
-	static char exePath[ PATH_MAX ];
-
-	uint32_t bufferSize = (uint32_t)sizeof( exePath );
-	if ( _NSGetExecutablePath( exePath, &bufferSize ) != 0 ) {
-		// the real path does not fit; callers treat empty as "unknown" and
-		// fall through to the system Vulkan loader
-		exePath[ 0 ] = '\0';
-	}
-	return exePath;
-}
-#endif
 
 void Sys_InitInput( void ) {
 	if ( rgm_windowServices != NULL && rgm_windowServices->InitInput != NULL ) {
@@ -259,58 +215,6 @@ bool Sys_IsThreadStopRequested( const xthreadInfo &info ) {
 	return info.stopRequested;
 }
 
-#if defined( _WIN32 )
-
-void Sys_CreateThread( xthread_t function, void *parms, xthreadPriority priority, xthreadInfo &info, const char *name, xthreadInfo *threads[MAX_THREADS], int *thread_count ) {
-	DWORD threadId = 0;
-	HANDLE temp = CreateThread( NULL, 0, ( LPTHREAD_START_ROUTINE )function, parms, 0, &threadId );
-	info.threadHandle = reinterpret_cast<uintptr_t>( temp );
-	info.threadId = static_cast<uint32_t>( threadId );
-	info.stopRequested = false;
-	if ( priority == THREAD_HIGHEST ) {
-		SetThreadPriority( reinterpret_cast<HANDLE>( info.threadHandle ), THREAD_PRIORITY_HIGHEST );
-	} else if ( priority == THREAD_ABOVE_NORMAL ) {
-		SetThreadPriority( reinterpret_cast<HANDLE>( info.threadHandle ), THREAD_PRIORITY_ABOVE_NORMAL );
-	}
-	info.name = name;
-	// Match RGM_RemoveThreadInfo and the POSIX branch below: the slot store and
-	// the count bump have to be serialized against the readers, otherwise a
-	// weakly ordered target can expose the bumped count with a stale slot.
-	Sys_EnterCriticalSection( CRITICAL_SECTION_ZERO );
-	if ( *thread_count < MAX_THREADS ) {
-		threads[( *thread_count )++] = &info;
-		Sys_LeaveCriticalSection( CRITICAL_SECTION_ZERO );
-	} else {
-		Sys_LeaveCriticalSection( CRITICAL_SECTION_ZERO );
-		common->DPrintf( "WARNING: MAX_THREADS reached\n" );
-	}
-}
-
-bool Sys_IsCurrentThreadStopRequested( void ) {
-	const DWORD id = GetCurrentThreadId();
-	bool stopRequested = false;
-	Sys_EnterCriticalSection( CRITICAL_SECTION_ZERO );
-	for ( int i = 0; i < g_thread_count; i++ ) {
-		if ( g_threads[i] != NULL && id == g_threads[i]->threadId ) {
-			stopRequested = g_threads[i]->stopRequested;
-			break;
-		}
-	}
-	Sys_LeaveCriticalSection( CRITICAL_SECTION_ZERO );
-	return stopRequested;
-}
-
-void Sys_DestroyThread( xthreadInfo &info ) {
-	Sys_RequestThreadStop( info );
-	WaitForSingleObject( reinterpret_cast<HANDLE>( info.threadHandle ), INFINITE );
-	CloseHandle( reinterpret_cast<HANDLE>( info.threadHandle ) );
-	info.threadHandle = 0;
-	info.threadId = 0;
-	info.stopRequested = false;
-	RGM_RemoveThreadInfo( info );
-}
-
-#else
 
 typedef void *( *rgmPthreadFunction_t )( void * );
 
@@ -389,7 +293,6 @@ void Sys_DestroyThread( xthreadInfo &info ) {
 	RGM_RemoveThreadInfo( info );
 }
 
-#endif
 
 /*
 ====================
@@ -481,27 +384,6 @@ only tracks the driver library handle on Windows for parity with the legacy
 loader.
 ====================
 */
-#if defined( _WIN32 )
-static HMODULE rgm_glDriverModule = NULL;
-PROC ( WINAPI *qwglGetProcAddress )( LPCSTR ) = NULL;
-
-bool QGL_Init( const char *dllname ) {
-	rgm_glDriverModule = LoadLibraryA( dllname );
-	if ( rgm_glDriverModule == NULL ) {
-		return false;
-	}
-	qwglGetProcAddress = ( PROC ( WINAPI * )( LPCSTR ) )GetProcAddress( rgm_glDriverModule, "wglGetProcAddress" );
-	return true;
-}
-
-void QGL_Shutdown( void ) {
-	qwglGetProcAddress = NULL;
-	if ( rgm_glDriverModule != NULL ) {
-		FreeLibrary( rgm_glDriverModule );
-		rgm_glDriverModule = NULL;
-	}
-}
-#else
 bool QGL_Init( const char *dllname ) {
 	(void)dllname;
 	return true;
@@ -509,7 +391,6 @@ bool QGL_Init( const char *dllname ) {
 
 void QGL_Shutdown( void ) {
 }
-#endif
 
 #endif /* OPENQ4_RENDERER_GL_MODULE || OPENQ4_RENDERER_GLES_MODULE */
 
@@ -541,11 +422,7 @@ static void RGM_Shutdown( void ) {
 	idLib::ShutDown();
 }
 
-#if defined( _WIN32 )
-	#define RENDERER_GL_MODULE_EXPORT __declspec( dllexport )
-#else
 	#define RENDERER_GL_MODULE_EXPORT __attribute__( ( visibility( "default" ) ) )
-#endif
 
 extern "C" RENDERER_GL_MODULE_EXPORT
 renderExport_t *GetRenderAPI( renderImport_t *moduleImport ) {

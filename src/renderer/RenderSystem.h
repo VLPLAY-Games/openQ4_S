@@ -540,11 +540,6 @@ public:
 // RAVEN BEGIN
 // mwhitlock: changes for Xenon to enable us to use texture resources from .xpr
 // bundles.
-#if defined(_XENON)
-	// Like BeginLevelLoad and EndLevelLoad, but only deals with textures.
-	virtual void			XenonBeginLevelLoadTextures( void ) = 0;
-	virtual	void			XenonEndLevelLoadTextures( void ) = 0;
-#endif
 // RAVEN END
 
 	virtual	void			ExportMD5R( bool compressed ) = 0;
@@ -553,7 +548,7 @@ public:
 
 	virtual void			CopyPrimBatchTriangles( idDrawVert *destDrawVerts, glIndex_t *destIndices, void *primBatchMesh, void *silTraceVerts ) = 0;
 
-#else	// Q4SDK_MD5R
+#else
 
 // RAVEN BEGIN
 // dluetscher: added call to write out the MD5R models that have been converted at load,

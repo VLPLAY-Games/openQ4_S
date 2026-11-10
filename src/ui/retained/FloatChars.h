@@ -411,27 +411,15 @@ inline std::from_chars_result Parse(const char* first, const char* last, double&
 } // namespace float_chars_detail
 
 inline std::to_chars_result FloatToChars(char* first, char* last, double value) noexcept {
-#if defined(_MSC_VER)
-	return std::to_chars(first,last,value);
-#else
 	return float_chars_detail::Shortest(first,last,value,float_chars_detail::Style::Plain);
-#endif
 }
 inline std::to_chars_result FloatToChars(char* first, char* last, double value, std::chars_format format) noexcept {
 	if (!float_chars_detail::ValidFormat(format)) return {first,std::errc::invalid_argument};
-#if defined(_MSC_VER)
-	return std::to_chars(first,last,value,format);
-#else
 	return float_chars_detail::Shortest(first,last,value,float_chars_detail::FormatStyle(format));
-#endif
 }
 inline std::to_chars_result FloatToChars(char* first, char* last, double value, std::chars_format format, int precision) noexcept {
 	if (!float_chars_detail::ValidFormat(format)) return {first,std::errc::invalid_argument};
-#if defined(_MSC_VER)
-	return std::to_chars(first,last,value,format,precision);
-#else
 	return float_chars_detail::Precise(first,last,value,float_chars_detail::FormatStyle(format),precision);
-#endif
 }
 inline std::from_chars_result FloatFromChars(const char* first, const char* last, double& value, std::chars_format format) noexcept {
 	return float_chars_detail::Parse(first,last,value,format);

@@ -69,15 +69,9 @@ If you have questions concerning this license or the applicable additional terms
 #include "ModernShadowPlanner.h"
 #include "../framework/RenderDoc.h"
 #include "../framework/declEntityDef.h"
-#if defined(__APPLE__)
-#include <execinfo.h>
-#endif
 
 // Detect the Microsoft software OpenGL wrapper and guide the user toward
 // installing proper vendor drivers.
-#ifdef _WIN32
-#include "../sys/win32/win_local.h"
-#endif
 
 // functions that are not called every frame
 
@@ -1833,11 +1827,7 @@ static idStr R_ModeAspectRatioLabel( int width, int height ) {
 	return "";
 }
 
-#if defined( MACOS_X )
-bool R_GetModeInfo( int *width, int *height, int mode ) {
-#else
 static bool R_GetModeInfo( int *width, int *height, int mode ) {
-#endif
 	const vidmode_t	*vm;
 	const int originalMode = mode;
 
@@ -2294,27 +2284,6 @@ static bool R_InitOpenGLInternal( bool legacyPolicy, bool forceWindow, char *err
 	R_SetColorMappings();
 	R_RecordRendererStartupPhase( RENDERER_STARTUP_PHASE_READY );
 
-#ifdef _WIN32
-	static bool glCheck = false;
-	if ( legacyPolicy && !glCheck ) {
-		glCheck = true;
-		if ( !idStr::Icmp( glConfig.vendor_string, "Microsoft" ) && idStr::FindText( glConfig.renderer_string, "OpenGL-D3D" ) != -1 ) {
-			if ( cvarSystem->GetCVarBool( "r_fullscreen" ) ) {
-				cmdSystem->BufferCommandText( CMD_EXEC_NOW, "vid_restart partial windowed\n" );
-				Sys_GrabMouseCursor( false );
-			}
-			int ret = MessageBox( NULL, "Please install OpenGL drivers from your graphics hardware vendor to run " GAME_NAME ".\nYour OpenGL functionality is limited.",
-				"Insufficient OpenGL capabilities", MB_OKCANCEL | MB_ICONWARNING | MB_TASKMODAL );
-			if ( ret == IDCANCEL ) {
-				cmdSystem->BufferCommandText( CMD_EXEC_APPEND, "quit\n" );
-				cmdSystem->ExecuteCommandBuffer();
-			}
-			if ( cvarSystem->GetCVarBool( "r_fullscreen" ) ) {
-				cmdSystem->BufferCommandText( CMD_EXEC_APPEND, "vid_restart\n" );
-			}
-		}
-	}
-#endif
 	return true;
 }
 
@@ -2368,17 +2337,6 @@ void GL_CheckErrors( void ) {
 
 		if ( !r_ignoreGLErrors.GetBool() ) {
 			common->Printf( "GL_CheckErrors: %s\n", s );
-#if defined(__APPLE__)
-			void *frames[8];
-			const int frameCount = backtrace( frames, 8 );
-			char **symbols = backtrace_symbols( frames, frameCount );
-			if ( symbols != NULL ) {
-				for ( int frame = 0; frame < frameCount; ++frame ) {
-					common->Printf( "  %s\n", symbols[frame] );
-				}
-				free( symbols );
-			}
-#endif
 		}
 	}
 }
@@ -5616,17 +5574,6 @@ void GfxInfo_f( const idCmdArgs &args ) {
 		common->Printf( "glFinish not forced\n" );
 	}
 
-#ifdef _WIN32	
-// WGL_EXT_swap_interval
-typedef BOOL (WINAPI * PFNWGLSWAPINTERVALEXTPROC) (int interval);
-extern	PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT;
-
-	if ( r_swapInterval.GetInteger() && wglSwapIntervalEXT ) {
-		common->Printf( "Forcing swapInterval %i\n", r_swapInterval.GetInteger() );
-	} else {
-		common->Printf( "swapInterval not forced\n" );
-	}
-#endif
 	
 	// the shadow pass gates on the core GL 2.0 glStencilOpSeparate entry point
 	// plus wrap stencil ops, not on the legacy vendor extension strings

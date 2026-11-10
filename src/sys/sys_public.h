@@ -43,94 +43,8 @@ class idStr;
 
 
 // Win32
-#if defined(WIN32) || defined(_WIN32)
-
-#define BUILD_OS_ID						0
-#if defined( _M_X64 ) || defined( __x86_64__ )
-	#define	BUILD_STRING				"win-x64"
-	#define	CPUSTRING					"x64"
-#elif defined( _M_IX86 ) || defined( __i386__ )
-	#define	BUILD_STRING				"win-x86"
-	#define	CPUSTRING					"x86"
-#elif defined( _M_ARM64 ) || defined( __aarch64__ )
-	#define	BUILD_STRING				"win-arm64"
-	#define	CPUSTRING					"arm64"
-#else
-	#define	BUILD_STRING				"win-unknown"
-	#define	CPUSTRING					"unknown"
-#endif
-#define CPU_EASYARGS					1
-
-#define ALIGN16( x )					__declspec(align(16)) x
-#define PACKED
-
-#define _alloca16( x )					((void *)((((intptr_t)_alloca( (x)+15 )) + 15) & ~15))
-
-#define PATHSEPERATOR_STR				"\\"
-#define PATHSEPERATOR_CHAR				'\\'
-
-#define ID_INLINE						__forceinline
-#define ID_INLINE_EXTERN				__forceinline
-#define ID_STATIC_TEMPLATE				static
-
-#define assertmem( x, y )				assert( _CrtIsValidPointer( x, y, true ) )
-
-#endif
 
 // Mac OSX
-#if defined(MACOS_X) || defined(__APPLE__)
-
-#define BUILD_OS_ID					1
-#ifdef __ppc__
-	#define	BUILD_STRING				"macos-ppc"
-	#define	CPUSTRING					"ppc"
-	#define CPU_EASYARGS				0
-#elif defined(__i386__)
-	#define	BUILD_STRING				"macos-x86"
-	#define	CPUSTRING					"x86"
-	#define CPU_EASYARGS				1
-#elif defined(__x86_64__)
-	#define	BUILD_STRING				"macos-x64"
-	#define	CPUSTRING					"x64"
-	#define CPU_EASYARGS				1
-#elif defined(__aarch64__) || defined(__arm64__)
-	#define	BUILD_STRING				"macos-arm64"
-	#define	CPUSTRING					"arm64"
-	#define CPU_EASYARGS				1
-#else
-	#define	BUILD_STRING				"macos-unknown"
-	#define	CPUSTRING					"unknown"
-	#define CPU_EASYARGS				1
-#endif
-
-// Clang rejects an alignment attribute that trails a declarator with a
-// constructor initialiser, so prefix the declaration the way the Linux
-// branch does and keep parenthesised initialisers building on macOS.
-#define ALIGN16( x )					__attribute__((aligned(16))) x
-
-#ifdef __MWERKS__
-#define PACKED
-#include <alloca.h>
-#else
-#define PACKED							__attribute__((packed))
-#endif
-
-#define _alloca							alloca
-#define _alloca16( x )					((void *)((((intptr_t)alloca( (x)+15 )) + 15) & ~15))
-
-#define PATHSEPERATOR_STR				"/"
-#define PATHSEPERATOR_CHAR				'/'
-
-#define __cdecl
-#define ASSERT							assert
-
-#define ID_INLINE						inline
-#define ID_INLINE_EXTERN				inline
-#define ID_STATIC_TEMPLATE
-
-#define assertmem( x, y )
-
-#endif
 
 
 // Linux
@@ -279,11 +193,7 @@ typedef struct sysMemoryStats_s {
 
 typedef uintptr_t address_t;
 
-#if defined( WIN32 ) || defined( _WIN32 )
-typedef uintptr_t idSocketHandle_t;
-#else
 typedef int idSocketHandle_t;
-#endif
 
 template<class type> class idList;		// for Sys_ListFiles
 

@@ -2,11 +2,7 @@
 
 
 
-#ifdef _XENON
-#define PACIFIER_UPDATE session->PacifierUpdate()
-#else
 #define PACIFIER_UPDATE
-#endif
 
 
 /*

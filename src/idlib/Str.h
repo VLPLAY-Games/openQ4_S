@@ -30,11 +30,7 @@
 #define vsnprintf		use_idStr_vsnPrintf
 #define _vsnprintf		use_idStr_vsnPrintf
 
-#ifdef _XENON
-class __declspec(align(16)) idVec4;
-#else
 class idVec4;
-#endif
 
 #ifndef FILE_HASH_SIZE
 #define FILE_HASH_SIZE		1024

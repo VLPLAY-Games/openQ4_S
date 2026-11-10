@@ -469,12 +469,6 @@ public:
 	// allocator ownership and per-module diagnostics remain paired.
 	virtual void					FreeMaterialTypeArray( byte *array ) = 0;
 
-#if defined(_XENON)
-// mwhitlock: Xenon texture streaming
-	virtual void					SetLightMaterialList(idList<idMaterial*>* materialList) = 0;
-	virtual void					SetEntityMaterialList(idList<idMaterial*>* materialList) = 0;
-	virtual void					PurgeType( declType_t type ) = 0;
-#endif
 // RAVEN END
 };
 

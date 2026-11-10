@@ -23,12 +23,8 @@ void idSIMD::Init( void ) {
 // jnewquist: Tag scope and callees to track allocations using "new".
 	MEM_SCOPED_TAG(tag,MA_DEFAULT);
 // jsinger: xenon uses idSIMD_Xenon always
-#ifdef _XENON
-	generic = new idSIMD_Xenon;
-#else
 	generic = new idSIMD_Generic;
 	generic->cpuid = CPUID_GENERIC;
-#endif
 // RAVEN END
 	processor = NULL;
 	SIMDProcessor = generic;
@@ -226,122 +222,6 @@ idSIMDProcessor *p_simd;
 idSIMDProcessor *p_generic;
 TIME_TYPE baseClocks = 0;
 
-#ifdef _WINDOWS
-
-#define StartRecordTime( start )			\
-	{										\
-		LARGE_INTEGER li;					\
-		QueryPerformanceCounter( &li );		\
-		start = static_cast<TIME_TYPE>( li.QuadPart );	\
-	}
-
-#define StopRecordTime( end )				\
-	{										\
-		LARGE_INTEGER li;					\
-		QueryPerformanceCounter( &li );		\
-		end = static_cast<TIME_TYPE>( li.QuadPart );	\
-	}
-
-#elif defined(MACOS_X)
-
-#include <stdlib.h>
-#include <unistd.h>			// this is for sleep()
-#include <sys/time.h>
-#include <sys/resource.h>
-#include <mach/mach_time.h>
-
-double ticksPerNanosecond;
-
-/*
-
-    .text
-	.align 2
-	.globl _GetTB
-_GetTB:
-
-loop:
-	        mftbu   r4	;  load from TBU
-	        mftb    r5	;  load from TBL
-	        mftbu   r6	;  load from TBU
-	        cmpw    r6, r4	;  see if old == new
-	        bne     loop	;  if not, carry occured, therefore loop
-
-	        stw     r4, 0(r3)
-	        stw     r5, 4(r3)
-
-done:
-	        blr		;  return
-
-*/
-
-/*
-
-typedef struct {
-	unsigned int hi;
-	unsigned int lo;
-} U64;
-
-double TBToDoubleNano( U64 startTime, U64 stopTime, double ticksPerNanosecond );
-
-#if defined( __MWERKS__ )
-asm void GetTB( U64 * );
-#else
-void GetTB( U64 * );
-#endif
-
-double TBToDoubleNano( U64 startTime, U64 stopTime, double ticksPerNanosecond ) {
-	#define K_2POWER32 4294967296.0
-	#define TICKS_PER_NANOSECOND 0.025
-	double nanoTime;
-	U64 diffTime;
-
-	// calc the difference in TB ticks
-	diffTime.hi = stopTime.hi - startTime.hi;
-	diffTime.lo = stopTime.lo - startTime.lo;
-
-	// convert TB ticks into time
-	nanoTime = (double)(diffTime.hi)*((double)K_2POWER32) + (double)(diffTime.lo);
-	nanoTime = nanoTime/ticksPerNanosecond;
-	return (nanoTime);
-}       
-
-TIME_TYPE time_in_millisec( void ) {
-	#define K_2POWER32 4294967296.0
-	#define TICKS_PER_NANOSECOND 0.025
-
-	U64 the_time;
-	double nanoTime, milliTime;
-
-	GetTB( &the_time );
-
-	// convert TB ticks into time
-	nanoTime = (double)(the_time.hi)*((double)K_2POWER32) + (double)(the_time.lo);
-	nanoTime = nanoTime/ticksPerNanosecond;
-
-	// nanoseconds are 1 billionth of a second. I want milliseconds
-	milliTime = nanoTime * 1000000.0;
-
-	printf( "ticks per nanosec -- %lf\n", ticksPerNanosecond );
-	printf( "nanoTime is %lf -- milliTime is %lf -- as int is %i\n", nanoTime, milliTime, (int)milliTime );
-
-	return (int)milliTime;
-}
-
-#define StartRecordTime( start )			\
-	start = time_in_millisec(); 
-
-#define StopRecordTime( end )				\
-	end = time_in_millisec();
-
-*/
-
-#define StartRecordTime( start )			\
-	start = mach_absolute_time(); 
-
-#define StopRecordTime( end )				\
-	end = mach_absolute_time();
-
-#else
 
 #include <time.h>
 
@@ -362,7 +242,6 @@ static TIME_TYPE Sys_SimdMonotonicNanoseconds( void ) {
 #define StopRecordTime( end )				\
 	end = Sys_SimdMonotonicNanoseconds();
 
-#endif // _WINDOWS
 
 #define GetBest( start, end, best )			\
 	if ( !best || end - start < best ) {	\
@@ -4478,10 +4357,6 @@ idSIMD::Test_f
 void idSIMD::Test_f( const idCmdArgs &args ) {
 // RAVEN BEGIN
 // jsinger: at the moment this doesn't compile on xenon, but we also shouldn't need it anyway
-#ifndef _XENON
-#ifdef _WINDOWS
-	SetThreadPriority( GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL );
-#endif // _WINDOWS
 
 	p_simd = ( processor != NULL ) ? processor : generic;
 	p_generic = generic;
@@ -4567,9 +4442,5 @@ void idSIMD::Test_f( const idCmdArgs &args ) {
 	p_simd = NULL;
 	p_generic = NULL;
 
-#ifdef _WINDOWS
-	SetThreadPriority( GetCurrentThread(), THREAD_PRIORITY_NORMAL );
-#endif // _WINDOWS
-#endif
 // RAVEN END
 }

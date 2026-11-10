@@ -791,9 +791,6 @@ void idEvent::ServiceEvents( void ) {
 	num = 0;
 	while( !EventQueue.IsListEmpty() ) {
 		
-#ifdef _XENON
-		session->PacifierUpdate();
-#endif
 		
 		event = EventQueue.Next();
 		assert( event );

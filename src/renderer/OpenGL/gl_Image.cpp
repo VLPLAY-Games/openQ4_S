@@ -769,18 +769,10 @@ void idImage::AllocImage() {
 				// with the exact size otherwise large image allocation (for instance for physical page textures)
 				// may fail on Vista 32-bit.
 				void * data = NULL;
-#if defined(_WIN32)
-				data = HeapAlloc( GetProcessHeap(), 0, compressedSize );
-#else
 				data = malloc( compressedSize );
-#endif
 				glCompressedTexImage2DARB( uploadTarget+side, level, internalFormat, w, h, 0, compressedSize, data );
 				if ( data != NULL ) {
-#if defined(_WIN32)
-					HeapFree( GetProcessHeap(), 0, data );
-#else
 					free( data );
-#endif
 				}
 			} else {
 				glTexImage2D( uploadTarget + side, level, internalFormat, w, h, 0, dataFormat, dataType, NULL );
