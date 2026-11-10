@@ -173,12 +173,16 @@ int linkat( int od, const char *op, int nd, const char *np, int flags ) {
 
 /* Boot trace: one line per stage in boot.txt, so a crash can be placed even without a log. */
 void switch_mark( const char *stage ) {
+#ifdef OPENQ4_SWITCH_DIAG
 	FILE *f = fopen( SWITCH_DATA_DIR "/boot.txt", "a" );
 	if ( f ) {
 		fputs( stage, f );
 		fputc( '\n', f );
 		fclose( f );
 	}
+#else
+	(void)stage;
+#endif
 }
 
 /* Process memory in use, for bring-up logging. */

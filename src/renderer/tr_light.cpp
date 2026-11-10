@@ -2749,7 +2749,7 @@ static int R_CompareEffectSubmitDistance( const void *a, const void *b ) {
 	return ( da < db ) - ( da > db );
 }
 
-#if defined( __SWITCH__ )
+#if defined( __SWITCH__ ) && defined( OPENQ4_SWITCH_DIAG )
 idCVar bse_serviceDiag( "bse_serviceDiag", "0", CVAR_RENDERER | CVAR_BOOL, "log how much BSE service time goes to effects that are off-screen, portal-culled, far away, or looping (every 300 frames)" );
 
 // per category: how many effect services ran and how many microseconds they took
@@ -2898,7 +2898,7 @@ void R_AddEffectSurfaces(void) {
 			const float ownerTimeSeconds = static_cast<float>(def->gameTime) * 0.001f;
 			const float presentationTimeSeconds = tr.viewDef->floatTime;
 			def->updateFramenum = tr.frameCount;
-#if defined( __SWITCH__ )
+#if defined( __SWITCH__ ) && defined( OPENQ4_SWITCH_DIAG )
 			bool diagFrustum = false, diagArea = false;
 			float diagDist = 0.0f;
 			double diagStart = 0.0;
@@ -2911,7 +2911,7 @@ void R_AddEffectSurfaces(void) {
 			}
 #endif
 			const bool diagExpired = bse->ServiceEffect(def, ownerTimeSeconds, presentationTimeSeconds);
-#if defined( __SWITCH__ )
+#if defined( __SWITCH__ ) && defined( OPENQ4_SWITCH_DIAG )
 			if ( diagOn ) {
 				const double us = ( Sys_GetClockTicks() - diagStart ) * 1000000.0 / Sys_ClockTicksPerSecond();
 				R_BSEDiag_Add( BSEDIAG_ALL, us );
@@ -3195,7 +3195,7 @@ void R_AddEffectSurfaces(void) {
 			(serviceGateLagMin == 0x7fffffff) ? 0 : serviceGateLagMin,
 			(serviceGateLagMax == (-0x7fffffff - 1)) ? 0 : serviceGateLagMax);
 	}
-#if defined( __SWITCH__ )
+#if defined( __SWITCH__ ) && defined( OPENQ4_SWITCH_DIAG )
 	R_BSEDiag_EndFrame();
 #endif
 }

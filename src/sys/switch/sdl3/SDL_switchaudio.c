@@ -198,6 +198,7 @@ static bool WaitRenderer(SDL_AudioDevice *device)
     while (!SDL_GetAtomicInt(&device->shutdown)) {
         const Result ur = audrvUpdate(&h->drv);
         const u64 now = armGetSystemTick();
+#ifdef OPENQ4_SWITCH_DIAG
         if (!h->everReady && (iter < 6 || now - lastLog > 19200000ULL)) {
             lastLog = now;
             printf("audio: audren wait iter=%d update=0x%x states=%d/%d/%d played=%u drops=%u playing=%d\n", iter, (unsigned)ur,
@@ -205,6 +206,10 @@ static bool WaitRenderer(SDL_AudioDevice *device)
                    audrvVoiceGetPlayedSampleCount(&h->drv, 0), audrvVoiceGetVoiceDropsCount(&h->drv, 0),
                    (int)audrvVoiceIsPlaying(&h->drv, 0));
         }
+#else
+        (void)lastLog;
+        (void)ur;
+#endif
         ++iter;
         if (!h->everReady && now - start > 2ULL * 19200000ULL) {
             // the renderer never played anything: go back to the simple service
