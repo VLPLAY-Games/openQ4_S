@@ -14,6 +14,7 @@
 #include <malloc.h>
 
 extern void switch_audio_diag_s16(const short *x, int frames);
+extern int switch_audio_diag_test_direct(short *out, int frames);
 extern void switch_audio_diag_underrun(int count);
 
 #define SWITCH_NUM_BUFFERS 3
@@ -104,8 +105,9 @@ static bool SWITCHAUDIO_PlayDevice(SDL_AudioDevice *device, const Uint8 *buffer,
     // Reuse the buffer the service just handed back, in submission order.
     const int i = device->hidden->next;
     device->hidden->next = (i + 1) % SWITCH_NUM_BUFFERS;
-    switch_audio_diag_s16((const short *)buffer, buflen / 4);
     SDL_memcpy(device->hidden->mem[i], buffer, buflen);
+    switch_audio_diag_test_direct((short *)device->hidden->mem[i], buflen / 4);
+    switch_audio_diag_s16((const short *)device->hidden->mem[i], buflen / 4);
     // The audio service reads the buffer by DMA, not through the CPU cache.
     armDCacheFlush(device->hidden->mem[i], device->hidden->aligned);
     device->hidden->out[i].data_size = (u64)buflen;

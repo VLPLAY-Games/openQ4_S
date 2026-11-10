@@ -66,6 +66,9 @@ static unsigned int		src_pos, src_fill, src_rate = 44100;
 static volatile int		test_requested = 0;
 static int				test_active = 0;
 static unsigned int		test_frame = 0;
+static int				test_direct = 0;			/* second pass: tones written straight into the audout buffer */
+static unsigned int		test_direct_frame = 0;
+static int				test_dumped = 0;
 
 static volatile int		dump_requested = 0;
 static volatile int		dump_running = 0;
@@ -122,6 +125,8 @@ int switch_audio_diag_test_fill( float *out, int frames, int channels ) {
 		test_requested = 0;
 		test_active = 1;
 		test_frame = 0;
+		test_dumped = 0;
+		test_direct = 0;
 	}
 	if ( !test_active ) {
 		return 0;
@@ -138,9 +143,49 @@ int switch_audio_diag_test_fill( float *out, int frames, int channels ) {
 		}
 	}
 	test_frame += (unsigned int)frames;
+	/* capture the quiet and loud 440 Hz sections as the driver submitted them */
+	if ( !test_dumped && test_frame >= 9u * DIAG_RATE + DIAG_RATE / 4 ) {
+		test_dumped = 1;
+		dump_reason_user = 1;
+		dump_requested = 1;
+	}
 	if ( test_frame >= 15u * DIAG_RATE ) {
 		test_active = 0;
-		printf( "audio: output self-test finished\n" );
+		test_direct = 1;
+		test_direct_frame = 0;
+		test_dumped = 0;
+		printf( "audio: output self-test pass 1 (through SDL) finished, pass 2 (straight into audout) starts\n" );
+	}
+	return 1;
+}
+
+/* pass 2: same tones, generated as s16 and written into the audout buffer by the driver,
+   bypassing OpenAL, the SDL stream and the float conversion */
+int switch_audio_diag_test_direct( short *out, int frames ) {
+	static const float freq[5]	= { 0.0f, 440.0f, 440.0f, 4000.0f, 4000.0f };
+	static const float amp[5]	= { 0.0f, 0.04f, 0.4f, 0.04f, 0.4f };
+	if ( !test_direct ) {
+		return 0;
+	}
+	for ( int i = 0; i < frames; i++ ) {
+		const unsigned int t = test_direct_frame + (unsigned int)i;
+		const unsigned int phase = t / ( 3u * DIAG_RATE );
+		short v = 0;
+		if ( phase < 5 && freq[phase] > 0.0f ) {
+			v = (short)( 32767.0 * amp[phase] * sin( 6.283185307179586 * (double)freq[phase] * (double)( t % DIAG_RATE ) / (double)DIAG_RATE ) );
+		}
+		out[i * 2] = v;
+		out[i * 2 + 1] = v;
+	}
+	test_direct_frame += (unsigned int)frames;
+	if ( !test_dumped && test_direct_frame >= 9u * DIAG_RATE + DIAG_RATE / 4 ) {
+		test_dumped = 1;
+		dump_reason_user = 1;
+		dump_requested = 1;
+	}
+	if ( test_direct_frame >= 15u * DIAG_RATE ) {
+		test_direct = 0;
+		printf( "audio: output self-test pass 2 finished\n" );
 	}
 	return 1;
 }
