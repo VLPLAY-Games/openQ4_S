@@ -50,11 +50,106 @@ static void SWITCH_JoystickSetDevicePlayerIndex(int device_index, int player_ind
 static SDL_GUID SWITCH_JoystickGetDeviceGUID(int device_index) { return SDL_CreateJoystickGUIDForName("Nintendo Switch Controller"); }
 static SDL_JoystickID SWITCH_JoystickGetDeviceInstanceID(int device_index) { return device_index + 1; }
 
+/* Motion: the gyroscope of the console (handheld) or of the connected controller, handed to SDL as
+   a gyro sensor. The engine turns it into look input (in_gyro); it reads the yaw rate from sensor
+   value 2 (clockwise positive) and the pitch rate from value 0 (looking down positive), in radians per
+   second, so the rates are mapped to that here. The Switch reports the angular velocity in turns per
+   second and the acceleration in G, in a frame with X toward the top edge, Y to the left and Z out of
+   the face (controller lying flat, face up: X forward). Yaw is the turn about the direction the
+   accelerometer reports as up, so it works held upright (handheld) or flat (controller). */
+#define SW_NUM_SENSOR_HANDLES 4
+static HidSixAxisSensorHandle s_sensorHandles[SW_NUM_SENSOR_HANDLES];
+static u64 s_sensorLastSample[SW_NUM_SENSOR_HANDLES];
+static bool s_sensorsStarted;
+static bool s_sensorsWanted;
+static Uint64 s_sensorTimestamp;
+static float s_upX = 1.0f, s_upY = 0.0f, s_upZ = 0.0f;
+
+static void SWITCH_StartSensors(void)
+{
+    if (s_sensorsStarted) {
+        return;
+    }
+    hidGetSixAxisSensorHandles(&s_sensorHandles[0], 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
+    hidGetSixAxisSensorHandles(&s_sensorHandles[1], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
+    hidGetSixAxisSensorHandles(&s_sensorHandles[2], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadJoyDual);
+    hidGetSixAxisSensorHandles(&s_sensorHandles[3], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadJoyLeft);
+    for (int i = 0; i < SW_NUM_SENSOR_HANDLES; ++i) {
+        hidStartSixAxisSensor(s_sensorHandles[i]);
+        s_sensorLastSample[i] = 0;
+    }
+    s_sensorsStarted = true;
+}
+
+static void SWITCH_StopSensors(void)
+{
+    if (!s_sensorsStarted) {
+        return;
+    }
+    for (int i = 0; i < SW_NUM_SENSOR_HANDLES; ++i) {
+        hidStopSixAxisSensor(s_sensorHandles[i]);
+    }
+    s_sensorsStarted = false;
+}
+
+static void SWITCH_SendMotion(Uint64 timestamp, SDL_Joystick *joystick)
+{
+    HidSixAxisSensorState states[8];
+    for (int h = 0; h < SW_NUM_SENSOR_HANDLES; ++h) {
+        const size_t count = hidGetSixAxisSensorStates(s_sensorHandles[h], states, 8);
+        if (count == 0 || !(states[0].attributes & HidSixAxisSensorAttribute_IsConnected)) {
+            continue;
+        }
+        // newest first: walk the new samples oldest to newest
+        int fresh = 0;
+        while (fresh < (int)count && states[fresh].sampling_number > s_sensorLastSample[h]) {
+            ++fresh;
+        }
+        if (s_sensorLastSample[h] == 0 && fresh > 1) {
+            fresh = 1;      // first read: do not replay history
+        }
+        for (int i = fresh - 1; i >= 0; --i) {
+            const HidSixAxisSensorState *st = &states[i];
+            const float turn = 6.2831853f;
+            const float gx = st->angular_velocity.x * turn;
+            const float gy = st->angular_velocity.y * turn;
+            const float gz = st->angular_velocity.z * turn;
+
+            // follow the accelerometer's idea of up (slowly: it also feels the hand's own motion)
+            const float ax = st->acceleration.x, ay = st->acceleration.y, az = st->acceleration.z;
+            const float len = SDL_sqrtf(ax * ax + ay * ay + az * az);
+            if (len > 0.5f && len < 1.6f) {
+                s_upX += ((ax / len) - s_upX) * 0.05f;
+                s_upY += ((ay / len) - s_upY) * 0.05f;
+                s_upZ += ((az / len) - s_upZ) * 0.05f;
+                const float ul = SDL_sqrtf(s_upX * s_upX + s_upY * s_upY + s_upZ * s_upZ);
+                if (ul > 0.01f) {
+                    s_upX /= ul;
+                    s_upY /= ul;
+                    s_upZ /= ul;
+                }
+            }
+
+            float data[3];
+            data[0] = gy;                                              // tilting the top edge away: looking down
+            data[1] = 0.0f;
+            data[2] = -(gx * s_upX + gy * s_upY + gz * s_upZ);         // turning right (clockwise seen from above)
+            s_sensorTimestamp += st->delta_time;
+            SDL_SendJoystickSensor(timestamp, joystick, SDL_SENSOR_GYRO, s_sensorTimestamp, data, 3);
+        }
+        if (count > 0) {
+            s_sensorLastSample[h] = states[0].sampling_number;
+        }
+        break;      // one source at a time: the first connected one in the list
+    }
+}
+
 static bool SWITCH_JoystickOpen(SDL_Joystick *joystick, int device_index)
 {
     joystick->nbuttons = SW_NUM_BUTTONS;
     joystick->naxes = 4;
     joystick->nhats = 0;
+    SDL_PrivateJoystickAddSensor(joystick, SDL_SENSOR_GYRO, 200.0f);
     return true;
 }
 
@@ -93,6 +188,11 @@ static void SWITCH_JoystickUpdate(SDL_Joystick *joystick)
     SWITCH_SendStick(timestamp, joystick, 2, &right, &s_previousSticks[1]);
     s_previousSticks[0] = left;
     s_previousSticks[1] = right;
+
+    if (s_sensorsWanted) {
+        SWITCH_StartSensors();
+        SWITCH_SendMotion(timestamp, joystick);
+    }
 }
 
 static void SWITCH_JoystickClose(SDL_Joystick *joystick) {}
@@ -102,7 +202,14 @@ static bool SWITCH_JoystickRumble(SDL_Joystick *joystick, Uint16 low_frequency_r
 static bool SWITCH_JoystickRumbleTriggers(SDL_Joystick *joystick, Uint16 left_rumble, Uint16 right_rumble) { return SDL_Unsupported(); }
 static bool SWITCH_JoystickSetLED(SDL_Joystick *joystick, Uint8 red, Uint8 green, Uint8 blue) { return SDL_Unsupported(); }
 static bool SWITCH_JoystickSendEffect(SDL_Joystick *joystick, const void *data, int size) { return SDL_Unsupported(); }
-static bool SWITCH_JoystickSetSensorsEnabled(SDL_Joystick *joystick, bool enabled) { return SDL_Unsupported(); }
+static bool SWITCH_JoystickSetSensorsEnabled(SDL_Joystick *joystick, bool enabled)
+{
+    s_sensorsWanted = enabled;
+    if (!enabled) {
+        SWITCH_StopSensors();
+    }
+    return true;
+}
 
 static bool SWITCH_JoystickGetGamepadMapping(int device_index, SDL_GamepadMapping *out)
 {
