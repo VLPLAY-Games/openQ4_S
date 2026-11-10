@@ -2032,7 +2032,16 @@ bool RetainedUI_IsOpen() { return applicationOpen.load(std::memory_order_acquire
 // Nintendo, Steam Deck, generic). A controller used last shows the family
 // the HUD's prompts use, which in_promptStyle forces when a remapping layer
 // hides the real device (Sys_SDL_GamepadGlyphFamily: 0 generic, 1-4 a family).
-bool RetainedUI_PromptSwapped() { return idKeyInput::MenuConfirmSwapped(); }
+bool RetainedUI_PromptSwapped() {
+#if defined(__SWITCH__)
+	// The Nintendo glyph art puts A on the east button and B on the south one. The Switch gamepad is
+	// mapped by label (south is the console's A), so the menus' Accept prompt must show the art of the
+	// east button for it to read "A": a display-only swap, the input is not swapped.
+	return true;
+#else
+	return idKeyInput::MenuConfirmSwapped();
+#endif
+}
 int RetainedUI_PromptGlyphs() {
 	if (!idKeyInput::LastInputWasController()) return 0;
 	int family = 0;
