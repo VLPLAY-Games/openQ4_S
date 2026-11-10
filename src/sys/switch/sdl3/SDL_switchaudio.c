@@ -41,7 +41,7 @@ static bool RendererOpen(SDL_AudioDevice *device)
 {
     static const AudioRendererConfig config = {
         .output_rate = AudioRendererOutputRate_48kHz,
-        .num_voices = 1,
+        .num_voices = 24,
         .num_effects = 0,
         .num_sinks = 1,
         .num_mix_objs = 1,
@@ -72,18 +72,17 @@ static bool RendererOpen(SDL_AudioDevice *device)
     }
     audrvVoiceInit(&h->drv, 0, 2, PcmFormat_Int16, 48000);
     audrvVoiceSetDestinationMix(&h->drv, 0, AUDREN_FINAL_MIX_ID);
-    audrvVoiceSetMixFactor(&h->drv, 0, 1.0f, 0, 0);
-    audrvVoiceSetMixFactor(&h->drv, 0, 1.0f, 1, 1);
-    for (int i = 0; i < SWITCH_NUM_BUFFERS; ++i) {
-        AudioDriverWaveBuf *w = &h->wave[i];
-        SDL_zerop(w);
-        w->data_raw = (Uint8 *)h->pool + (size_t)i * h->aligned;
-        w->size = (u64)device->buffer_size;
-        w->start_sample_offset = 0;
-        w->end_sample_offset = device->buffer_size / 4;
-        audrvVoiceAddWaveBuf(&h->drv, 0, w);
+    for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            audrvVoiceSetMixFactor(&h->drv, 0, i == j ? 1.0f : 0.0f, i, j);
+        }
     }
-    audrvVoiceStart(&h->drv, 0);
+    // every wave buffer addresses the whole pool; the sample offsets pick its slice
+    for (int i = 0; i < SWITCH_NUM_BUFFERS; ++i) {
+        SDL_zerop(&h->wave[i]);
+        h->wave[i].data_raw = h->pool;
+        h->wave[i].size = (u64)h->aligned * SWITCH_NUM_BUFFERS;
+    }
     audrvUpdate(&h->drv);
     return true;
 }
@@ -175,16 +174,20 @@ static inline bool WaveReady(const AudioDriverWaveBuf *w)
 static void WaveSubmit(struct SDL_PrivateAudioData *h, int i, const void *src, int len)
 {
     AudioDriverWaveBuf *w = &h->wave[i];
+    Uint8 *dst = (Uint8 *)h->pool + (size_t)i * h->aligned;
     if (src) {
-        SDL_memcpy((Uint8 *)h->pool + (size_t)i * h->aligned, src, len);
+        SDL_memcpy(dst, src, len);
     } else {
-        SDL_memset((Uint8 *)h->pool + (size_t)i * h->aligned, 0, h->aligned);
+        SDL_memset(dst, 0, h->aligned);
     }
-    armDCacheFlush((Uint8 *)h->pool + (size_t)i * h->aligned, h->aligned);
-    w->size = (u64)len;
-    w->start_sample_offset = 0;
-    w->end_sample_offset = len / 4;
+    armDCacheFlush(dst, h->aligned);
+    w->start_sample_offset = (s32)((size_t)i * h->aligned / 4);
+    w->end_sample_offset = w->start_sample_offset + len / 4;
     audrvVoiceAddWaveBuf(&h->drv, 0, w);
+    audrvUpdate(&h->drv);
+    if (!audrvVoiceIsPlaying(&h->drv, 0)) {
+        audrvVoiceStart(&h->drv, 0);
+    }
 }
 
 static bool WaitRenderer(SDL_AudioDevice *device)
@@ -216,8 +219,14 @@ static bool WaitRenderer(SDL_AudioDevice *device)
             ++n;
         }
         if (n > 0) {
-            h->everReady = true;
-            switch_audio_diag_underrun(n - 1);
+            for (int k = 0; k < SWITCH_NUM_BUFFERS; ++k) {
+                if (h->wave[k].state == AudioDriverWaveBufState_Done) {
+                    h->everReady = true;
+                }
+            }
+            if (h->everReady) {
+                switch_audio_diag_underrun(n - 1);
+            }
             // After a stall several buffers come back at once; keep the queue depth with silence.
             for (int k = 1; k < n; ++k) {
                 const int i = h->next;
@@ -273,11 +282,13 @@ static bool SWITCHAUDIO_PlayDevice(SDL_AudioDevice *device, const Uint8 *buffer,
         switch_audio_diag_test_direct((short *)dst, buflen / 4);
         switch_audio_diag_s16((const short *)dst, buflen / 4);
         armDCacheFlush(dst, h->aligned);
-        h->wave[i].size = (u64)buflen;
-        h->wave[i].start_sample_offset = 0;
-        h->wave[i].end_sample_offset = buflen / 4;
+        h->wave[i].start_sample_offset = (s32)((size_t)i * h->aligned / 4);
+        h->wave[i].end_sample_offset = h->wave[i].start_sample_offset + buflen / 4;
         audrvVoiceAddWaveBuf(&h->drv, 0, &h->wave[i]);
         audrvUpdate(&h->drv);
+        if (!audrvVoiceIsPlaying(&h->drv, 0)) {
+            audrvVoiceStart(&h->drv, 0);
+        }
         return true;
     }
     SDL_memcpy(device->hidden->mem[i], buffer, buflen);
