@@ -195,7 +195,10 @@ def main():
     ap.add_argument("--source-root", type=Path)
     ap.add_argument("--skip", type=Path, help="file listing source paths (relative to src/) to exclude")
     ap.add_argument("--extra", nargs="*", default=[], help="extra sources as group:path")
+    ap.add_argument("--diag", action="store_true", help="build with OPENQ4_SWITCH_DIAG: on-device profiler, audio tests and per-frame timing lines")
     a = ap.parse_args()
+    if a.diag:
+        DEFINES.append("-DOPENQ4_SWITCH_DIAG")
 
     hb = a.host_build.resolve()
     out = a.out.resolve()

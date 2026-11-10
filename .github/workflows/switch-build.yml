@@ -16,10 +16,10 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends meson ninja-build python3 g++ pkg-config libwayland-dev wayland-protocols libx11-dev libxext-dev
           dkp-pacman -Syu --noconfirm
-          dkp-pacman -S --noconfirm switch-mesa switch-sdl2 switch-openal-soft switch-libvorbis switch-zlib
+          dkp-pacman -S --noconfirm switch-mesa switch-sdl2 switch-openal-soft
       - name: Configure host tree
         run: |
-          meson setup build-host --buildtype release -Dplatform_backend=sdl3 -Dbuild_renderer_gles=enabled
+          meson setup build-host --buildtype release
           ninja -C build-host
       - name: Generate and build the NRO
         run: |

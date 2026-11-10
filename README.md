@@ -111,35 +111,18 @@ When a text field needs input (for example the name of a save game) the system s
 
 ## Building from source
 
-The Switch build reuses the upstream Meson build as the source of truth for source lists and compiler flags, and re-emits the engine, the OpenGL ES renderer and the single-player game libraries for `aarch64-none-elf`. The three groups are linked into a single NRO.
-
-### Prerequisites
-
-- A Linux machine (the build is developed and tested on Ubuntu).
-- [devkitPro](https://devkitpro.org/wiki/Getting_Started) with **devkitA64** (r29 or newer) and **libnx** (4.12 or newer), plus the packages the port links against (`switch-mesa`, `switch-sdl2` dependencies such as `switch-openal-soft` and the usual `switch-*` libraries).
-- `meson`, `ninja`, `python3` and a host C/C++ compiler for the generator step.
-- Your own Quake 4 data to run it.
-
-### Steps
+The full guide is in [BUILDING.md](BUILDING.md). In short, on Linux with devkitPro (devkitA64, libnx, `switch-mesa`, `switch-openal-soft`) and Meson installed:
 
 ```bash
-# 1. Configure and build the host tree (it generates headers and the compile database
-#    that the Switch generator reads).
-meson setup build-host --buildtype release -Dplatform_backend=sdl3 -Dbuild_renderer_gles=enabled
+meson setup build-host --buildtype release
 ninja -C build-host
-
-# 2. Generate the devkitA64 build from it.
 python3 tools/switch/gen_ninja.py --host-build build-host --out build-switch
-
-# 3. Build the NRO.
 ninja -C build-switch        # produces build-switch/openQ4.nro
 ```
 
-The content packs (`baseoq4/pak*.pk4`) are built by the Meson tree from `content/baseoq4`.
+The host tree also builds the content packs (`build-host/baseoq4/pak*.pk4`). Release builds contain no diagnostics; `--diag` turns on the development profiler, audio tests and timing lines.
 
-### Development diagnostics
-
-Release builds contain no diagnostics. For performance and audio bring-up there are optional tools behind the `OPENQ4_SWITCH_DIAG` compile flag (an on-device sampling profiler, audio test tones and dumps, per-frame timing lines). Offline analysis scripts are in `tools/switch/`.
+More documentation: [installation](docs/installation.md), [performance](docs/performance.md), [troubleshooting](docs/troubleshooting.md) and [technical notes](TECHNICAL.md).
 
 ---
 
@@ -152,6 +135,7 @@ Release builds contain no diagnostics. For performance and audio bring-up there 
 | `src/renderer/GLES/`, `src/renderer/GLES_D3/` | OpenGL ES renderer and the render thread |
 | `tools/switch/` | NRO generator and analysis scripts |
 | `content/baseoq4/` | openQ4 content that becomes `baseoq4/pak*.pk4` |
+| `docs/` | User documentation (`docs/dev/` holds provenance records and the UI reference used by build tools) |
 | `LICENSES/`, `LICENSING.md` | Licence texts and the licensing overview |
 
 ---
