@@ -388,3 +388,16 @@ void userAppInit( void ) {
 void userAppExit( void ) {
 	socketExit();
 }
+
+/* Leave the process directly. Running exit() on the way out goes through every static destructor in
+   the engine, game and renderer groups while worker threads are still alive, and a crash there ends
+   the session with a system error screen instead of a clean close. By this point the game has already
+   shut itself down and written its files. */
+void switch_fast_exit( int rc ) {
+	(void)rc;
+	fflush( NULL );
+	svcExitProcess();
+	for ( ;; ) {
+		svcSleepThread( 1000000000ULL );
+	}
+}

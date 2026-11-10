@@ -149,6 +149,10 @@ static void Posix_WriteInstanceLockPid( const int fd ) {
 	write( fd, pidBuffer, pidLength );
 }
 
+#if defined( __SWITCH__ )
+extern "C" void switch_fast_exit( int rc );
+#endif
+
 /*
 ================
 Posix_Exit
@@ -183,6 +187,9 @@ void Posix_Exit(int ret) {
 	Posix_ReleaseInstanceLock();
 	// process spawning. it's best when it happens after everything has shut down
 	Posix_RunExitSpawn();
+#if defined( __SWITCH__ )
+	switch_fast_exit( set_exit ? set_exit : ret );
+#endif
 	// in case of signal, handler tries a common->Quit
 	// we use set_exit to maintain a correct exit code
 	if ( set_exit ) {
