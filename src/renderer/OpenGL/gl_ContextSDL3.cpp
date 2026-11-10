@@ -65,6 +65,9 @@ PFNWGLSETPBUFFERATTRIBARBPROC wglSetPbufferAttribARB = NULL;
 // opaque handles into the engine's video instance; every operation on them
 // crosses through renderWindowServices_t
 static void *s_glWindow = NULL;
+#if defined(OPENQ4_RENDERER_GLES_MODULE)
+void R_GLW_ResetStateCache( void );
+#endif
 static void *s_glContext = NULL;
 static void *s_glHDC = NULL;
 static const renderWindowServices_t *s_glWindowServices = NULL;
@@ -579,6 +582,9 @@ bool GLimp_Init(glimpParms_t parms) {
 
 			common->Printf("SDL3: trying OpenGL context %s with MSAA samples=%d\n", candidate.label, candidateMultiSamples);
 			s_glContext = s_glWindowServices->CreateGLContext();
+#if defined(OPENQ4_RENDERER_GLES_MODULE)
+			R_GLW_ResetStateCache();	// a new context starts with default bindings; forget what the old one had
+#endif
 			if (s_glContext && s_glWindowServices->MakeGLContextCurrent(s_glContext)) {
 				SDL3_RecordGLContextCandidate(candidate);
 				selectedMultiSamples = candidateMultiSamples;

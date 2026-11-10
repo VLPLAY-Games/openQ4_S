@@ -250,12 +250,204 @@ extern "C" void __wrap_glUniformMatrix4fv( GLint a, GLsizei b, GLboolean c, cons
 	glw_calls[GLW_UNIFORM]++;
 }
 
+
+/*
+	Redundant binding elimination, the same idea as for uniforms. A texture bind, an active-unit
+	switch, an array-buffer bind or a vertex attribute pointer that repeats what the context already
+	holds costs the driver a full state validation (Mesa st_validate_state / nvc0_state_validate,
+	about 4-5k such calls per frame on the Switch). The caches mirror the GL state, are updated on
+	every real call, and are invalidated when the objects they name are deleted or a context is
+	created.
+*/
+static const unsigned int GLW_UNKNOWN = 0xFFFFFFFFu;
+static const int GLW_MAX_UNITS = 32;
+static const int GLW_TEX_TARGETS = 4;
+static unsigned int glw_activeUnit = GLW_UNKNOWN;
+static unsigned int glw_boundTexture[GLW_MAX_UNITS][GLW_TEX_TARGETS];
+static unsigned int glw_arrayBuffer = GLW_UNKNOWN;
+static unsigned int glw_currentVao = 0;
+static unsigned int glw_bindsSkipped = 0;
+
+struct glwAttrib_t {
+	unsigned int	vao;
+	unsigned int	buffer;
+	GLint			size;
+	GLenum			type;
+	GLboolean		normalized;
+	GLsizei			stride;
+	const void *	pointer;
+	bool			valid;
+};
+static const int GLW_VAO_SLOTS = 64;
+static const int GLW_ATTRIBS = 16;
+static glwAttrib_t glw_attrib[GLW_VAO_SLOTS][GLW_ATTRIBS];
+
+static inline int glw_texTargetIndex( GLenum target ) {
+	switch ( target ) {
+	case GL_TEXTURE_2D:			return 0;
+	case GL_TEXTURE_CUBE_MAP:	return 1;
+	case GL_TEXTURE_3D:			return 2;
+	case GL_TEXTURE_2D_ARRAY:	return 3;
+	default:					return -1;
+	}
+}
+
+void R_GLW_ResetStateCache( void ) {
+	glw_activeUnit = GLW_UNKNOWN;
+	for ( int u = 0; u < GLW_MAX_UNITS; u++ ) {
+		for ( int t = 0; t < GLW_TEX_TARGETS; t++ ) {
+			glw_boundTexture[u][t] = GLW_UNKNOWN;
+		}
+	}
+	glw_arrayBuffer = GLW_UNKNOWN;
+	glw_currentVao = 0;
+	memset( glw_attrib, 0, sizeof( glw_attrib ) );
+}
+
+extern "C" void __real_glActiveTexture( GLenum a );
+extern "C" void __wrap_glActiveTexture( GLenum a ) {
+	const unsigned long long t0 = glw_now();
+	const unsigned int unit = a - GL_TEXTURE0;
+	if ( unit == glw_activeUnit ) {
+		glw_bindsSkipped++;
+	} else {
+		glw_activeUnit = unit < GLW_MAX_UNITS ? unit : GLW_UNKNOWN;
+		__real_glActiveTexture( a );
+	}
+	glw_ticks[GLW_TEXTURE] += glw_now() - t0;
+	glw_calls[GLW_TEXTURE]++;
+}
+
+extern "C" void __real_glBindTexture( GLenum a, GLuint b );
+extern "C" void __wrap_glBindTexture( GLenum a, GLuint b ) {
+	const unsigned long long t0 = glw_now();
+	const int target = glw_texTargetIndex( a );
+	if ( target >= 0 && glw_activeUnit < (unsigned int)GLW_MAX_UNITS ) {
+		unsigned int &slot = glw_boundTexture[glw_activeUnit][target];
+		if ( slot == b ) {
+			glw_bindsSkipped++;
+		} else {
+			slot = b;
+			__real_glBindTexture( a, b );
+		}
+	} else {
+		// the active unit is not known, so this bind lands on a unit the cache cannot name:
+		// every remembered binding for the target may now be wrong
+		if ( target >= 0 ) {
+			for ( int u = 0; u < GLW_MAX_UNITS; u++ ) {
+				glw_boundTexture[u][target] = GLW_UNKNOWN;
+			}
+		}
+		__real_glBindTexture( a, b );
+	}
+	glw_ticks[GLW_TEXTURE] += glw_now() - t0;
+	glw_calls[GLW_TEXTURE]++;
+}
+
+extern "C" void __real_glDeleteTextures( GLsizei a, const GLuint *b );
+extern "C" void __wrap_glDeleteTextures( GLsizei a, const GLuint *b ) {
+	// deleting a bound texture unbinds it; reflect that so a reused name is not mistaken for bound
+	for ( GLsizei i = 0; i < a; i++ ) {
+		for ( int u = 0; u < GLW_MAX_UNITS; u++ ) {
+			for ( int t = 0; t < GLW_TEX_TARGETS; t++ ) {
+				if ( glw_boundTexture[u][t] == b[i] ) {
+					glw_boundTexture[u][t] = 0;
+				}
+			}
+		}
+	}
+	__real_glDeleteTextures( a, b );
+}
+
+extern "C" void __real_glBindBuffer( GLenum a, GLuint b );
+extern "C" void __wrap_glBindBuffer( GLenum a, GLuint b ) {
+	const unsigned long long t0 = glw_now();
+	if ( a == GL_ARRAY_BUFFER ) {
+		if ( glw_arrayBuffer == b ) {
+			glw_bindsSkipped++;
+		} else {
+			glw_arrayBuffer = b;
+			__real_glBindBuffer( a, b );
+		}
+	} else {
+		__real_glBindBuffer( a, b );
+	}
+	glw_ticks[GLW_BUFFER] += glw_now() - t0;
+	glw_calls[GLW_BUFFER]++;
+}
+
+extern "C" void __real_glDeleteBuffers( GLsizei a, const GLuint *b );
+extern "C" void __wrap_glDeleteBuffers( GLsizei a, const GLuint *b ) {
+	for ( GLsizei i = 0; i < a; i++ ) {
+		if ( glw_arrayBuffer == b[i] ) {
+			glw_arrayBuffer = 0;
+		}
+		for ( int v = 0; v < GLW_VAO_SLOTS; v++ ) {
+			for ( int k = 0; k < GLW_ATTRIBS; k++ ) {
+				if ( glw_attrib[v][k].valid && glw_attrib[v][k].buffer == b[i] ) {
+					glw_attrib[v][k].valid = false;
+				}
+			}
+		}
+	}
+	__real_glDeleteBuffers( a, b );
+}
+
+extern "C" void __real_glBindVertexArray( GLuint a );
+extern "C" void __wrap_glBindVertexArray( GLuint a ) {
+	const unsigned long long t0 = glw_now();
+	glw_currentVao = a;
+	__real_glBindVertexArray( a );
+	glw_ticks[GLW_BUFFER] += glw_now() - t0;
+	glw_calls[GLW_BUFFER]++;
+}
+
+extern "C" void __real_glDeleteVertexArrays( GLsizei a, const GLuint *b );
+extern "C" void __wrap_glDeleteVertexArrays( GLsizei a, const GLuint *b ) {
+	for ( GLsizei i = 0; i < a; i++ ) {
+		memset( glw_attrib[b[i] & ( GLW_VAO_SLOTS - 1 )], 0, sizeof( glw_attrib[0] ) );
+	}
+	__real_glDeleteVertexArrays( a, b );
+}
+
+// anything that rewrites attribute state behind the pointer cache invalidates it
+extern "C" void __real_glVertexAttribIPointer( GLuint a, GLint b, GLenum c, GLsizei d, const void *e );
+extern "C" void __wrap_glVertexAttribIPointer( GLuint a, GLint b, GLenum c, GLsizei d, const void *e ) {
+	if ( a < (GLuint)GLW_ATTRIBS ) {
+		glw_attrib[glw_currentVao & ( GLW_VAO_SLOTS - 1 )][a].valid = false;
+	}
+	__real_glVertexAttribIPointer( a, b, c, d, e );
+}
+
+extern "C" void __real_glVertexAttribPointer( GLuint a, GLint b, GLenum c, GLboolean d, GLsizei e, const void *f );
+extern "C" void __wrap_glVertexAttribPointer( GLuint a, GLint b, GLenum c, GLboolean d, GLsizei e, const void *f ) {
+	const unsigned long long t0 = glw_now();
+	if ( a < (GLuint)GLW_ATTRIBS && glw_arrayBuffer != GLW_UNKNOWN ) {
+		glwAttrib_t &at = glw_attrib[glw_currentVao & ( GLW_VAO_SLOTS - 1 )][a];
+		if ( at.valid && at.vao == glw_currentVao && at.buffer == glw_arrayBuffer && at.size == b && at.type == c
+				&& at.normalized == d && at.stride == e && at.pointer == f ) {
+			glw_bindsSkipped++;
+		} else {
+			at.vao = glw_currentVao;
+			at.buffer = glw_arrayBuffer;
+			at.size = b;
+			at.type = c;
+			at.normalized = d;
+			at.stride = e;
+			at.pointer = f;
+			at.valid = true;
+			__real_glVertexAttribPointer( a, b, c, d, e, f );
+		}
+	} else {
+		__real_glVertexAttribPointer( a, b, c, d, e, f );
+	}
+	glw_ticks[GLW_ATTRIB] += glw_now() - t0;
+	glw_calls[GLW_ATTRIB]++;
+}
+
 GLW( GLW_DRAW, glDrawElements, ( GLenum a, GLsizei b, GLenum c, const void *d ), ( a, b, c, d ) )
 GLW( GLW_DRAW, glDrawArrays, ( GLenum a, GLint b, GLsizei c ), ( a, b, c ) )
-GLW( GLW_TEXTURE, glBindTexture, ( GLenum a, GLuint b ), ( a, b ) )
-GLW( GLW_TEXTURE, glActiveTexture, ( GLenum a ), ( a ) )
 GLW( GLW_TEXTURE, glTexParameteri, ( GLenum a, GLenum b, GLint c ), ( a, b, c ) )
-GLW( GLW_ATTRIB, glVertexAttribPointer, ( GLuint a, GLint b, GLenum c, GLboolean d, GLsizei e, const void *f ), ( a, b, c, d, e, f ) )
 GLW( GLW_ATTRIB, glEnableVertexAttribArray, ( GLuint a ), ( a ) )
 GLW( GLW_ATTRIB, glDisableVertexAttribArray, ( GLuint a ), ( a ) )
 GLW( GLW_STATE, glEnable, ( GLenum a ), ( a ) )
@@ -270,9 +462,7 @@ GLW( GLW_STATE, glCullFace, ( GLenum a ), ( a ) )
 GLW( GLW_STATE, glScissor, ( GLint a, GLint b, GLsizei c, GLsizei d ), ( a, b, c, d ) )
 GLW( GLW_STATE, glViewport, ( GLint a, GLint b, GLsizei c, GLsizei d ), ( a, b, c, d ) )
 GLW( GLW_STATE, glPolygonOffset, ( GLfloat a, GLfloat b ), ( a, b ) )
-GLW( GLW_BUFFER, glBindBuffer, ( GLenum a, GLuint b ), ( a, b ) )
 GLW( GLW_BUFFER, glBufferSubData, ( GLenum a, GLintptr b, GLsizeiptr c, const void *d ), ( a, b, c, d ) )
-GLW( GLW_BUFFER, glBindVertexArray, ( GLuint a ), ( a ) )
 GLW( GLW_FBO, glBindFramebuffer, ( GLenum a, GLuint b ), ( a, b ) )
 GLW( GLW_FBO, glClear, ( GLbitfield a ), ( a ) )
 
@@ -285,8 +475,9 @@ static void R_GLW_ReportAndReset( void ) {
 		glw_ticks[i] = 0;
 		glw_calls[i] = 0;
 	}
-	n += idStr::snPrintf( line + n, sizeof( line ) - n, " uniSkipped=%u", glw_uniformSkipped );
+	n += idStr::snPrintf( line + n, sizeof( line ) - n, " uniSkipped=%u bindSkipped=%u", glw_uniformSkipped, glw_bindsSkipped );
 	glw_uniformSkipped = 0;
+	glw_bindsSkipped = 0;
 	printf( "%s\n", line );
 }
 #endif
@@ -538,5 +729,9 @@ void R_RenderThread_Init( void ) {
 	cmdSystem->AddCommand( "renderThreadStats", R_RenderThreadStats_f, CMD_FL_RENDERER,
 		"prints render-thread frame counts and how often the main thread waited for it" );
 }
+
+#if !defined( __SWITCH__ )
+void R_GLW_ResetStateCache( void ) {}
+#endif
 
 #endif // OPENQ4_RENDERER_GLES_MODULE

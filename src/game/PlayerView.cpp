@@ -822,7 +822,27 @@ is deliberately a bare contents query: it runs once per audible emitter per fram
 ===================
 */
 static bool OpenQ4_SoundPointInLiquid( const idVec3 &point ) {
-	return gameLocal.LiquidContentsAtPoint( point, NULL ) != 0;
+	// Emitters mostly stand still and every one asks every frame, which cost ~2.5% of the main thread
+	// on the Switch. Remember recent answers per exact point for 100 ms of game time.
+	struct liquidMemo_t {
+		idVec3	point;
+		int		time;
+		bool	result;
+		bool	valid;
+	};
+	static liquidMemo_t memo[64];
+	const unsigned int *bits = reinterpret_cast<const unsigned int *>( &point.x );
+	const unsigned int hash = ( ( bits[0] * 73856093u ) ^ ( bits[1] * 19349663u ) ^ ( bits[2] * 83492791u ) ) >> 4;
+	liquidMemo_t &entry = memo[hash & 63];
+	if ( entry.valid && gameLocal.time - entry.time < 100 && gameLocal.time >= entry.time && entry.point == point ) {
+		return entry.result;
+	}
+	const bool result = gameLocal.LiquidContentsAtPoint( point, NULL ) != 0;
+	entry.point = point;
+	entry.time = gameLocal.time;
+	entry.result = result;
+	entry.valid = true;
+	return result;
 }
 // openQ4 END
 

@@ -1504,6 +1504,8 @@ void idRenderWorldLocal::FreeWorld() {
 	R_RenderThread_Sync( "world" );
 	int i;
 
+	ClearBoundsAreasMemo();
+
 	// drop every memoized draw-surf area before the defs and portal areas the
 	// entries point at are freed (also keeps FreeEntityDef's memo scan trivial
 	// during mass teardown)

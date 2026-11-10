@@ -160,6 +160,10 @@ idAI::idAI ( void ) {
 // openQ4 BEGIN
 	liquidLevel				= 0;
 	liquidType				= 0;
+	liquidProbeTime			= -100000;
+	liquidProbeOrigin.Zero();
+	liquidProbeLevel		= 0;
+	liquidProbeType			= 0;
 	liquidAirTics			= 0;
 	nextLiquidDamageTime	= 0;
 	liquidCanBreathe		= false;
@@ -1359,8 +1363,21 @@ void idAI::UpdateLiquid( void ) {
 		return;
 	}
 
+	// The contents query walks the collision sectors (~5% of the main thread in a fight). A monster
+	// crosses a liquid surface rarely, so ask at most every 100 ms unless it has moved a long way;
+	// the per-tic breath and damage logic below still runs every tic on the remembered answer.
 	int newType = 0;
-	const int newLevel = gameLocal.LiquidLevelForEntity( this, newType );
+	int newLevel;
+	if ( gameLocal.time - liquidProbeTime < 100 && ( GetPhysics()->GetOrigin() - liquidProbeOrigin ).LengthSqr() < 16.0f * 16.0f ) {
+		newLevel = liquidProbeLevel;
+		newType = liquidProbeType;
+	} else {
+		newLevel = gameLocal.LiquidLevelForEntity( this, newType );
+		liquidProbeTime = gameLocal.time;
+		liquidProbeOrigin = GetPhysics()->GetOrigin();
+		liquidProbeLevel = newLevel;
+		liquidProbeType = newType;
+	}
 
 	// breaking the surface, either way
 	if ( ( newLevel != 0 ) != ( liquidLevel != 0 ) ) {

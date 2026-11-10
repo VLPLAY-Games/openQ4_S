@@ -561,6 +561,11 @@ protected:
 	// transient presentation-interpolation samples.  Deliberately not saved: they
 	// are a render-only cache and restoring them could blend across a load.
 	int						presentationPoseTime;				// game time of the newest authoritative sample
+	// exact posed bounds of this tic and the one before, for bounding an interpolated pose between them
+	idBounds				presentationBoundsPrev;
+	idBounds				presentationBoundsCur;
+	int						presentationBoundsTime;
+	bool					presentationBoundsPrevValid;
 	bool					presentationPoseCanInterpolate;		// samples are one sequential tic apart and continuous
 	bool					presentationPoseMoved;				// the two samples differ
 	bool					presentationPosePushed;				// an interpolated pose is currently in the renderer

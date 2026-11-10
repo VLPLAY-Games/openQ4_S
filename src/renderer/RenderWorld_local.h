@@ -456,6 +456,20 @@ public:
 
 	void					BoundsInAreas_r( int nodeNum, const idBounds &bounds, int *areas, int *numAreas, int maxAreas ) const;
 
+	// BoundsInAreas is a pure function of the (static) area tree and the bounds, and entities, lights
+	// and effects ask it for the same bounds every tic. Recent answers are kept, keyed by the exact
+	// bounds; the table is cleared whenever a world is loaded or freed. Main thread only.
+	struct boundsAreasMemo_t {
+		float					key[6];
+		int						maxAreas;
+		int						numAreas;
+		int						areas[16];
+		bool					valid;
+	};
+	static const int		BOUNDS_AREAS_MEMO_SIZE = 512;
+	mutable boundsAreasMemo_t	boundsAreasMemo[BOUNDS_AREAS_MEMO_SIZE];
+	void					ClearBoundsAreasMemo( void ) const;
+
 	float					DrawTextLength( const char *text, float scale, int len = 0 );
 
 	void					FreeInteractions();

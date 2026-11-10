@@ -125,6 +125,7 @@ idRenderWorldLocal::idRenderWorldLocal
 ===================
 */
 idRenderWorldLocal::idRenderWorldLocal() {
+	ClearBoundsAreasMemo();
 	mapName.Clear();
 	mapTimeStamp = FILE_NOT_FOUND_TIMESTAMP;
 	mapFileCRC = 0u;
@@ -1458,8 +1459,42 @@ int idRenderWorldLocal::BoundsInAreas( const idBounds &bounds, int *areas, int m
 	if ( !areaNodes ) {
 		return numAreas;
 	}
+
+	// exact-bounds memo (see RenderWorld_local.h)
+	float key[6];
+	key[0] = bounds[0][0]; key[1] = bounds[0][1]; key[2] = bounds[0][2];
+	key[3] = bounds[1][0]; key[4] = bounds[1][1]; key[5] = bounds[1][2];
+	unsigned int hash = 2166136261u ^ static_cast<unsigned int>( maxAreas );
+	const unsigned int *keyBits = reinterpret_cast<const unsigned int *>( key );
+	for ( int i = 0; i < 6; ++i ) {
+		hash = ( hash ^ keyBits[i] ) * 16777619u;
+	}
+	boundsAreasMemo_t &memo = boundsAreasMemo[hash & ( BOUNDS_AREAS_MEMO_SIZE - 1 )];
+	if ( memo.valid && memo.maxAreas == maxAreas && memcmp( memo.key, key, sizeof( key ) ) == 0 ) {
+		for ( int i = 0; i < memo.numAreas; ++i ) {
+			areas[i] = memo.areas[i];
+		}
+		return memo.numAreas;
+	}
+
 	BoundsInAreas_r( 0, bounds, areas, &numAreas, maxAreas );
+
+	if ( numAreas <= 16 ) {
+		memcpy( memo.key, key, sizeof( key ) );
+		memo.maxAreas = maxAreas;
+		memo.numAreas = numAreas;
+		for ( int i = 0; i < numAreas; ++i ) {
+			memo.areas[i] = areas[i];
+		}
+		memo.valid = true;
+	}
 	return numAreas;
+}
+
+void idRenderWorldLocal::ClearBoundsAreasMemo( void ) const {
+	for ( int i = 0; i < BOUNDS_AREAS_MEMO_SIZE; ++i ) {
+		boundsAreasMemo[i].valid = false;
+	}
 }
 
 /*

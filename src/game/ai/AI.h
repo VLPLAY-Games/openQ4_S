@@ -579,6 +579,10 @@ public:
 	int						liquidLevel;			// 0 none, 1 feet, 2 waist, 3 head
 	int						liquidType;				// the CONTENTS_ bits of whatever they are standing in
 	int						liquidAirTics;			// breath left while submerged
+	int						liquidProbeTime;		// when the liquid contents were last queried
+	idVec3					liquidProbeOrigin;		// where they were queried
+	int						liquidProbeLevel;		// and what came back
+	int						liquidProbeType;
 	int						nextLiquidDamageTime;	// pain debounce for lava and slime
 	bool					liquidCanBreathe;		// "canBreatheLiquid" on the def: never drowns
 	bool					liquidImmune;			// "liquidImmune" on the def: lava and slime do nothing

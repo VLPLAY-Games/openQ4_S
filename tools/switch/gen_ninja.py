@@ -38,7 +38,7 @@ GL_WRAP = ["glDrawElements", "glDrawArrays", "glUseProgram", "glBindTexture", "g
            "glUniform3fv", "glUniform4fv", "glUniformMatrix4fv", "glVertexAttribPointer", "glEnableVertexAttribArray",
            "glDisableVertexAttribArray", "glEnable", "glDisable", "glBlendFunc", "glDepthFunc", "glDepthMask",
            "glColorMask", "glStencilFunc", "glStencilOp", "glCullFace", "glScissor", "glViewport", "glPolygonOffset",
-           "glLinkProgram", "glDeleteProgram", "glBindBuffer", "glBufferSubData", "glBindVertexArray", "glBindFramebuffer", "glClear"]
+           "glLinkProgram", "glDeleteProgram", "glDeleteTextures", "glDeleteBuffers", "glDeleteVertexArrays", "glVertexAttribIPointer", "glBindBuffer", "glBufferSubData", "glBindVertexArray", "glBindFramebuffer", "glClear"]
 ARCH_FLAGS = ["-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-mtp=soft", "-fPIE", "-ftls-model=local-exec"]
 # Third-party trees the Switch build does not use (SDL3 and GLEW are replaced by
 # src/sys/switch and the GLES loader).

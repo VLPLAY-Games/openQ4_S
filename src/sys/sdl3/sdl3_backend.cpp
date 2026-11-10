@@ -5942,6 +5942,14 @@ unsigned char Sys_MapCharForKey(int key) {
 }
 
 void IN_ActivateMouse(void) {
+#if defined(__SWITCH__)
+	// The Switch video driver has no relative mouse mode. The engine retries every frame, and each
+	// failure was a console print; give up after the first.
+	static bool s_mouseUnsupported = false;
+	if (s_mouseUnsupported) {
+		return;
+	}
+#endif
 	if (!s_sdlWindow || !win32.in_mouse.GetBool() || SDL3_IsMouseCaptured()) {
 		return;
 	}
@@ -5971,6 +5979,9 @@ void IN_ActivateMouse(void) {
 	if (!SDL_SetWindowRelativeMouseMode(s_sdlWindow, true)) {
 		common->Printf("SDL3: failed to enable relative mouse mode: %s\n", SDL_GetError());
 		(void)SDL_SetWindowMouseGrab(s_sdlWindow, false);
+#if defined(__SWITCH__)
+		s_mouseUnsupported = true;
+#endif
 		return;
 	}
 

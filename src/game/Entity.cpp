@@ -502,6 +502,11 @@ idEntity::idEntity
 */
 idEntity::idEntity() {
 
+	presentationBoundsPrev.Clear();
+	presentationBoundsCur.Clear();
+	presentationBoundsTime = -100000;
+	presentationBoundsPrevValid = false;
+
 	entityNumber	= ENTITYNUM_NONE;
 	entityDefNumber = -1;
 
@@ -2233,7 +2238,28 @@ void idEntity::UpdatePresentationPose( void ) {
 		presentationRenderEntity.callback = NULL;
 		presentationRenderEntity.numJoints = animator->NumJoints();
 		presentationRenderEntity.joints = presentationJoints;
-		presentationRenderEntity.hModel->BoundsFromJoints( presentationJoints, presentationRenderEntity.bounds );
+		// The interpolated pose lies between this tic's pose and the previous tic's, and a vertex
+		// moves along a short arc between them (a limb turns a few degrees per tic, so the arc bulges
+		// by well under a unit). The union of the two exact bounds, padded by one unit, therefore
+		// contains it, and skinning every vertex again each rendered frame is avoided. Anything
+		// that breaks that picture (no consecutive previous tic, a presentation time outside the
+		// last two tics) falls back to the exact computation.
+		const int ticMsec = gameLocal.msec > 0 ? gameLocal.msec : 16;
+		if ( gameLocal.time != presentationBoundsTime ) {
+			presentationBoundsPrevValid = presentationBoundsTime >= 0 && gameLocal.time - presentationBoundsTime <= ticMsec * 2
+				&& !presentationBoundsCur.IsCleared();
+			presentationBoundsPrev = presentationBoundsCur;
+			presentationBoundsCur = renderEntity.bounds;
+			presentationBoundsTime = gameLocal.time;
+		}
+		const int behind = gameLocal.time - presentationTime;
+		if ( presentationBoundsPrevValid && !presentationBoundsCur.IsCleared() && behind >= 0 && behind <= ticMsec * 2 ) {
+			presentationRenderEntity.bounds = presentationBoundsPrev;
+			presentationRenderEntity.bounds.AddBounds( presentationBoundsCur );
+			presentationRenderEntity.bounds.ExpandSelf( 1.0f );
+		} else {
+			presentationRenderEntity.hModel->BoundsFromJoints( presentationJoints, presentationRenderEntity.bounds );
+		}
 	}
 
 	presentationPoseHeld = true;
