@@ -167,6 +167,7 @@ idSoundOggStream::~idSoundOggStream() { Close(); }
 ===============================================================================
 */
 #include <stdio.h>
+extern "C" void switch_audio_diag_src( const short *pcm, int frames, int channels, int rate );
 static int	soundDiagLogged = 0;
 static int	soundDiagDumps = 0;
 
@@ -255,6 +256,7 @@ void idSoundOggStream::DiagnoseBlock() {
 			soundDiagLogged++;
 		}
 	}
+	switch_audio_diag_src( block, frames, channels, static_cast<int>( shape.rate ) );
 	if( diagDump < 0 && requestFrame == 0 ) {
 		static int streamsDumped = 0;
 		if( streamsDumped < 3 ) {

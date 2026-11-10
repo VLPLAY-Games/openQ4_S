@@ -38,6 +38,7 @@ static Compat s_dev;
 // audio diagnostics (switch_audio_diag.c)
 extern void switch_audio_diag_f32(const float *x, int frames, int channels, unsigned long long mixTicks);
 extern void switch_audio_diag_spec(int reqFreq, int reqChannels, int reqSamples, int format, int gotFreq);
+extern int switch_audio_diag_test_fill(float *out, int frames, int channels);
 static int s_channels = 2;
 static int s_isFloat = 0;
 
@@ -64,6 +65,11 @@ static void SDLCALL Pull(void *userdata, SDL_AudioStream *stream, int additional
             break;
         }
         memset(c->scratch, 0, chunk);
+        if (s_isFloat && switch_audio_diag_test_fill((float *)c->scratch, chunk / c->frameBytes, s_channels)) {
+            SDL_PutAudioStreamData(stream, c->scratch, chunk);
+            additional -= chunk;
+            continue;
+        }
         const unsigned long long t0 = armGetSystemTick();
         c->callback(c->userdata, c->scratch, chunk);
         if (s_isFloat) {

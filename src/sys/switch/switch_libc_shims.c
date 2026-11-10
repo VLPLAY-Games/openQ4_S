@@ -216,8 +216,10 @@ static void *switch_log_flusher( void *arg ) {
 	int tick = 0;
 	for ( ;; ) {
 		svcSleepThread( 2000000000ULL );	// 2 s
-		if ( ++tick >= 5 ) {
-			// every 10 s: process memory in use and the malloc heap, to spot growth or fragmentation
+		if ( ++tick >= 60 ) {
+			// every 2 min: process memory in use and the malloc heap, to spot growth or fragmentation.
+			// mallinfo() walks the whole heap under the allocator lock (about 100 ms with a 1.8 GB heap),
+			// which stalled every thread that allocates; once every 10 s it was a visible hitch.
 			u64 used = 0, total = 0;
 			struct mallinfo mi = mallinfo();
 			tick = 0;

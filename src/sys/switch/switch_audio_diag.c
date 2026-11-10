@@ -56,12 +56,94 @@ static struct {
 	unsigned int		budgetUs;
 } stats;
 
+// the decoded music the engine queued for OpenAL, kept next to the OpenAL output so the two can be
+// aligned and subtracted offline (stereo s16 at src_rate)
+#define DIAG_SRC_FRAMES		( 44100 * 10 )
+static short *			ring_src;
+static unsigned int		src_pos, src_fill, src_rate = 44100;
+
+// output self-test: replaces OpenAL for 12 s with silence, then a 440 Hz tone, then a 4 kHz tone
+static volatile int		test_requested = 0;
+static int				test_active = 0;
+static unsigned int		test_frame = 0;
+
 static volatile int		dump_requested = 0;
 static volatile int		dump_running = 0;
 static int				dump_count = 0;
 static int				dump_reason_auto = 0;
 static int				dump_reason_user = 0;
 static unsigned int		spec_freq, spec_channels, spec_samples;
+
+void switch_audio_diag_src( const short *pcm, int frames, int channels, int rate ) {
+	if ( channels < 1 || channels > 2 || frames <= 0 ) {
+		return;
+	}
+	if ( !ring_src ) {
+		ring_src = (short *)calloc( (size_t)DIAG_SRC_FRAMES * 2, sizeof( short ) );
+		if ( !ring_src ) {
+			return;
+		}
+	}
+	src_rate = (unsigned int)rate;
+	for ( int i = 0; i < frames; i++ ) {
+		ring_src[src_pos * 2] = pcm[i * channels];
+		ring_src[src_pos * 2 + 1] = pcm[i * channels + ( channels > 1 ? 1 : 0 )];
+		src_pos = ( src_pos + 1 ) % DIAG_SRC_FRAMES;
+		if ( src_fill < DIAG_SRC_FRAMES ) src_fill++;
+	}
+}
+
+/* ZL + ZR + Plus held for a second starts the 12 s output self-test */
+void switch_audio_diag_pad_test( int comboDown ) {
+	static unsigned long long since = 0;
+	static int fired = 0;
+	if ( !comboDown ) {
+		since = 0;
+		fired = 0;
+		return;
+	}
+	if ( since == 0 ) {
+		since = armGetSystemTick();
+	} else if ( !fired && armGetSystemTick() - since > 19200000ULL ) {
+		fired = 1;
+		test_requested = 1;
+		printf( "audio: output self-test requested (15 s: silence, 440 Hz quiet/loud, 4 kHz quiet/loud)\n" );
+	}
+}
+
+/* Called for every chunk before OpenAL renders it. Returns 1 when it filled the chunk itself.
+   15 s: silence, 440 Hz quiet then loud, 4 kHz quiet then loud (3 s each). Quiet is -28 dBFS, loud
+   -8 dBFS. A clean output path gives pure tones at both levels and nothing in the silence; noise that
+   grows with the level shows up as roughness on the loud tones. */
+int switch_audio_diag_test_fill( float *out, int frames, int channels ) {
+	static const float freq[5]	= { 0.0f, 440.0f, 440.0f, 4000.0f, 4000.0f };
+	static const float amp[5]	= { 0.0f, 0.04f, 0.4f, 0.04f, 0.4f };
+	if ( test_requested && !test_active ) {
+		test_requested = 0;
+		test_active = 1;
+		test_frame = 0;
+	}
+	if ( !test_active ) {
+		return 0;
+	}
+	for ( int i = 0; i < frames; i++ ) {
+		const unsigned int t = test_frame + (unsigned int)i;
+		const unsigned int phase = t / ( 3u * DIAG_RATE );
+		float v = 0.0f;
+		if ( phase < 5 && freq[phase] > 0.0f ) {
+			v = amp[phase] * sinf( 6.2831853f * freq[phase] * (float)( t % DIAG_RATE ) / DIAG_RATE );
+		}
+		for ( int c = 0; c < channels; c++ ) {
+			out[i * channels + c] = v;
+		}
+	}
+	test_frame += (unsigned int)frames;
+	if ( test_frame >= 15u * DIAG_RATE ) {
+		test_active = 0;
+		printf( "audio: output self-test finished\n" );
+	}
+	return 1;
+}
 
 static void diag_init( void ) {
 	if ( !ring_f32 ) {
@@ -152,9 +234,28 @@ static void *dump_thread( void *arg ) {
 	snprintf( path, sizeof( path ), DIAG_DIR "/audio_%d.txt", n );
 	FILE *f = fopen( path, "w" );
 	if ( f ) {
-		fprintf( f, "reason=%s\nf32_frames=%u\ns16_frames=%u\nrate=%d\nopenal_freq=%u channels=%u samples=%u\n",
-				dump_reason_user ? "controller" : "automatic", f32n, s16n, DIAG_RATE, spec_freq, spec_channels, spec_samples );
+		fprintf( f, "reason=%s\nf32_frames=%u\ns16_frames=%u\nrate=%d\nopenal_freq=%u channels=%u samples=%u\nsrc_frames=%u src_rate=%u\n",
+				dump_reason_user ? "controller" : "automatic", f32n, s16n, DIAG_RATE, spec_freq, spec_channels, spec_samples, src_fill, src_rate );
 		fclose( f );
+	}
+	if ( ring_src && src_fill > 0 ) {
+		const unsigned int n2 = src_fill;
+		const unsigned int st = ( src_pos + DIAG_SRC_FRAMES - n2 ) % DIAG_SRC_FRAMES;
+		short *srccopy = (short *)malloc( (size_t)n2 * 2 * sizeof( short ) );
+		if ( srccopy ) {
+			for ( unsigned int i = 0; i < n2; i++ ) {
+				const unsigned int k = ( st + i ) % DIAG_SRC_FRAMES;
+				srccopy[i * 2] = ring_src[k * 2];
+				srccopy[i * 2 + 1] = ring_src[k * 2 + 1];
+			}
+			snprintf( path, sizeof( path ), DIAG_DIR "/audio_%d_src.raw", n );
+			fd = open( path, O_WRONLY | O_CREAT | O_TRUNC, 0644 );
+			if ( fd >= 0 ) {
+				write( fd, srccopy, (size_t)n2 * 2 * sizeof( short ) );
+				close( fd );
+			}
+			free( srccopy );
+		}
 	}
 	free( f32copy );
 	free( s16copy );
