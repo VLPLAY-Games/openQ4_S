@@ -178,7 +178,7 @@ void Posix_Exit(int ret) {
 	// process spawning. it's best when it happens after everything has shut down
 	Posix_RunExitSpawn();
 #if defined( __SWITCH__ )
-	printf( "quit timing: leaving through the loader at %d ms\n", Sys_Milliseconds() );
+	switch_mark( "posix exit: leaving" );
 	switch_fast_exit( set_exit ? set_exit : ret );
 #endif
 	// in case of signal, handler tries a common->Quit

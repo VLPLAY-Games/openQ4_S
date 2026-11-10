@@ -1902,8 +1902,8 @@ idCommonLocal::Quit
 ==================
 */
 #if defined( __SWITCH__ )
-// where the time goes while the game closes: one line per stage straight to the log
-#define SWITCH_QUIT_MARK( x ) printf( "quit timing: %s at %d ms\n", x, Sys_Milliseconds() )
+extern "C" void switch_mark( const char *stage );
+#define SWITCH_QUIT_MARK( x ) switch_mark( x )
 #else
 #define SWITCH_QUIT_MARK( x ) ((void)0)
 #endif
