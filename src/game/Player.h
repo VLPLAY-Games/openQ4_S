@@ -1064,6 +1064,7 @@ private:
 	idEntityPtr<idEntity>	focusEnt;
 	idUserInterface *		focusBrackets;	
 	int						focusBracketsTime;
+	int						focusScanTime;			// idle focus search runs at most every few tics
 
 	bool					targetFriendly;
 

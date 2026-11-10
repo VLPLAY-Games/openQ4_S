@@ -33,6 +33,11 @@ idCVar bse_scale("bse_scale", "0.6", CVAR_FLOAT | CVAR_ARCHIVE, "effect scalabil
 #else
 idCVar bse_scale("bse_scale", "1", CVAR_FLOAT | CVAR_ARCHIVE, "effect scalability amount");
 #endif
+#if defined( __SWITCH__ )
+idCVar bse_particleActorTrace("bse_particleActorTrace", "0", CVAR_BOOL | CVAR_ARCHIVE, "particles with physics also collide with actors and other render-model clip (costly: each hit candidate is a render-model trace)");
+#else
+idCVar bse_particleActorTrace("bse_particleActorTrace", "1", CVAR_BOOL | CVAR_ARCHIVE, "particles with physics also collide with actors and other render-model clip (costly: each hit candidate is a render-model trace)");
+#endif
 idCVar bse_maxParticles("bse_maxParticles", "2048", CVAR_INTEGER, "maximum per-segment particle allocation");
 
 int bse_frameSpawned = 0;

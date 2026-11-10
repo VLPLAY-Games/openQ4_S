@@ -17,6 +17,8 @@
 
 #include "../framework/Session.h"
 
+extern idCVar bse_particleActorTrace;
+
 struct SElecWork {
 	srfTriangles_t* tri;
 	idVec3* coords;
@@ -741,7 +743,7 @@ bool rvParticle::RunPhysics(rvBSE* effect, rvSegmentTemplate* st, float time) {
 	idVec3 source = sourceWorld;
 	idVec3 dest = destWorld;
 	rvBSEManagerLocal::AddPerfCounter(PERF_NUM_TRACES);
-	game->Translation(trace, source, dest, trm, CONTENTS_SOLID | CONTENTS_RENDERMODEL);
+	game->Translation(trace, source, dest, trm, bse_particleActorTrace.GetBool() ? ( CONTENTS_SOLID | CONTENTS_RENDERMODEL ) : CONTENTS_SOLID);
 	if (trace.fraction >= 1.0f) {
 		return false;
 	}

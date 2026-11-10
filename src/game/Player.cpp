@@ -1416,6 +1416,7 @@ idPlayer::idPlayer() {
 	focusType				= FOCUS_NONE;
 	focusBrackets			= NULL;
 	focusBracketsTime		= 0;
+	focusScanTime			= 0;
 	targetFriendly			= false;
 
 	talkingNPC				= NULL;
@@ -1805,6 +1806,7 @@ void idPlayer::Init( void ) {
 	focusType				= FOCUS_NONE;
 	focusBrackets			= NULL;
 	focusBracketsTime		= 0;
+	focusScanTime			= 0;
 	
 	talkingNPC				= NULL;
  	talkCursor				= 0;
@@ -7555,6 +7557,14 @@ void idPlayer::UpdateFocus( void ) {
 	}
 #endif
 	
+	// With nothing focused, looking for something to focus (a clip model query and several
+	// render-model traces) is only needed a few times a second; a focused target is
+	// still tracked every tic so GUI cursors stay responsive.
+	if ( !gameLocal.isMultiplayer && focusType == FOCUS_NONE && !focusBrackets && gameLocal.time < focusScanTime ) {
+		return;
+	}
+	focusScanTime = gameLocal.time + 80;
+
 	// Kill the focus brackets when their time has elapsed
 	oldBrackets = focusBrackets;	
 	if ( focusBracketsTime && gameLocal.time > focusBracketsTime ) {
