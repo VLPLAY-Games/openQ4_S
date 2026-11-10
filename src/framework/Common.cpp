@@ -1994,7 +1994,15 @@ void idCommonLocal::FatalError( const char *fmt, ... ) {
 idCommonLocal::Quit
 ==================
 */
+#if defined( __SWITCH__ )
+extern "C" void switch_mark( const char *stage );
+#define SWITCH_QUIT_MARK( x ) switch_mark( x )
+#else
+#define SWITCH_QUIT_MARK( x ) ((void)0)
+#endif
+
 void idCommonLocal::Quit( void ) {
+	SWITCH_QUIT_MARK( "quit: begin" );
 
 #ifdef ID_ALLOW_TOOLS
 	if ( com_editors & EDITOR_RADIANT ) {
@@ -2019,6 +2027,7 @@ void idCommonLocal::Quit( void ) {
 		Shutdown();
 	}
 
+	SWITCH_QUIT_MARK( "quit: shutdown done" );
 	Sys_Quit();
 }
 
@@ -7517,6 +7526,7 @@ void idCommonLocal::Shutdown( void ) {
 
 	// A committed checkpoint is a user operation, not cancellable preload work.
 	// Finish its preview and storage job while both services still exist.
+	SWITCH_QUIT_MARK( "shutdown: begin" );
 	Session_FinishPendingSave();
 	com_shuttingDown = true;
 	LevelEditor_Shutdown();
@@ -7534,6 +7544,7 @@ void idCommonLocal::Shutdown( void ) {
 		Printf( "jobsShutdown PASS v1 initialized=0 queued=0 running=0\n" );
 	}
 
+	SWITCH_QUIT_MARK( "shutdown: jobs done" );
 	idAsyncNetwork::server.Kill();
 	idAsyncNetwork::client.Shutdown();
 
@@ -7541,15 +7552,19 @@ void idCommonLocal::Shutdown( void ) {
 	vrSystem->Shutdown();
 
 	// game specific shut down
+	SWITCH_QUIT_MARK( "shutdown: game shutting down" );
 	ShutdownGame( false );
+	SWITCH_QUIT_MARK( "shutdown: game done" );
 
 	// Release the engine/tool-side render-geometry copy after renderer teardown.
 	// This is a no-op on static-renderer builds whose shared copy already stopped.
 	R_ShutdownTriSurfData();
 
 	// shut down non-portable system services
+	SWITCH_QUIT_MARK( "shutdown: sys shutting down" );
 	Sys_Shutdown();
 	RenderDoc_Shutdown();
+	SWITCH_QUIT_MARK( "shutdown: sys done" );
 
 	// shut down the console
 	console->Shutdown();
@@ -7888,6 +7903,7 @@ void idCommonLocal::ShutdownGame( bool reloading ) {
 
 	idAsyncNetwork::client.Shutdown();
 
+	SWITCH_QUIT_MARK( "shutdown game: session next" );
 	// shut down the session
 	session->Shutdown();
 
@@ -7906,18 +7922,21 @@ void idCommonLocal::ShutdownGame( bool reloading ) {
 	// Cached collision polygons retain material declarations. A campaign or
 	// module restart replaces those declarations, so retire the cache after
 	// the game releases its clip models and before renderer/decl teardown.
+	SWITCH_QUIT_MARK( "shutdown game: game module next" );
 	collisionModelManager->Shutdown();
 
 	// shut down the user interfaces
 	uiManager->Shutdown();
 
 	// shut down the sound system
+	SWITCH_QUIT_MARK( "shutdown game: ui and sound next" );
 	soundSystem->Shutdown();
 
 	// shut down async networking
 	idAsyncNetwork::Shutdown();
 
 	// shut down the user command input code
+	SWITCH_QUIT_MARK( "shutdown game: network next" );
 	usercmdGen->Shutdown();
 
 	// shut down the event loop
@@ -7925,12 +7944,14 @@ void idCommonLocal::ShutdownGame( bool reloading ) {
 
 	// shut down the renderSystem; NULL on module-only builds when a fatal
 	// error shuts down before the renderer module published its interfaces
+	SWITCH_QUIT_MARK( "shutdown game: renderer next" );
 	if ( renderSystem ) {
 		renderSystem->Shutdown();
 	}
 
 	// shutdown the decl manager while the game DLL is still loaded, because
 	// game-owned decl types (e.g. entity/fx decls) can have module-local vtables.
+	SWITCH_QUIT_MARK( "shutdown game: decls next" );
 	declManager->Shutdown();
 
 	// Model decl destructors release idAnim references into the module animation
