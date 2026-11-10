@@ -32,6 +32,7 @@ struct SDL_PrivateAudioData
     AudioDriverWaveBuf wave[SWITCH_NUM_BUFFERS];
     void *pool;
     bool drvOpen;
+    bool everReady;
     u32 aligned;
     int next;
 };
@@ -100,6 +101,9 @@ static void RendererClose(struct SDL_PrivateAudioData *h)
     h->pool = NULL;
 }
 
+static bool AudoutOpen(SDL_AudioDevice *device);
+static bool SWITCHAUDIO_WaitDevice(SDL_AudioDevice *device);
+
 static bool SWITCHAUDIO_OpenDevice(SDL_AudioDevice *device)
 {
     device->hidden = (struct SDL_PrivateAudioData *)SDL_calloc(1, sizeof(*device->hidden));
@@ -126,7 +130,11 @@ static bool SWITCHAUDIO_OpenDevice(SDL_AudioDevice *device)
     }
     RendererClose(device->hidden);
     printf("audio: audren unavailable, falling back to audout\n");
+    return AudoutOpen(device);
+}
 
+static bool AudoutOpen(SDL_AudioDevice *device)
+{
     if (R_FAILED(audoutInitialize()) || R_FAILED(audoutStartAudioOut())) {
         return SDL_SetError("audout initialization failed");
     }
@@ -182,13 +190,33 @@ static void WaveSubmit(struct SDL_PrivateAudioData *h, int i, const void *src, i
 static bool WaitRenderer(SDL_AudioDevice *device)
 {
     struct SDL_PrivateAudioData *h = device->hidden;
+    u64 start = armGetSystemTick(), lastLog = start;
+    int iter = 0;
     while (!SDL_GetAtomicInt(&device->shutdown)) {
-        audrvUpdate(&h->drv);
+        const Result ur = audrvUpdate(&h->drv);
+        const u64 now = armGetSystemTick();
+        if (!h->everReady && (iter < 6 || now - lastLog > 19200000ULL)) {
+            lastLog = now;
+            printf("audio: audren wait iter=%d update=0x%x states=%d/%d/%d played=%u drops=%u playing=%d\n", iter, (unsigned)ur,
+                   (int)h->wave[0].state, (int)h->wave[1].state, (int)h->wave[2].state,
+                   audrvVoiceGetPlayedSampleCount(&h->drv, 0), audrvVoiceGetVoiceDropsCount(&h->drv, 0),
+                   (int)audrvVoiceIsPlaying(&h->drv, 0));
+        }
+        ++iter;
+        if (!h->everReady && now - start > 2ULL * 19200000ULL) {
+            // the renderer never played anything: go back to the simple service
+            printf("audio: audren produced no output in 2 s, falling back to audout\n");
+            RendererClose(h);
+            h->renderer = false;
+            h->next = 0;
+            return AudoutOpen(device) ? SWITCHAUDIO_WaitDevice(device) : true;
+        }
         int n = 0;
         while (n < SWITCH_NUM_BUFFERS && WaveReady(&h->wave[(h->next + n) % SWITCH_NUM_BUFFERS])) {
             ++n;
         }
         if (n > 0) {
+            h->everReady = true;
             switch_audio_diag_underrun(n - 1);
             // After a stall several buffers come back at once; keep the queue depth with silence.
             for (int k = 1; k < n; ++k) {
