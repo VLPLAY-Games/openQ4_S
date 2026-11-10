@@ -3653,6 +3653,17 @@ and north buttons, as SDL reports it: 1 A, 2 B, 3 X, 4 Y, 5 cross, 6 circle,
 ===============
 */
 int Sys_SDL_GamepadGlyphFamily(int faceLabels[4]) {
+#if defined(__SWITCH__)
+	// The Switch gamepad is mapped by label (SDL's south button is the console's A, east is B), so the
+	// prompts are Nintendo glyphs reading A, B, X, Y at south, east, west and north.
+	if (in_promptStyle.GetInteger() == 0) {
+		faceLabels[0] = 1;
+		faceLabels[1] = 2;
+		faceLabels[2] = 3;
+		faceLabels[3] = 4;
+		return 3;
+	}
+#endif
 	static const int xbox[4] = { 1, 2, 3, 4 }, playstation[4] = { 5, 6, 7, 8 }, nintendo[4] = { 2, 1, 4, 3 }, unknown[4] = { 0, 0, 0, 0 };
 	int family = in_promptStyle.GetInteger();
 	if (family == 0) {

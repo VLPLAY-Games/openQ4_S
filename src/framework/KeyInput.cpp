@@ -361,6 +361,10 @@ static bool Key_MenuConfirmSwapped( int setting, int promptStyle, const char *fa
 	if ( setting == 2 ) {
 		return true;
 	}
+#if defined( __SWITCH__ )
+	// the Switch gamepad is already mapped by label: its A is the south button
+	return false;
+#endif
 	if ( promptStyle >= 1 && promptStyle <= 4 ) {
 		return promptStyle == 3;
 	}
