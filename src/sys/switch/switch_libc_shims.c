@@ -8,6 +8,7 @@
 */
 #include <errno.h>
 #include <fcntl.h>
+#include <malloc.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -212,8 +213,20 @@ void switch_pin_current_thread( int core ) {
 static void *switch_log_flusher( void *arg ) {
 	(void)arg;
 	switch_pin_current_thread( 2 );
+	int tick = 0;
 	for ( ;; ) {
 		svcSleepThread( 2000000000ULL );	// 2 s
+		if ( ++tick >= 5 ) {
+			// every 10 s: process memory in use and the malloc heap, to spot growth or fragmentation
+			u64 used = 0, total = 0;
+			struct mallinfo mi = mallinfo();
+			tick = 0;
+			svcGetInfo( &used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0 );
+			svcGetInfo( &total, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0 );
+			printf( "mem: process=%lluMB/%lluMB malloc arena=%uMB in-use=%uMB free=%uMB\n",
+					(unsigned long long)( used >> 20 ), (unsigned long long)( total >> 20 ),
+					(unsigned int)( mi.arena >> 20 ), (unsigned int)( mi.uordblks >> 20 ), (unsigned int)( mi.fordblks >> 20 ) );
+		}
 		fflush( stdout );
 	}
 	return NULL;
@@ -238,7 +251,8 @@ static void *switch_log_flusher( void *arg ) {
 
 static Handle			prof_handle[ PROF_MAX_THREADS ];
 static volatile int		prof_threads = 0;
-static volatile int		prof_phase = 0;
+static volatile int		prof_phase = 0;		// bit 0: a world is loaded
+static volatile int		prof_slow = 0;		// 0 normal frame, 1 >= 30 ms, 2 >= 45 ms (the previous frame)
 static volatile int		prof_enabled = 0;
 static unsigned char	prof_buf[ PROF_BUF_SIZE ];
 static unsigned int		prof_len = 0;
@@ -248,6 +262,10 @@ extern int main( int argc, char **argv );
 
 void switch_prof_set_phase( int phase ) {
 	prof_phase = phase;
+}
+
+void switch_prof_set_slow( int level ) {
+	prof_slow = level;
 }
 
 /* Called by the render thread on itself (slot 1). */
@@ -293,7 +311,8 @@ static void prof_sample( int slot ) {
 	svcSetThreadActivity( h, ThreadActivity_Runnable );
 	if ( n > 0 && prof_len + 3 + (unsigned int)n * 8 <= PROF_BUF_SIZE ) {
 		prof_buf[ prof_len++ ] = (unsigned char)slot;
-		prof_buf[ prof_len++ ] = (unsigned char)prof_phase;
+		// phase byte: bit 0 = world loaded, bits 1-2 = slow level (1 normal gameplay, 3 slow, 5 very slow)
+		prof_buf[ prof_len++ ] = (unsigned char)( ( prof_phase & 1 ) | ( prof_slow << 1 ) );
 		prof_buf[ prof_len++ ] = (unsigned char)n;
 		memcpy( prof_buf + prof_len, pcs, (size_t)n * 8 );
 		prof_len += (unsigned int)n * 8;

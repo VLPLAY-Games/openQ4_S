@@ -25,6 +25,7 @@ static const u64 s_buttonMask[SW_NUM_BUTTONS] = {
     HidNpadButton_Left, HidNpadButton_Up, HidNpadButton_Right, HidNpadButton_Down,
 };
 
+extern void switch_audio_diag_pad(int comboDown);
 static PadState s_pad;
 static u64 s_previousButtons;
 static HidAnalogStickState s_previousSticks[2];
@@ -73,6 +74,7 @@ static void SWITCH_JoystickUpdate(SDL_Joystick *joystick)
     padUpdate(&s_pad);
 
     const u64 held = padGetButtons(&s_pad);
+    switch_audio_diag_pad((held & HidNpadButton_ZL) && (held & HidNpadButton_ZR) && (held & HidNpadButton_Minus));
     const u64 changed = held ^ s_previousButtons;
     if (changed) {
         for (int i = 0; i < SW_NUM_BUTTONS; ++i) {

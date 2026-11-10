@@ -8,6 +8,7 @@
   and this file answers them with SDL3 audio streams.
 */
 #include <SDL3/SDL.h>
+#include <switch.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,6 +35,12 @@ typedef struct {
 
 static Compat s_dev;
 
+// audio diagnostics (switch_audio_diag.c)
+extern void switch_audio_diag_f32(const float *x, int frames, int channels, unsigned long long mixTicks);
+extern void switch_audio_diag_spec(int reqFreq, int reqChannels, int reqSamples, int format, int gotFreq);
+static int s_channels = 2;
+static int s_isFloat = 0;
+
 static SDL_AudioFormat FromSDL2(SDL2_AudioFormat f)
 {
     switch (f) {
@@ -57,7 +64,11 @@ static void SDLCALL Pull(void *userdata, SDL_AudioStream *stream, int additional
             break;
         }
         memset(c->scratch, 0, chunk);
+        const unsigned long long t0 = armGetSystemTick();
         c->callback(c->userdata, c->scratch, chunk);
+        if (s_isFloat) {
+            switch_audio_diag_f32((const float *)c->scratch, chunk / c->frameBytes, s_channels, armGetSystemTick() - t0);
+        }
         SDL_PutAudioStreamData(stream, c->scratch, chunk);
         additional -= chunk;
     }
@@ -83,7 +94,10 @@ Uint32 SWITCH_SDL2_OpenAudioDevice(const char *device, int iscapture, const SDL2
     }
     spec.format = FromSDL2(desired->format);
     spec.channels = desired->channels ? desired->channels : 2;
-    spec.freq = desired->freq ? desired->freq : 48000;
+    // The hardware plays 48 kHz. If OpenAL renders at another rate (it asks for 44.1 kHz by default),
+    // SDL has to resample the whole mix with its simple interpolator, which adds noise that follows
+    // the signal. Run OpenAL at the device rate instead; it resamples each source itself.
+    spec.freq = 48000;
     s_dev.callback = desired->callback;
     s_dev.userdata = desired->userdata;
     s_dev.frameBytes = SDL_AUDIO_BYTESIZE(spec.format) * spec.channels;
@@ -94,6 +108,9 @@ Uint32 SWITCH_SDL2_OpenAudioDevice(const char *device, int iscapture, const SDL2
     }
     // Deeper device buffers ride out mixer hiccups while the CPU is busy with the game.
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "2048");
+    s_channels = spec.channels;
+    s_isFloat = (spec.format == SDL_AUDIO_F32);
+    switch_audio_diag_spec(desired->freq, desired->channels, desired->samples, desired->format, spec.freq);
     s_dev.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, Pull, &s_dev);
     if (!s_dev.stream) {
         free(s_dev.scratch);

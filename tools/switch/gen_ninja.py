@@ -38,7 +38,7 @@ GL_WRAP = ["glDrawElements", "glDrawArrays", "glUseProgram", "glBindTexture", "g
            "glUniform3fv", "glUniform4fv", "glUniformMatrix4fv", "glVertexAttribPointer", "glEnableVertexAttribArray",
            "glDisableVertexAttribArray", "glEnable", "glDisable", "glBlendFunc", "glDepthFunc", "glDepthMask",
            "glColorMask", "glStencilFunc", "glStencilOp", "glCullFace", "glScissor", "glViewport", "glPolygonOffset",
-           "glLinkProgram", "glDeleteProgram", "glDeleteTextures", "glDeleteBuffers", "glDeleteVertexArrays", "glVertexAttribIPointer", "glBindBuffer", "glBufferSubData", "glBindVertexArray", "glBindFramebuffer", "glClear"]
+           "glLinkProgram", "glDeleteProgram", "glDeleteTextures", "glDeleteBuffers", "glDeleteVertexArrays", "glVertexAttribIPointer", "glTexImage2D", "glTexSubImage2D", "glCompressedTexImage2D", "glCompressedTexSubImage2D", "glTexStorage2D", "glBufferData", "glGenerateMipmap", "glReadPixels", "glFinish", "glBindBuffer", "glBufferSubData", "glBindVertexArray", "glBindFramebuffer", "glClear"]
 ARCH_FLAGS = ["-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-mtp=soft", "-fPIE", "-ftls-model=local-exec"]
 # Third-party trees the Switch build does not use (SDL3 and GLEW are replaced by
 # src/sys/switch and the GLES loader).
@@ -325,7 +325,7 @@ def main():
     # Switch support code: libc shims and the SDL2 audio entry points OpenAL expects.
     sw = src_root / "src/sys/switch"
     support = []
-    for name, extra in (("switch_libc_shims.c", []), ("sdl2_audio_compat.c", sdl_flags)):
+    for name, extra in (("switch_libc_shims.c", []), ("switch_audio_diag.c", []), ("sdl2_audio_compat.c", sdl_flags)):
         obj = f"obj/support/{name}.o"
         flags = (extra or (["-D__SWITCH__", "-D_GNU_SOURCE", "-O2", "-w"] + ARCH_FLAGS + [f"-I{DKP}/libnx/include"])) + ["-std=gnu11"]
         lines += [f"build {obj}: cc {sw / name}", f"  flags = {' '.join(shlex.quote(x) for x in flags)}"]

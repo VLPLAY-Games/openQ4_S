@@ -13,6 +13,9 @@
 #include <switch.h>
 #include <malloc.h>
 
+extern void switch_audio_diag_s16(const short *x, int frames);
+extern void switch_audio_diag_underrun(int count);
+
 #define SWITCH_NUM_BUFFERS 3
 #define SWITCH_ALIGN 0x1000
 
@@ -77,6 +80,7 @@ static bool SWITCHAUDIO_WaitDevice(SDL_AudioDevice *device)
     // Wake regularly so shutdown is noticed.
     while (!SDL_GetAtomicInt(&device->shutdown)) {
         if (R_SUCCEEDED(audoutWaitPlayFinish(&released, &count, 10000000ULL)) && count > 0) {
+            switch_audio_diag_underrun((int)count - 1);
             // After a stall several buffers come back at once. PlayDevice refills one;
             // refill the rest with silence so the queue keeps its depth (otherwise it
             // shrinks to a single buffer and every later hiccup is audible).
@@ -98,6 +102,7 @@ static bool SWITCHAUDIO_PlayDevice(SDL_AudioDevice *device, const Uint8 *buffer,
     // Reuse the buffer the service just handed back, in submission order.
     const int i = device->hidden->next;
     device->hidden->next = (i + 1) % SWITCH_NUM_BUFFERS;
+    switch_audio_diag_s16((const short *)buffer, buflen / 4);
     SDL_memcpy(device->hidden->mem[i], buffer, buflen);
     device->hidden->out[i].data_size = (u64)buflen;
     audoutAppendAudioOutBuffer(&device->hidden->out[i]);

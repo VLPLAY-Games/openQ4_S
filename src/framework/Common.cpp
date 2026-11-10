@@ -6543,6 +6543,10 @@ static void Common_EndFrameWork(int frame) {
 	Common_WriteFrameWorkTrace();
 }
 
+#if defined( __SWITCH__ )
+extern "C" void switch_prof_set_slow( int level );
+#endif
+
 void idCommonLocal::Frame( void ) {
 	try {
 		Common_FlushOffMainThreadPrints();
@@ -6618,6 +6622,17 @@ void idCommonLocal::Frame( void ) {
 			time_gameFrame = 0;
 			time_gameDraw = 0;
 		}	
+
+#if defined( __SWITCH__ )
+		{
+			// tag profiler samples with how slow the frame that just ended was
+			static int s_lastFrameEndMs = 0;
+			const int nowMs = Sys_Milliseconds();
+			const int frameMs = nowMs - s_lastFrameEndMs;
+			s_lastFrameEndMs = nowMs;
+			switch_prof_set_slow( frameMs >= 45 ? 2 : ( frameMs >= 30 ? 1 : 0 ) );
+		}
+#endif
 
 		com_frameNumber++;
 

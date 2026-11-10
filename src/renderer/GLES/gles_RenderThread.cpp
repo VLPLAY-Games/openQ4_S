@@ -103,8 +103,8 @@ static long long					rt_syncWaitUsec = 0;
 
 ===============================================================================
 */
-enum { GLW_DRAW, GLW_PROGRAM, GLW_TEXTURE, GLW_UNIFORM, GLW_ATTRIB, GLW_STATE, GLW_BUFFER, GLW_FBO, GLW_COUNT };
-static const char *glw_names[GLW_COUNT] = { "draw", "prog", "tex", "uni", "attr", "state", "buf", "fbo" };
+enum { GLW_DRAW, GLW_PROGRAM, GLW_TEXTURE, GLW_UNIFORM, GLW_ATTRIB, GLW_STATE, GLW_BUFFER, GLW_FBO, GLW_UPLOAD, GLW_COUNT };
+static const char *glw_names[GLW_COUNT] = { "draw", "prog", "tex", "uni", "attr", "state", "buf", "fbo", "upload" };
 static unsigned long long glw_ticks[GLW_COUNT];
 static unsigned int glw_calls[GLW_COUNT];
 
@@ -444,6 +444,18 @@ extern "C" void __wrap_glVertexAttribPointer( GLuint a, GLint b, GLenum c, GLboo
 	glw_ticks[GLW_ATTRIB] += glw_now() - t0;
 	glw_calls[GLW_ATTRIB]++;
 }
+
+
+// texture and buffer uploads, mipmap generation and CPU/GPU stalls: the usual causes of one long frame
+GLW( GLW_UPLOAD, glTexImage2D, ( GLenum a, GLint b, GLint c, GLsizei d, GLsizei e, GLint f, GLenum g, GLenum h, const void *i ), ( a, b, c, d, e, f, g, h, i ) )
+GLW( GLW_UPLOAD, glTexSubImage2D, ( GLenum a, GLint b, GLint c, GLint d, GLsizei e, GLsizei f, GLenum g, GLenum h, const void *i ), ( a, b, c, d, e, f, g, h, i ) )
+GLW( GLW_UPLOAD, glCompressedTexImage2D, ( GLenum a, GLint b, GLenum c, GLsizei d, GLsizei e, GLint f, GLsizei g, const void *h ), ( a, b, c, d, e, f, g, h ) )
+GLW( GLW_UPLOAD, glCompressedTexSubImage2D, ( GLenum a, GLint b, GLint c, GLint d, GLsizei e, GLsizei f, GLenum g, GLsizei h, const void *i ), ( a, b, c, d, e, f, g, h, i ) )
+GLW( GLW_UPLOAD, glTexStorage2D, ( GLenum a, GLsizei b, GLenum c, GLsizei d, GLsizei e ), ( a, b, c, d, e ) )
+GLW( GLW_UPLOAD, glBufferData, ( GLenum a, GLsizeiptr b, const void *c, GLenum d ), ( a, b, c, d ) )
+GLW( GLW_UPLOAD, glGenerateMipmap, ( GLenum a ), ( a ) )
+GLW( GLW_UPLOAD, glReadPixels, ( GLint a, GLint b, GLsizei c, GLsizei d, GLenum e, GLenum f, void *g ), ( a, b, c, d, e, f, g ) )
+GLW( GLW_UPLOAD, glFinish, ( void ), ( ) )
 
 GLW( GLW_DRAW, glDrawElements, ( GLenum a, GLsizei b, GLenum c, const void *d ), ( a, b, c, d ) )
 GLW( GLW_DRAW, glDrawArrays, ( GLenum a, GLint b, GLsizei c ), ( a, b, c ) )

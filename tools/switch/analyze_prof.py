@@ -2,10 +2,12 @@
 """
 Summarize the sampling profile written by the Switch build (sdmc:/switch/openQ4/prof.bin).
 
-    python3 -I analyze_prof.py prof.bin openQ4.elf [--phase 1] [--top 40]
+    python3 -I analyze_prof.py prof.bin openQ4.elf [--phase normal|slow|vslow|game|menu|N] [--top 40]
 
-Slot 0 is the main thread, slot 1 the render thread. Phase 1 is "a world is loaded" (gameplay),
-phase 0 menus and loading. For each thread the report lists the functions with the most self
+Slot 0 is the main thread, slot 1 the render thread. The phase byte is: bit 0 = a world is loaded
+(gameplay), bits 1-2 = how slow the previous frame was (0 normal, 1 >= 30 ms, 2 >= 45 ms), so
+1 = normal gameplay, 3 = slow gameplay, 5 = very slow gameplay, 0/2/4 = menus and loading.
+--phase takes normal (1), slow (3 and 5), vslow (5), game (1, 3 and 5), menu (0, 2, 4) or a number. For each thread the report lists the functions with the most self
 time (the sampled pc) and the most inclusive time (any function anywhere in the sampled call
 chain), as a share of that thread's samples.
 """
@@ -60,7 +62,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("prof")
     ap.add_argument("elf")
-    ap.add_argument("--phase", type=int, default=1)
+    ap.add_argument("--phase", default="normal")
     ap.add_argument("--top", type=int, default=40)
     args = ap.parse_args()
 
@@ -75,9 +77,11 @@ def main():
         i = bisect.bisect_right(addrs, off) - 1
         return names[i] if i >= 0 else None
 
+    named = {"normal": {1}, "slow": {3, 5}, "vslow": {5}, "game": {1, 3, 5}, "menu": {0, 2, 4}}
+    phases = named.get(args.phase) or {int(args.phase)}
     slot_names = {0: "main thread", 1: "render thread"}
     for slot in sorted({s[0] for s in samples}):
-        mine = [s for s in samples if s[0] == slot and s[1] == args.phase]
+        mine = [s for s in samples if s[0] == slot and s[1] in phases]
         if not mine:
             continue
         total = len(mine)
@@ -92,7 +96,7 @@ def main():
                     seen.add(n)
                     incl_c[n] += 1
         print("=" * 100)
-        print("%s, phase %d: %d samples (%.1f s at 500 Hz)" % (slot_names.get(slot, "slot %d" % slot), args.phase, total, total / 500.0))
+        print("%s, phase %s: %d samples (%.1f s at 500 Hz)" % (slot_names.get(slot, "slot %d" % slot), sorted(phases)[0] if len(phases) == 1 else args.phase, total, total / 500.0))
         print("-- self time (top %d)" % args.top)
         for n, c in self_c.most_common(args.top):
             print("  %5.1f%%  %s" % (100.0 * c / total, short(n)))

@@ -2667,14 +2667,6 @@ static bool R_EffectBoundsAreaVisible( const idRenderWorldLocal *world, const rv
 		}
 	}
 
-	// Snap the box outward to a 64 unit grid. A drifting particle cloud changes its exact bounds every
-	// frame, which defeats the BoundsInAreas memo and re-walks the BSP tree each time; the snapped box
-	// is a superset (never culls anything the exact one would keep) and repeats for many frames.
-	for ( int axis = 0; axis < 3; ++axis ) {
-		worldBounds[0][axis] = idMath::Floor( worldBounds[0][axis] * ( 1.0f / 64.0f ) ) * 64.0f;
-		worldBounds[1][axis] = idMath::Ceil( worldBounds[1][axis] * ( 1.0f / 64.0f ) ) * 64.0f;
-	}
-
 	int areas[32];
 	const int numAreas = world->BoundsInAreas( worldBounds, areas, sizeof( areas ) / sizeof( areas[0] ) );
 	if ( numAreas <= 0 ) {
