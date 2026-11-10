@@ -27,12 +27,6 @@ const float SUSPEND_ANGULAR_ACCELERATION	= 30.0f;
 const idVec6 vec6_lcp_epsilon				= idVec6( LCP_EPSILON, LCP_EPSILON, LCP_EPSILON,
 													 LCP_EPSILON, LCP_EPSILON, LCP_EPSILON );
 
-#if defined( __SWITCH__ )
-idCVar af_maxActiveTime( "af_maxActiveTime", "6", CVAR_GAME | CVAR_FLOAT | CVAR_ARCHIVE, "seconds a ragdoll or other articulated figure may keep simulating before it is put to rest (0 = no limit)" );
-#else
-idCVar af_maxActiveTime( "af_maxActiveTime", "0", CVAR_GAME | CVAR_FLOAT | CVAR_ARCHIVE, "seconds a ragdoll or other articulated figure may keep simulating before it is put to rest (0 = no limit)" );
-#endif
-
 #define AF_TIMINGS
 
 #ifdef AF_TIMINGS
@@ -5977,12 +5971,6 @@ bool idPhysics_AF::TestIfAtRest( float timeStep ) {
 
 	// if the simulation should always be suspended after a certain amount time passed
 	if ( maxMoveTime > 0.0f && current.activateTime > maxMoveTime ) {
-		return true;
-	}
-
-	// bodies that keep twitching on geometry never reach the tolerance test below; put them to rest
-	// after a while (they wake again when something touches them)
-	if ( af_maxActiveTime.GetFloat() > 0.0f && current.activateTime > af_maxActiveTime.GetFloat() ) {
 		return true;
 	}
 

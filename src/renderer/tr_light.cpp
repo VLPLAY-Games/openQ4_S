@@ -2767,14 +2767,16 @@ static void R_BSEDiag_EndFrame( void ) {
 	if ( ++bseDiagFrames < 300 ) {
 		return;
 	}
-	static const char *names[BSEDIAG_COUNT] = { "all", "frustumCulled", "areaCulled", "far>1024", "far>2048", "loop", "oneShot", "hidden(frustum|area)" };
-	common->Printf( "bsediag: per 300 frames, services (count / ms):" );
-	for ( int i = 0; i < BSEDIAG_COUNT; i++ ) {
-		common->Printf( " %s=%d/%.1f", names[i], bseDiagCount[i], bseDiagMicros[i] * 0.001 );
-		bseDiagCount[i] = 0;
-		bseDiagMicros[i] = 0.0;
+	if ( bse_serviceDiag.GetBool() ) {
+		static const char *names[BSEDIAG_COUNT] = { "all", "frustumCulled", "areaCulled", "far>1024", "far>2048", "loop", "oneShot", "hidden(frustum|area)" };
+		common->Printf( "bsediag: per 300 frames, services (count / ms):" );
+		for ( int i = 0; i < BSEDIAG_COUNT; i++ ) {
+			common->Printf( " %s=%d/%.1f", names[i], bseDiagCount[i], bseDiagMicros[i] * 0.001 );
+			bseDiagCount[i] = 0;
+			bseDiagMicros[i] = 0.0;
+		}
+		common->Printf( "\n" );
 	}
-	common->Printf( "\n" );
 	{
 		int numImages, numLoaded;
 		float imageMB;

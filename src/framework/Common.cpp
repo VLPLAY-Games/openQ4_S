@@ -7509,6 +7509,9 @@ void idCommonLocal::Init( int argc, const char **argv, const char *cmdline ) {
 		ClearCommandLine();
 
 		com_fullyInitialized = true;
+#if defined( __SWITCH__ ) && !defined( OPENQ4_SWITCH_DIAG )
+		com_speeds.SetBool( false );	// per-frame timing lines in the log are a development aid
+#endif
 	}
 
 	catch( idException & ) {

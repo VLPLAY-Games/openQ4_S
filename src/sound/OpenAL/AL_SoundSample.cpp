@@ -152,7 +152,7 @@ idSoundOggStream::idSoundOggStream() : file( NULL ), decoder( NULL ), list( NULL
 	diagLast( 0 ), diagNextFrame( 0 ), diagHaveLast( false ), diagDump( -1 ), diagDumpedFrames( 0 ) {}
 idSoundOggStream::~idSoundOggStream() { Close(); }
 
-#if defined( __SWITCH__ )
+#if defined( __SWITCH__ ) && defined( OPENQ4_SWITCH_DIAG )
 /*
 ===============================================================================
 
@@ -362,7 +362,7 @@ void idSoundOggStream::FinishBlock() {
 	switch( outcome ) {
 		case DECODE_READY:
 			state = BLOCK_READY;
-#if defined( __SWITCH__ )
+#if defined( __SWITCH__ ) && defined( OPENQ4_SWITCH_DIAG )
 			DiagnoseBlock();
 #endif
 			if( requestTime != 0 ) {
@@ -1215,7 +1215,7 @@ void idSoundSample_OpenAL::CreateOpenALBuffer()
 				return; // CPU bytes remain available to the bounded queue fallback.
 			}
 			openalReserved = bufferSize;
-#if defined( __SWITCH__ )
+#if defined( __SWITCH__ ) && defined( OPENQ4_SWITCH_DIAG )
 			if( NumChannels() >= 1 && NumChannels() <= 2 && bufferSize >= 64 ) {
 				SoundDiag_Sample( GetName(), static_cast<int>( format.basic.formatTag ), static_cast<const short *>( buffer ),
 					static_cast<int>( bufferSize / ( sizeof( short ) * NumChannels() ) ), NumChannels(), static_cast<int>( format.basic.samplesPerSec ) );

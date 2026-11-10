@@ -4377,8 +4377,8 @@ void idGameLocal::MenuFrame( void ) { }
 		static int nextCountsTime = 0;
 		if ( time >= nextCountsTime || time + 60000 < nextCountsTime ) {
 			nextCountsTime = time + 30000;
-			common->Printf( "gamediag: time=%ds entities=%d clientEntities=%d debris=%d (faded early %d)\n",
-				time / 1000, num_entities, num_clientEntities, rvClientMoveable::NumLive(), rvClientMoveable::NumCapped() );
+			common->Printf( "gamediag: time=%ds entities=%d clientEntities=%d\n",
+				time / 1000, num_entities, num_clientEntities );
 		}
 	}
 #endif

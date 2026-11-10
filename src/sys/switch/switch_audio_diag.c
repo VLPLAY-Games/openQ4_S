@@ -26,6 +26,7 @@
 
 ===============================================================================
 */
+#ifdef OPENQ4_SWITCH_DIAG
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -415,3 +416,17 @@ void switch_audio_diag_underrun( int count ) {
 		stats.under += (unsigned int)count;
 	}
 }
+#else /* diagnostics compiled out: the driver and the OpenAL shim still call these */
+
+void switch_audio_diag_src( const short *pcm, int frames, int channels, int rate ) { (void)pcm; (void)frames; (void)channels; (void)rate; }
+void switch_audio_diag_pad_test( int comboDown ) { (void)comboDown; }
+int switch_audio_diag_test_fill( float *out, int frames, int channels ) { (void)out; (void)frames; (void)channels; return 0; }
+int switch_audio_diag_test_direct( short *out, int frames ) { (void)out; (void)frames; return 0; }
+void switch_audio_diag_spec( int reqFreq, int reqChannels, int reqSamples, int format, int gotFreq ) { (void)reqFreq; (void)reqChannels; (void)reqSamples; (void)format; (void)gotFreq; }
+void switch_audio_diag_request_dump( int user ) { (void)user; }
+void switch_audio_diag_pad( int comboDown ) { (void)comboDown; }
+void switch_audio_diag_f32( const float *x, int frames, int channels, unsigned long long mixTicks ) { (void)x; (void)frames; (void)channels; (void)mixTicks; }
+void switch_audio_diag_s16( const short *x, int frames ) { (void)x; (void)frames; }
+void switch_audio_diag_underrun( int count ) { (void)count; }
+
+#endif

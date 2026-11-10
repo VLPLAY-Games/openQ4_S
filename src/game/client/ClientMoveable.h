@@ -48,12 +48,6 @@ protected:
 	int						bounceSoundTime;
 	const idSoundShader*	bounceSoundShader;
 	bool					mPlayBounceSoundOnce;
-	bool					capFading;			// already told to fade out because too many pieces are alive
-
-public:
-	static int				NumLive			( void );
-	static int				NumCapped		( void );
-protected:
 	bool					mHasBounced;
 
 	idInterpolate<float>	scale;
