@@ -481,6 +481,25 @@ void idAsyncNetwork::AbandonDeferredDedicatedSpawn( void ) {
 	dedicatedSpawnDeferred = false;
 }
 
+#if defined( __SWITCH__ )
+/*
+==================
+Net_SwitchUnavailable
+
+The Switch build links only the single-player game module. Starting or joining a
+multiplayer game (and the bot matches of the Arena campaign) needs the multiplayer
+module, so these are refused with a message instead of failing to load a module.
+==================
+*/
+static bool Net_SwitchUnavailable( void ) {
+	common->Printf( "Multiplayer and Arena matches are not available in the Switch build.\n" );
+	if ( session != NULL ) {
+		session->MessageBox( MSG_OK, "Multiplayer and Arena matches are not available on Nintendo Switch.", "openQ4", false );
+	}
+	return true;
+}
+#endif
+
 /*
 ==================
 idAsyncNetwork::SpawnServer_f
@@ -498,6 +517,11 @@ engine reload (a map change's, or a bare reloadEngine) keeps it one.
 ==================
 */
 void idAsyncNetwork::SpawnServer_f( const idCmdArgs &args ) {
+#if defined( __SWITCH__ )
+	if ( Net_SwitchUnavailable() ) {
+		return;
+	}
+#endif
 	if ( dedicatedSpawnDeferred ) {
 		dedicatedSpawnDeferred = false;
 		serverDedicated.SetInteger( 1 );
@@ -646,6 +670,11 @@ static idStr Net_AddressArgument( const idCmdArgs &args ) {
 }
 
 void idAsyncNetwork::Connect_f( const idCmdArgs &args ) {
+#if defined( __SWITCH__ )
+	if ( Net_SwitchUnavailable() ) {
+		return;
+	}
+#endif
 
     if ( !idStr::Icmp( fileSystem->GetActiveGameDir(), "q4xbase" ) ||
          !idStr::Icmp( cvarSystem->GetCVarString( "fs_game" ), "q4xbase" ) ) {
