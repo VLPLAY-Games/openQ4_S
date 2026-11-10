@@ -2320,7 +2320,13 @@ static void SDL3_HandleGamepadGyroEvent(const SDL_GamepadSensorEvent &event, int
 			return;
 		}
 	}
-	if (!SDL3_IsMouseCaptured() || SDL3_ShouldRouteMenuMouse()) {
+#if defined(__SWITCH__)
+	// no relative mouse mode on the Switch: gyro look applies whenever no menu has the pointer
+	const bool gyroBlocked = SDL3_ShouldRouteMenuMouse();
+#else
+	const bool gyroBlocked = !SDL3_IsMouseCaptured() || SDL3_ShouldRouteMenuMouse();
+#endif
+	if (gyroBlocked) {
 		s_gamepadGyroLastTimestamp = SDL3_GamepadSensorTimestamp(event);
 		s_gamepadGyroRemainderX = 0.0f;
 		s_gamepadGyroRemainderY = 0.0f;

@@ -54,9 +54,10 @@ static SDL_JoystickID SWITCH_JoystickGetDeviceInstanceID(int device_index) { ret
    a gyro sensor. The engine turns it into look input (in_gyro); it reads the yaw rate from sensor
    value 2 (clockwise positive) and the pitch rate from value 0 (looking down positive), in radians per
    second, so the rates are mapped to that here. The Switch reports the angular velocity in turns per
-   second and the acceleration in G, in a frame with X toward the top edge, Y to the left and Z out of
-   the face (controller lying flat, face up: X forward). Yaw is the turn about the direction the
-   accelerometer reports as up, so it works held upright (handheld) or flat (controller). */
+   second and the acceleration in G. A controller's frame has X forward, Y to the left and Z out of the
+   face; the console's own sensor reads Y toward the bottom edge and X to the right. Yaw is the turn
+   about the direction the accelerometer reports as up, so it works held upright (handheld) or flat
+   (controller); pitch is the turn about the left-right axis of whichever frame it is. */
 #define SW_NUM_SENSOR_HANDLES 4
 static HidSixAxisSensorHandle s_sensorHandles[SW_NUM_SENSOR_HANDLES];
 static u64 s_sensorLastSample[SW_NUM_SENSOR_HANDLES];
@@ -149,7 +150,7 @@ static void SWITCH_SendMotion(Uint64 timestamp, SDL_Joystick *joystick)
             }
 
             float data[3];
-            data[0] = gy;                                              // tilting the top edge away: looking down
+            data[0] = (h == 0) ? -gx : gy;                             // tilting the top edge away: looking down (the console's frame differs from a controller's)
             data[1] = 0.0f;
             data[2] = -(gx * s_upX + gy * s_upY + gz * s_upZ);         // turning right (clockwise seen from above)
             s_sensorTimestamp += st->delta_time;
