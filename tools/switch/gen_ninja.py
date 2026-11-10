@@ -39,6 +39,11 @@ GL_WRAP = ["glDrawElements", "glDrawArrays", "glUseProgram", "glBindTexture", "g
            "glDisableVertexAttribArray", "glEnable", "glDisable", "glBlendFunc", "glDepthFunc", "glDepthMask",
            "glColorMask", "glStencilFunc", "glStencilOp", "glCullFace", "glScissor", "glViewport", "glPolygonOffset",
            "glLinkProgram", "glDeleteProgram", "glDeleteTextures", "glDeleteBuffers", "glDeleteVertexArrays", "glVertexAttribIPointer", "glTexImage2D", "glTexSubImage2D", "glCompressedTexImage2D", "glCompressedTexSubImage2D", "glTexStorage2D", "glBufferData", "glGenerateMipmap", "glReadPixels", "glFinish", "glBindBuffer", "glBufferSubData", "glBindVertexArray", "glBindFramebuffer", "glClear"]
+# Homebrew Menu entry: title, author, version and icon of the NRO.
+APP_NAME = "openQ4"
+APP_AUTHOR = "VLPLAY Games"
+APP_VERSION = "1.0.0"
+ICON = Path(__file__).resolve().parents[2] / "assets/switch/icon.jpg"
 ARCH_FLAGS = ["-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-mtp=soft", "-fPIE", "-ftls-model=local-exec"]
 # Third-party trees the Switch build does not use (SDL3 and GLEW are replaced by
 # src/sys/switch and the GLES loader).
@@ -225,7 +230,8 @@ def main():
         "rule localize", "  command = $objcopy $keep $in $out", "  description = LOCALIZE $out",
         "rule link", "  command = $ld -specs=" + DKP + "/libnx/switch.specs " + " ".join(ARCH_FLAGS) + " -Wl,-Map,$out.map -o $out $in $libs", "  description = LINK $out",
         "rule openal_sdl3", "  command = rm -rf openal_tmp && mkdir openal_tmp && cd openal_tmp && " + BIN + "ar x " + DKP + "/portlibs/switch/lib/libopenal.a sdl2.o && " + BIN + "objcopy " + " ".join(f"--redefine-sym SDL_{n}=SWITCH_SDL2_{n}" for n in ("OpenAudioDevice", "CloseAudioDevice", "PauseAudioDevice", "GetAudioDeviceName", "GetNumAudioDevices", "InitSubSystem")) + " sdl2.o sdl2.o && cp " + DKP + "/portlibs/switch/lib/libopenal.a ../$out && " + BIN + "ar r ../$out sdl2.o && cd .. && rm -rf openal_tmp", "  description = OPENAL(SDL3) $out",
-        "rule nro", "  command = " + DKP + "/tools/bin/elf2nro $in $out", "  description = NRO $out",
+        "rule nacp", "  command = " + DKP + f"/tools/bin/nacptool --create \"{APP_NAME}\" \"{APP_AUTHOR}\" \"{APP_VERSION}\" $out", "  description = NACP $out",
+        "rule nro", "  command = " + DKP + "/tools/bin/elf2nro $in $out --icon=" + str(ICON) + " --nacp=openQ4.nacp", "  description = NRO $out",
         "",
     ]
     group_objs = {}
@@ -338,7 +344,7 @@ def main():
 
     libs = "-L{0}/libnx/lib -L{0}/portlibs/switch/lib libopenal_sdl3.a -lGLESv2 -lEGL -lglapi -ldrm_nouveau -lnx -lm".format(DKP)
     lines += [f"build openQ4.elf: link " + " ".join(group_objs.values()) + " libopenal_sdl3.a", f"  libs = {libs}",
-              "build openQ4.nro: nro openQ4.elf", "default openQ4.nro", ""]
+              "build openQ4.nacp: nacp", "build openQ4.nro: nro openQ4.elf | openQ4.nacp " + str(ICON), "default openQ4.nro", ""]
     (out / "build.ninja").write_text("\n".join(lines))
     print(f"wrote {out/'build.ninja'}; unresolved objects: {len(missing)}")
     for m in missing[:5]:
