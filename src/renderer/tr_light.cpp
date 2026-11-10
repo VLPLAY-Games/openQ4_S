@@ -2750,7 +2750,7 @@ static int R_CompareEffectSubmitDistance( const void *a, const void *b ) {
 }
 
 #if defined( __SWITCH__ )
-idCVar bse_serviceDiag( "bse_serviceDiag", "1", CVAR_RENDERER | CVAR_BOOL, "log how much BSE service time goes to effects that are off-screen, portal-culled, far away, or looping (every 300 frames)" );
+idCVar bse_serviceDiag( "bse_serviceDiag", "0", CVAR_RENDERER | CVAR_BOOL, "log how much BSE service time goes to effects that are off-screen, portal-culled, far away, or looping (every 300 frames)" );
 
 // per category: how many effect services ran and how many microseconds they took
 enum { BSEDIAG_ALL, BSEDIAG_FRUSTUM, BSEDIAG_AREA, BSEDIAG_FAR, BSEDIAG_VERYFAR, BSEDIAG_LOOP, BSEDIAG_ONESHOT, BSEDIAG_HIDDEN, BSEDIAG_COUNT };
