@@ -699,6 +699,14 @@ bool GLimp_SetScreenParms(glimpParms_t parms) {
 	return true;
 }
 
+#if defined(OPENQ4_RENDERER_GLES_MODULE)
+void RB_GLESD3_ForgetContext( void );
+void RB_GLES_ForgetContext( void );
+#if defined(__SWITCH__)
+void RB_GLES_ForgetContextCaches( void );
+#endif
+#endif
+
 void GLimp_Shutdown(void) {
 	s_strictSwapIntervalActive = false;
 	R_DisplayPresentationShutdown();
@@ -725,6 +733,16 @@ void GLimp_Shutdown(void) {
 	// the engine owns the window; whether it survived depends on the
 	// preserve-window flag, so drop the cached pointer either way
 	s_glWindow = NULL;
+
+	// this module's statics outlive a renderer restart when the module is linked statically
+	// (Switch); every GL object they name died with the context
+#if defined(OPENQ4_RENDERER_GLES_MODULE)
+	RB_GLESD3_ForgetContext();
+	RB_GLES_ForgetContext();
+#if defined(__SWITCH__)
+	RB_GLES_ForgetContextCaches();
+#endif
+#endif
 
 	QGL_Shutdown();
 }

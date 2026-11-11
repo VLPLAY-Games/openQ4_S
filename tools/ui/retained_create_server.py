@@ -63,13 +63,14 @@ ADVANCED_BUTTON_TOP = 367.0               # mp_create_advbtn
 START = (244.0, 397.0, 275.0, 37.0)       # mp_create_serverbtn
 NAME_BYTES = 25                           # mp_create_val1: maxchars 25
 
-# The setting rows: (state, verb, label, kind, minimum, maximum, message).
+# The setting rows: (state, verb, label, kind, minimum, maximum, message). The stock page's
+# Dedicated Server and Pure Server rows are left out: the console runs no dedicated server and
+# cannot serve a pure one.
 # A choice's entries come from CHOICES; a number row says `message` outside
 # its range. The session's RETAINED_CREATE_SETTINGS holds the same verbs,
 # states and ranges.
 SETTINGS = (
     ("lan", "createLan", "#str_200947", "choice", 0, 1, None),
-    ("dedicated", "createDedicated", "#str_200053", "toggle", 0, 1, None),
     ("gametype", "createGameType", "#str_200042", "choice", 0, len(GAMETYPES) - 1, None),
     ("autobalance", "createAutoBalance", "#str_201008", "toggle", 0, 1, None),
     ("fraglimit", "createFragLimit", "#str_200060", "number", 0, 999, "#str_231123"),
@@ -88,7 +89,6 @@ ADVANCED = (
     ("usepass", "createUsePass", "#str_200067", "toggle", 0, 1, None),
     ("servermods", "createServerMods", "#str_200071", "toggle", 0, 1, None),
     ("weaponstay", "createWeaponStay", "#str_200967", "toggle", 0, 1, None),
-    ("pure", "createPure", "#str_200073", "toggle", 0, 1, None),
     ("rate", "createRate", "#str_200074", "choice", 0, 5, None),
     ("ready", "createReady", "#str_200975", "toggle", 0, 1, None),
     ("spectators", "createSpectators", "#str_200064", "toggle", 0, 1, None),

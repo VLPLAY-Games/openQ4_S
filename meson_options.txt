@@ -20,6 +20,13 @@ option(
 )
 
 option(
+  'build_game_mp',
+  type: 'boolean',
+  value: true,
+  description: 'Build the multiplayer game module (game-mp_<arch>).',
+)
+
+option(
   'build_game_sp',
   type: 'boolean',
   value: true,

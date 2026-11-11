@@ -6,17 +6,17 @@ tackled.
 
 ## Multiplayer (LAN first, then online)
 
-**Today:** not supported. The Switch build links only the single-player game
-module (`game_sp`). Starting or joining a multiplayer game, and the bot matches
-of the Arena campaign, need the multiplayer module (`game_mp`), so the game
-refuses them with a message instead of failing to load a module. The network
-code of the engine is still compiled in but has not been tested on the Switch.
+**Today:** local multiplayer with bots works. The Switch build links both game
+modules (`game_sp` and `game_mp`). Creating a server from the Multiplayer menu
+restarts the application into the multiplayer module (switching modules inside one
+process left the renderer and the statically linked modules in a broken state), and
+coming back to the campaign restarts it again. Joining servers and the Arena
+campaign are not available yet; joining is refused with a message.
 
 **Plan:**
 
-1. **Build and link `game_mp`** as a second static group next to the
-   single-player game, and let the module loader choose between them. Check the
-   additional memory use and the extra start-up cost.
+1. **Done:** `game_mp` is linked as a second static group, and the application
+   restarts into the module a command needs.
 2. **LAN play.** Join a server on the local network (a PC host first), then
    check hosting a listen server on the console. LAN is the first target because
    it is independent of internet conditions and is the easiest place to measure

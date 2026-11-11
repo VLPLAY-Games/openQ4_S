@@ -141,6 +141,13 @@ struct glwUniformEntry_t {
 static const unsigned int GLW_UNIFORM_CACHE_SIZE = 4096;
 static glwUniformEntry_t glw_uniformCache[GLW_UNIFORM_CACHE_SIZE];
 
+// A new GL context numbers its programs from scratch, so remembered uniform values and the current
+// program of the old one must not survive it.
+void RB_GLES_ForgetContextCaches( void ) {
+	glw_currentProgram = 0;
+	memset( glw_uniformCache, 0, sizeof( glw_uniformCache ) );
+}
+
 static inline glwUniformEntry_t &glw_uniformEntry( GLint location ) {
 	const unsigned int h = ( glw_currentProgram * 131u + (unsigned int)location * 2654435761u ) >> 7;
 	return glw_uniformCache[h & ( GLW_UNIFORM_CACHE_SIZE - 1 )];

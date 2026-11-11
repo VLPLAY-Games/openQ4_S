@@ -486,15 +486,14 @@ void idAsyncNetwork::AbandonDeferredDedicatedSpawn( void ) {
 ==================
 Net_SwitchUnavailable
 
-The Switch build links only the single-player game module. Starting or joining a
-multiplayer game (and the bot matches of the Arena campaign) needs the multiplayer
-module, so these are refused with a message instead of failing to load a module.
+Joining a server is not available in the Switch build yet. Starting a local game
+(a listen server with bots) is.
 ==================
 */
 static bool Net_SwitchUnavailable( void ) {
-	common->Printf( "Multiplayer and Arena matches are not available in the Switch build.\n" );
+	common->Printf( "Joining multiplayer servers is not available in the Switch build yet.\n" );
 	if ( session != NULL ) {
-		session->MessageBox( MSG_OK, "Multiplayer and Arena matches are not available on Nintendo Switch.", "openQ4", false );
+		session->MessageBox( MSG_OK, "Joining servers is not available on Nintendo Switch yet.", "openQ4", false );
 	}
 	return true;
 }
@@ -518,9 +517,13 @@ engine reload (a map change's, or a bare reloadEngine) keeps it one.
 */
 void idAsyncNetwork::SpawnServer_f( const idCmdArgs &args ) {
 #if defined( __SWITCH__ )
-	if ( Net_SwitchUnavailable() ) {
-		return;
-	}
+	// Pure mode needs the game pak checksums, which the Switch build does not produce; a local
+	// game does not need it.
+	cvarSystem->SetCVarBool( "si_pure", false );
+	// A dedicated server closes the window; the console has no text console to run one.
+	dedicatedSpawnDeferred = false;
+	serverDedicated.SetInteger( 0 );
+	cvarSystem->SetCVarBool( "net_serverMenuDedicated", false );
 #endif
 	if ( dedicatedSpawnDeferred ) {
 		dedicatedSpawnDeferred = false;

@@ -432,3 +432,56 @@ void switch_fast_exit( int rc ) {
 		svcSleepThread( 1000000000ULL );
 	}
 }
+
+/* A record of CPU exceptions. */
+
+extern char __start__;
+
+/* libnx calls this on a CPU exception in place of its default handler. Write what is known to a file
+   next to the application, then end the process the way the default handler does. */
+void __libnx_exception_handler( ThreadExceptionDump *ctx ) {
+	FILE *f = fopen( "sdmc:/switch/openQ4/crash.txt", "w" );
+	if ( f != NULL ) {
+		const u64 base = (u64)&__start__;
+		fprintf( f, "exception type=0x%x (%u)\n", (unsigned)ctx->error_desc, (unsigned)ctx->error_desc );
+		fprintf( f, "base=%llx\n", (unsigned long long)base );
+		fprintf( f, "pc=%llx (offset %llx)\n", (unsigned long long)ctx->pc.x, (unsigned long long)( ctx->pc.x - base ) );
+		fprintf( f, "lr=%llx (offset %llx)\n", (unsigned long long)ctx->lr.x, (unsigned long long)( ctx->lr.x - base ) );
+		fprintf( f, "sp=%llx fp=%llx far=%llx\n", (unsigned long long)ctx->sp.x, (unsigned long long)ctx->fp.x,
+			(unsigned long long)ctx->far.x );
+		for ( int i = 0; i < 29; i++ ) {
+			fprintf( f, "x%d=%llx\n", i, (unsigned long long)ctx->cpu_gprs[i].x );
+		}
+		/* frame-pointer walk: each frame holds the caller's fp and the return address */
+		u64 fp = ctx->fp.x;
+		for ( int depth = 0; depth < 24 && fp != 0 && ( fp & 7 ) == 0; depth++ ) {
+			const u64 *frame = (const u64 *)fp;
+			const u64 ret = frame[1];
+			fprintf( f, "frame %d: ret=%llx (offset %llx)\n", depth, (unsigned long long)ret, (unsigned long long)( ret - base ) );
+			fp = frame[0];
+		}
+		fclose( f );
+	}
+	diagAbortWithResult( MAKERESULT( Module_Libnx, LibnxError_ShouldNotHappen ) );
+}
+
+/* Changing between the single-player and multiplayer game modules in one process leaves state behind
+   (the modules are linked in, never unloaded). Start the program again instead: ask the loader to run
+   this NRO next, with these arguments, and let the caller quit. Returns 1 when the loader took it. */
+static char switch_argv0[ 512 ];
+
+void switch_set_argv0( const char *path ) {
+	if ( path != NULL && strlen( path ) < sizeof( switch_argv0 ) ) {
+		strcpy( switch_argv0, path );
+	}
+}
+
+int switch_request_relaunch( const char *args ) {
+	char line[ 2048 ];
+	const char *path = switch_argv0[ 0 ] ? switch_argv0 : "sdmc:/switch/openQ4/openQ4.nro";
+	if ( !envHasNextLoad() ) {
+		return 0;
+	}
+	snprintf( line, sizeof( line ), "\"%s\" %s", path, args != NULL ? args : "" );
+	return R_SUCCEEDED( envSetNextLoad( path, line ) ) ? 1 : 0;
+}

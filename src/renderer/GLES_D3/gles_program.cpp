@@ -475,6 +475,19 @@ void R_GLESD3_Programs_Shutdown( void ) {
 
 /*
 ====================
+R_GLESD3_Programs_Forget
+
+The GL context was destroyed with its objects: drop the program handles without
+touching GL, so the next Init builds them again in the new context.
+====================
+*/
+void R_GLESD3_Programs_Forget( void ) {
+	memset( gles_programs, 0, sizeof( gles_programs ) );
+	gles_currentProgram = 0;
+}
+
+/*
+====================
 R_GLESD3_Program
 ====================
 */

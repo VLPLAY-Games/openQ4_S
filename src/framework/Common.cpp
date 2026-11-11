@@ -68,6 +68,7 @@ If you have questions concerning this license or the applicable additional terms
 #include <SDL3/SDL_locale.h>
 #include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_cpuinfo.h>
+
 // The refresh of the display the game window is on, 0 when unknown (sdl3_backend.cpp).
 float Sys_SDL_GetWindowRefreshHz( void );
 #endif
@@ -4638,12 +4639,59 @@ static void Com_NetIPv6SelfTest_f( const idCmdArgs &args ) {
 Com_ReloadEngine_f
 =================
 */
+#if defined( __SWITCH__ )
+extern "C" int switch_request_relaunch( const char *args );
+
+/*
+=================
+Com_SwitchRelaunchForModule
+
+Switching between game_sp and game_mp inside one process leaves the renderer and the statically linked
+modules in a state a fresh start does not have. Start the application again with the module and the
+command that was waiting for the swap instead. Returns false (nothing done) when the loader cannot.
+=================
+*/
+static bool Com_SwitchRelaunchForModule( void ) {
+	const idStr requested = cvarSystem->GetCVarString( "com_nextGameModule" );
+	const idStr active = cvarSystem->GetCVarString( "com_activeGameModule" );
+	if ( !openQ4_IsValidGameModuleName( requested.c_str() ) || active.Length() == 0 || requested == active ) {
+		return false;
+	}
+	idStr line = "+set com_nextGameModule " + requested;
+	if ( requested == "game_mp" ) {
+		// the server settings the menu chose are not all archived; hand them over in a file
+		idFile *settings = fileSystem->OpenFileWrite( "relaunch.cfg" );
+		if ( settings != NULL ) {
+			cvarSystem->WriteFlaggedVariables( CVAR_SERVERINFO, "set", settings );
+			fileSystem->CloseFile( settings );
+			line += " +exec relaunch.cfg";
+		}
+	}
+	idStr pending;
+	if ( cmdSystem->PeekPostReloadCommand( pending ) ) {
+		line += " +" + pending;
+	}
+	if ( !switch_request_relaunch( line.c_str() ) ) {
+		common->Printf( "Relaunch is not available; switching the game module in place\n" );
+		return false;
+	}
+	common->Printf( "Restarting for game module %s: %s\n", requested.c_str(), line.c_str() );
+	common->Quit();
+	return true;
+}
+#endif
+
 void Com_ReloadEngine_f( const idCmdArgs &args ) {
 	bool menu = false;
 
 	if ( !commonLocal.IsInitialized() ) {
 		return;
 	}
+#if defined( __SWITCH__ )
+	if ( Com_SwitchRelaunchForModule() ) {
+		return;
+	}
+#endif
 
 	if ( args.Argc() > 1 && idStr::Icmp( args.Argv( 1 ), "menu" ) == 0 ) {
 		menu = true;
@@ -4703,6 +4751,11 @@ void Com_ReloadGameModule_f( const idCmdArgs &args ) {
 		return;
 	}
 	const idStr previousModule = cvarSystem->GetCVarString( "com_activeGameModule" );
+#if defined( __SWITCH__ )
+	if ( Com_SwitchRelaunchForModule() ) {
+		return;
+	}
+#endif
 
 	common->Printf( "============= ReloadGameModule start =============\n" );
 	fileSystem->SetIsFileLoadingAllowed( true );
@@ -6821,6 +6874,13 @@ static const char *openQ4_SelectGameModuleBaseName( void ) {
 		return idStr::Icmp( nextModule, "game_mp" ) == 0 ? "game_mp" : "game_sp";
 	}
 
+#if defined( __SWITCH__ )
+	// The application always starts in single player; multiplayer is entered by a restart that names
+	// its module (com_nextGameModule above), so a mode left in the config by the last session does
+	// not decide it.
+	cvarSystem->SetCVarString( "si_gameType", "singleplayer" );
+	return "game_sp";
+#endif
 	const char *gameType = cvarSystem->GetCVarString( "si_gameType" );
 #ifdef ID_DEDICATED
 	// A dedicated server has no single-player mode at all (StartNewGame refuses

@@ -29,6 +29,9 @@ GROUPS = {
     "engine": {"target": "openQ4-client_x64", "keep": None},
     "renderer": {"target": "renderer-gles_x64.so", "keep": ["GetRenderAPI", "openQ4_Mem_GetModuleStats_renderer"], "rename": "openQ4_Mem_GetModuleStats=openQ4_Mem_GetModuleStats_renderer"},
     "game": {"target": "content/baseoq4/game-sp_x64.so", "keep": ["GetGameAPI", "openQ4_Mem_GetModuleStats_game"], "rename": "openQ4_Mem_GetModuleStats=openQ4_Mem_GetModuleStats_game"},
+    # Both game groups export GetGameAPI, so the multiplayer one is renamed on the way out.
+    "game_mp": {"target": "content/baseoq4/game-mp_x64.so", "keep": ["GetGameAPI_mp", "openQ4_Mem_GetModuleStats_game_mp"],
+                "rename": "GetGameAPI=GetGameAPI_mp --redefine-sym openQ4_Mem_GetModuleStats=openQ4_Mem_GetModuleStats_game_mp"},
 }
 
 # Files the Switch build replaces; they are listed in switch_overrides.txt.

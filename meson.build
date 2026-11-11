@@ -141,7 +141,7 @@ endforeach
 build_engine = get_option('build_engine')
 build_games = get_option('build_games')
 build_game_sp = get_option('build_game_sp')
-build_game_mp = false
+build_game_mp = get_option('build_game_mp')
 needs_game_headers = build_engine or build_games
 install_root_dir = meson.project_source_root() / '.install'
 install_game_dir = install_root_dir / 'baseoq4'
@@ -986,6 +986,7 @@ game_module_link_args += '-Wl,--version-script=' + linux_game_module_export_map[
 game_module_link_depends += linux_game_module_export_map
 
 game_idlib_library = disabler()
+game_idlib_library_mp = disabler()
 if build_engine or build_games
     # One archive per game flavour. src/idlib/precompiled.h includes
     # mpgame/Game_local.h under -DGAME_MPAPI and game/Game_local.h otherwise, and
@@ -998,6 +999,18 @@ if build_engine or build_games
         game_idlib_sources,
         include_directories: game_idlib_include_dirs,
         cpp_args: game_common_cpp_args,
+        c_args: game_common_c_args,
+        cpp_pch: game_idlib_pch_headers,
+        override_options: game_target_override_options,
+        pic: true,
+        gnu_symbol_visibility: 'hidden',
+        install: false,
+    )
+    game_idlib_library_mp = static_library(
+        'openq4_game_idlib_mp',
+        game_idlib_sources,
+        include_directories: game_idlib_mp_include_dirs,
+        cpp_args: game_common_cpp_args + ['-DGAME_MPAPI'],
         c_args: game_common_c_args,
         cpp_pch: game_idlib_pch_headers,
         override_options: game_target_override_options,

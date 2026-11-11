@@ -112,6 +112,7 @@ public:
 	bool				IsPortInitialized() { return clientPort.GetPort() != 0; }
 
 	bool				IsActive( void ) const;
+	int					GetClientStateValue( void ) const { return (int)clientState; }
 	int					GetLocalClientNum( void ) const;
 	const netadr_t&		GetServerAddress( void ) const { return serverAddress; }
 	int					GetPrediction( void ) const;

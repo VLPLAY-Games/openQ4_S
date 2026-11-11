@@ -284,6 +284,27 @@ static GLuint	rb_glesD3TestIbo = 0;
 static bool		rb_glesD3ResourcesReady = false;
 static bool		rb_glesD3ResourcesFailed = false;
 
+void R_GLESD3_Programs_Forget( void );
+void R_GLESD3_Draw_Forget( void );
+
+/*
+====================
+RB_GLESD3_ForgetContext
+
+Called when the GL context is destroyed (a renderer restart on a module swap
+keeps this module's statics, which a reloaded shared library would not): every
+GL object this backend held died with the context.
+====================
+*/
+void RB_GLESD3_ForgetContext( void ) {
+	R_GLESD3_Programs_Forget();
+	R_GLESD3_Draw_Forget();
+	rb_glesD3TestVbo = 0;
+	rb_glesD3TestIbo = 0;
+	rb_glesD3ResourcesReady = false;
+	rb_glesD3ResourcesFailed = false;
+}
+
 /*
 ====================
 RB_GLESD3_EnsureResources

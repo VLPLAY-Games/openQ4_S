@@ -215,6 +215,21 @@ static bool rb_glesResolutionScaleUnavailable = false;
 
 /*
 ====================
+RB_GLES_ForgetContext
+
+The GL context was destroyed with the scene-scale target.
+====================
+*/
+void RB_GLES_ForgetContext( void ) {
+	rb_glesResolutionScaleFbo = 0;
+	rb_glesResolutionScaleColor = 0;
+	rb_glesResolutionScaleWidth = 0;
+	rb_glesResolutionScaleHeight = 0;
+	rb_glesResolutionScaleUnavailable = false;
+}
+
+/*
+====================
 RB_GLES_AbandonSceneResolutionScale
 
 The crop is pushed by the front end and this pass is the only thing that

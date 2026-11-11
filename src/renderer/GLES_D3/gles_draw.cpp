@@ -55,6 +55,18 @@ void R_GLESD3_Draw_Shutdown( void ) {
 
 /*
 ====================
+R_GLESD3_Draw_Forget
+
+The GL context is gone; the vertex array it held went with it.
+====================
+*/
+void R_GLESD3_Draw_Forget( void ) {
+	gles_vao = 0;
+	gles_enabledAttributes = 0;
+}
+
+/*
+====================
 R_GLESD3_Draw_BeginView / EndView
 
 Bound for the duration of a view. Restoring 0 on the way out matters: the

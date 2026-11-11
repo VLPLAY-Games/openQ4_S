@@ -35,7 +35,7 @@ The single-player campaign is playable and saves and loads work. This is the 1.0
 | Frame rate | Around 45 FPS median on the first levels at the clocks above; **heavy fights have strong frame-rate drops** |
 | Audio | OpenAL Soft on top of the audio renderer (`audren`), 48 kHz stereo |
 | Input | Handheld, Joy-Con and Pro Controller; **gyro aiming**; system on-screen keyboard for text fields (save names, player name) |
-| Multiplayer | Not supported (see [Known limitations](#known-limitations)) |
+| Multiplayer | Local games with bots (create a server from the Multiplayer menu); joining other servers is not available yet (see [Known limitations](#known-limitations)) |
 
 ---
 
@@ -100,7 +100,7 @@ When a text field needs input (for example the name of a save game) the system s
 
 ## Known limitations
 
-- **No multiplayer.** Network play, LAN games and the Arena bot matches are not available: they need the multiplayer game module, which is not part of this build (the game shows a message). See the [roadmap](docs/roadmap.md).
+- **Multiplayer is local only.** Create a server from the Multiplayer menu and add bots in the advanced options. Joining servers on the network or the internet, and the Arena campaign, are not available yet. Switching between single player and multiplayer restarts the application (about 20 seconds); the game starts again by itself. See the [roadmap](docs/roadmap.md).
 - **Closing the game takes a while.** Shutdown is complete and safe, just not instant.
 - **Heavy fights drop the frame rate a lot.** Large fights with many enemies and effects can fall well below 30 FPS; exploring is usually well above that. Higher CPU clocks help.
 - **Overclocking is up to you.** The application never requests clock changes. A CPU clock of 1785 MHz or more is needed.

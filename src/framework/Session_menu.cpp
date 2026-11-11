@@ -4799,10 +4799,6 @@ void idSessionLocal::HandleMainMenuCommands( const char *menuCommand ) {
 		}
 
 		if ( !idStr::Icmp( cmd, "startMultiplayer" ) ) {
-#if defined( __SWITCH__ )
-			cmdSystem->BufferCommandText( CMD_EXEC_NOW, "spawnServer" );	// refused with a message
-			continue;
-#endif
 			CommitStartServerMapSelection( guiMainMenu );
 			if ( StartMenuServer() ) {
 				return;

@@ -71,6 +71,7 @@ public:
 	virtual void            SetupReloadEngineMenu( const idCmdArgs &args );
 	virtual void			SetupReloadGameModule( const idCmdArgs &args );
 	virtual bool			PostReloadEngine( void );
+	virtual bool			PeekPostReloadCommand( idStr &text ) const;
 
 	void					SetWait( int numFrames ) { wait = numFrames; }
 	void					SetWaitMsec( int numMsec ) { waitMsecEnd = Sys_Milliseconds() + Max( 0, numMsec ); }
@@ -904,6 +905,31 @@ idCmdSystemLocal::SetupReloadGameModule
 void idCmdSystemLocal::SetupReloadGameModule( const idCmdArgs &args ) {
 	BufferCommandText( CMD_EXEC_APPEND, "reloadGameModule\n" );
 	postReload = args;
+}
+
+/*
+============
+idCmdSystemLocal::PeekPostReloadCommand
+============
+*/
+bool idCmdSystemLocal::PeekPostReloadCommand( idStr &text ) const {
+	text.Clear();
+	if ( !postReload.Argc() ) {
+		return false;
+	}
+	for ( int i = 0; i < postReload.Argc(); i++ ) {
+		idStr arg = postReload.Argv( i );
+		arg.Replace( "\"", "'" );
+		if ( i > 0 ) {
+			text += " ";
+		}
+		if ( arg.Length() == 0 || arg.Find( ' ' ) >= 0 ) {
+			text += "\"" + arg + "\"";
+		} else {
+			text += arg;
+		}
+	}
+	return true;
 }
 
 /*

@@ -767,12 +767,14 @@ TODO: OSX - use the native API instead? NSModule
 // that export only these entry points; "loading" a module picks its table.
 extern "C" {
 	void *GetGameAPI( void * );
+	void *GetGameAPI_mp( void * );
 	void *GetRenderAPI( void * );
 	void openQ4_Mem_GetModuleStats_game( void );
+	void openQ4_Mem_GetModuleStats_game_mp( void );
 	void openQ4_Mem_GetModuleStats_renderer( void );
 }
 
-enum { SWITCH_MODULE_GAME = 1, SWITCH_MODULE_RENDERER = 2 };
+enum { SWITCH_MODULE_GAME = 1, SWITCH_MODULE_RENDERER = 2, SWITCH_MODULE_GAME_MP = 3 };
 
 intptr_t Sys_DLL_Load( const char *path ) {
 	if ( path == NULL || path[0] == '\0' ) {
@@ -781,6 +783,9 @@ intptr_t Sys_DLL_Load( const char *path ) {
 	// The file name carries the module kind; the directory and arch suffix do not matter.
 	if ( strstr( path, "game-sp" ) != NULL ) {
 		return SWITCH_MODULE_GAME;
+	}
+	if ( strstr( path, "game-mp" ) != NULL ) {
+		return SWITCH_MODULE_GAME_MP;
 	}
 	if ( strstr( path, "renderer-gles" ) != NULL ) {
 		return SWITCH_MODULE_RENDERER;
@@ -796,6 +801,9 @@ void* Sys_DLL_GetProcAddress( intptr_t handle, const char *sym ) {
 	if ( handle == SWITCH_MODULE_GAME ) {
 		if ( strcmp( sym, "GetGameAPI" ) == 0 ) return (void *)&GetGameAPI;
 		if ( strcmp( sym, MEM_MODULE_STATS_ENTRY_POINT ) == 0 ) return (void *)&openQ4_Mem_GetModuleStats_game;
+	} else if ( handle == SWITCH_MODULE_GAME_MP ) {
+		if ( strcmp( sym, "GetGameAPI" ) == 0 ) return (void *)&GetGameAPI_mp;
+		if ( strcmp( sym, MEM_MODULE_STATS_ENTRY_POINT ) == 0 ) return (void *)&openQ4_Mem_GetModuleStats_game_mp;
 	} else if ( handle == SWITCH_MODULE_RENDERER ) {
 		if ( strcmp( sym, "GetRenderAPI" ) == 0 ) return (void *)&GetRenderAPI;
 		if ( strcmp( sym, MEM_MODULE_STATS_ENTRY_POINT ) == 0 ) return (void *)&openQ4_Mem_GetModuleStats_renderer;

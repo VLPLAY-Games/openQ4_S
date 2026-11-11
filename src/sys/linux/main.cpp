@@ -1053,11 +1053,15 @@ main
 */
 #if defined( __SWITCH__ )
 extern "C" void switch_mark( const char *stage );
+extern "C" void switch_set_argv0( const char *path );
 #endif
 
 int main(int argc, const char **argv) {
 #if defined( __SWITCH__ )
 	switch_mark( "main" );
+	if ( argc > 0 ) {
+		switch_set_argv0( argv[0] );
+	}
 #endif
 #ifdef ID_MCHECK
 	// must have -lmcheck linkage
