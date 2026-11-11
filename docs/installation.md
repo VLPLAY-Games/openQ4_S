@@ -42,9 +42,12 @@ and next to the NRO (`log.txt`).
 ## Controls and options
 
 - **Settings -> Controls**: bindings.
-- **Settings -> Game Options -> Controller**: stick dead zone and sensitivity,
-  gyro aiming and its sensitivity, rumble.
+- **Settings -> Game Options -> Controller**: stick layout, dead zone and
+  sensitivity, gyro aiming and its sensitivity, rumble.
+- The menus also work by touch in handheld mode.
 - Saving a game opens the system keyboard for the save name.
+- Multiplayer: **Multiplayer** menu, create a server, bots in **Advanced Options**.
+  Switching between the campaign and multiplayer restarts the application by itself.
 
 ## Updating
 

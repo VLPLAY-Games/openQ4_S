@@ -3,7 +3,7 @@
 **Quake 4 on the Nintendo Switch.** A port of the [openQ4](https://github.com/themuffinator/openQ4) engine and single-player game libraries to the Switch homebrew platform (devkitA64 / libnx), built around your own retail Quake 4 data.
 
 [![Platform](https://img.shields.io/badge/platform-Nintendo%20Switch-e60012.svg)](#requirements)
-[![Status](https://img.shields.io/badge/status-1.0.0%20release%20candidate-d97a1f.svg)](#status)
+[![Status](https://img.shields.io/badge/status-1.1.0-d97a1f.svg)](#status)
 [![Licensing](https://img.shields.io/badge/Licensing-GPL%20engine%20%7C%20SDK%20game%20code-blue.svg)](LICENSING.md)
 
 > [!IMPORTANT]
@@ -24,7 +24,9 @@
 
 ## Status
 
-The single-player campaign is playable and saves and loads work. This is the 1.0.0 release line of the Switch port, on the `main` branch. The `switch` branch is used for testing, and `upstream-main` keeps the state of the repository before the port.
+The single-player campaign is playable and saves and loads work. This is the 1.1.0 release line of the Switch port, on the `main` branch. The `switch` branch is used for testing, and `upstream-main` keeps the state of the repository before the port.
+
+What is new in 1.1.0: **touch screen** support in the menus, a cleaned-up settings menu (options a console cannot use are gone), and **local multiplayer with bots**.
 
 **What was tested:** the first three levels, on a Switch Lite in handheld mode, with a CPU clock of **1785 MHz**, a GPU clock of **460 MHz** and a RAM clock of **1600 MHz**. Later levels have not been played through yet. **In heavy fights the frame rate drops a lot**, well below 30 FPS in the worst moments.
 
@@ -34,7 +36,7 @@ The single-player campaign is playable and saves and loads work. This is the 1.0
 | Rendering | OpenGL ES 3.0 renderer (Mesa/nouveau), render thread overlapping game logic, NEON-accelerated skeletal model and culling code |
 | Frame rate | Around 45 FPS median on the first levels at the clocks above; **heavy fights have strong frame-rate drops** |
 | Audio | OpenAL Soft on top of the audio renderer (`audren`), 48 kHz stereo |
-| Input | Handheld, Joy-Con and Pro Controller; **gyro aiming**; system on-screen keyboard for text fields (save names, player name) |
+| Input | Handheld, Joy-Con and Pro Controller; **gyro aiming**; **touch screen in the menus**; system on-screen keyboard for text fields (save names, player name) |
 | Multiplayer | Local games with bots (create a server from the Multiplayer menu); joining other servers is not available yet (see [Known limitations](#known-limitations)) |
 
 ---
@@ -87,13 +89,29 @@ Gyro aiming adds the motion of the console (or of the connected controller) to t
 
 It only applies during gameplay, never in menus.
 
+### Touch screen
+
+In handheld mode the menus (main menu, settings, pause menu, save and load) can be
+used by touch: tap a button or a row. The touch screen does not move the view during
+gameplay.
+
+### Local multiplayer with bots
+
+Open **Multiplayer**, create a server (choose the game type and the map) and add bots in
+**Advanced Options** (Bots and Bot Skill). The game starts the server on the console and
+you play against the bots. Joining other servers is not available yet.
+
+Changing between the single-player campaign and multiplayer **restarts the application**
+(about 20 seconds): the game closes and starts again by itself with the right mode, then
+loads the map. The game always starts in single player.
+
 ### On-screen keyboard
 
 When a text field needs input (for example the name of a save game) the system software keyboard opens. Type the name, confirm, and the field is confirmed as well.
 
 ### Settings worth knowing
 
-- **Game Options -> Controller**: stick dead zone, look sensitivity, gyro aiming and sensitivity, rumble.
+- **Game Options -> Controller**: stick layout and dead zone, look sensitivity and curve, gyro aiming and sensitivity, rumble.
 - **System**: resolution and quality options. The defaults are tuned for the Switch.
 
 ---
@@ -161,9 +179,11 @@ openQ4 contains components under different licences. The engine is covered by th
 
 **Установка:** скопируйте `openQ4.nro` в `sdmc:/switch/openQ4/`, рядом положите папку `q4base` из вашей копии игры и контент-паки openQ4 в `baseoq4/`. Запускайте `hbmenu` в режиме перехвата игры (удерживая **R** при запуске игры), а не через альбом.
 
-**Что есть:** одиночная кампания, отрисовка на OpenGL ES, звук через `audren`, управление геймпадом, **гироскоп для прицеливания** (Настройки -> Game Options -> Controller), экранная клавиатура системы для ввода имён сохранений.
+**Что есть:** одиночная кампания, локальный мультиплеер с ботами, отрисовка на OpenGL ES, звук через `audren`, управление геймпадом, **гироскоп для прицеливания** (Настройки -> Game Options -> Controller), экранная клавиатура системы для ввода имён сохранений.
 
-**Чего нет:** сетевой игры (мультиплеера) и выделенного сервера.
+**Новое в 1.1.0:** управление **сенсорным экраном** в меню, упрощённое меню настроек (убраны пункты, которых нет на консоли) и **локальный мультиплеер с ботами** (меню Multiplayer, боты в Advanced Options). Переход между кампанией и мультиплеером перезапускает приложение (около 20 секунд), игра запускается сама.
+
+**Чего нет:** подключения к чужим серверам по сети и выделенного сервера.
 
 **Требования к разгону:** нужен разгон процессора до **1785 МГц и выше**; видеокарту и память разгонять необязательно. **Тестировалось:** первые 3 уровня на частотах 1785 / 460 / 1600 МГц (CPU / GPU / RAM). **В тяжёлых боях сильные просадки FPS.**
 

@@ -32,6 +32,24 @@ dynamic loader for them, so each is linked as a **group**:
 The Switch is built with `-D__SWITCH__ -D__linux__ -D_GNU_SOURCE`. `__linux__`
 is defined deliberately: the engine's POSIX layer is reused.
 
+## Game modules and multiplayer
+
+Both game modules are linked into the NRO as private groups: `game_sp` and `game_mp`
+(`tools/switch/gen_ninja.py`; the multiplayer group exports `GetGameAPI_mp`). The module
+loader (`Sys_DLL_Load`) picks the group by file name.
+
+Switching modules inside one process is not supported on the Switch: the groups are never
+unloaded, so statics survive a switch, and the renderer is restarted over the same GL
+context. Instead `Com_SwitchRelaunchForModule` (`Common.cpp`) writes the config, asks the
+loader to run the NRO again (`envSetNextLoad`) with `+set com_nextGameModule <module>`
+and the command that was waiting for the swap (`spawnServer`, `loadgame`, ...), and quits.
+The server settings that are not archived travel in `relaunch.cfg`. The application
+always starts in `game_sp` unless `com_nextGameModule` says otherwise. If the loader
+cannot chain-load, the old in-place swap is used.
+
+A listen server runs in the same process with its local client over UDP on
+`127.0.0.1`; Pure and Dedicated are forced off.
+
 ## Rendering
 
 - OpenGL ES 3.0 through switch-mesa (nouveau). The renderer is the shared
@@ -83,6 +101,9 @@ account for the rest.
   relative-mouse mode on the Switch, so the gyro path is allowed whenever no menu
   has the pointer. Yaw is computed about the vertical shown by the accelerometer,
   which works held upright or flat.
+- Touch: the touch screen (up to 16 fingers, 1280x720 space) is read through `hid` in the
+  video driver's event pump and sent to SDL as touch events; the engine routes the first
+  finger to the menus as a pointer.
 - Text: when the engine starts text input, the video driver opens the system
   software keyboard from the event pump and sends the result as text followed by
   Return.
@@ -93,6 +114,12 @@ account for the rest.
 service shutdown (`__appExit`) and return to the loader (`__nx_exit`). It skips
 `exit()` because running every static destructor of the three module groups
 crashed on the way out.
+
+## Crashes
+
+`__libnx_exception_handler` (`switch_libc_shims.c`) writes `crash.txt` next to the NRO on a
+CPU exception: registers and a frame-pointer backtrace as offsets from `__start__`, which
+`aarch64-none-elf-addr2line` resolves against `openQ4.elf`.
 
 ## Diagnostics
 

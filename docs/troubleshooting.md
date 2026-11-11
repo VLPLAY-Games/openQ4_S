@@ -24,6 +24,16 @@ Raise the CPU clock to 1785 MHz or more. See [performance.md](performance.md).
 Switch it on in Settings -> Game Options -> Controller. It only applies during
 gameplay, not in menus. If horizontal turning is mirrored, report the console model.
 
+**The game closes and starts again when I open multiplayer (or go back to the campaign).**
+This is intended: the single-player and multiplayer modules cannot be swapped inside one
+running process on the Switch, so the application restarts into the right one (about
+20 seconds) and continues by itself. If it only closes and returns to the Homebrew Menu,
+launch the game in title takeover mode (hold R while starting a game).
+
+**The game crashed.**
+If the system reports an error without a code, look for `crash.txt` next to the NRO (it
+is written on a CPU exception) and for `log.txt`. Attach both to a bug report.
+
 **The save-name keyboard does not open.**
 The system keyboard is an applet and is supported in title takeover mode, which is
 the supported way to launch the game.

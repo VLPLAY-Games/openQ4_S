@@ -50,7 +50,7 @@ option(
 option(
   'version_track',
   type: 'string',
-  value: 'dev',
+  value: 'stable',
   description: 'Version track embedded into the build. Use stable for release builds, dev for local builds, or labels such as beta/rc for prerelease builds.',
 )
 

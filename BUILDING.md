@@ -91,9 +91,10 @@ python3 tools/switch/gen_ninja.py --host-build build-host --out build-switch --d
 | `build_engine` | true | build the engine target |
 | `build_games` | true | build the game module targets |
 | `build_game_sp` | true | build the single-player game module |
+| `build_game_mp` | true | build the multiplayer game module (needed for local multiplayer) |
 | `linux_x11` | auto | host SDL3 X11 driver |
 | `gles_root` | empty | prefix with `lib/` containing GLES for the host module |
-| `version_track`, `version_iteration`, `version_base_override` | | version string control |
+| `version_track`, `version_iteration`, `version_base_override` | `stable` | version string control (`stable` gives the plain version, 1.1.0) |
 | `idlib_asserts` | false | enable `assert()`/`verify()` in idlib |
 | `prebuilt_content_packs` | empty | use packs built elsewhere |
 

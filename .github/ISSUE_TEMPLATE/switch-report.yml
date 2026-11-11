@@ -15,7 +15,7 @@ body:
     attributes:
       label: openQ4 version
       description: The release tag you downloaded, or the commit SHA if you built it yourself.
-      placeholder: "1.0.0"
+      placeholder: "1.1.0"
     validations:
       required: true
   - type: dropdown

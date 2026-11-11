@@ -1,7 +1,7 @@
 project(
     'openQ4',
     ['c', 'cpp'],
-    version: '0.13.2',
+    version: '1.1.0',
     meson_version: '>=1.6.0',
     default_options: [
         'c_std=c11',

@@ -1,6 +1,6 @@
 # Roadmap
 
-What is planned after the 1.0.0 release of the Switch port. Items are not
+What is planned after the 1.1.0 release of the Switch port. Items are not
 promises or dates; they are listed roughly in the order they are expected to be
 tackled.
 
