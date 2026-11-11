@@ -17,6 +17,7 @@
 #include "../../../../subprojects/SDL3-3.4.18/src/video/SDL_egl_c.h"
 #include "../../../../subprojects/SDL3-3.4.18/src/events/SDL_events_c.h"
 #include "../../../../subprojects/SDL3-3.4.18/src/events/SDL_keyboard_c.h"
+#include "../../../../subprojects/SDL3-3.4.18/src/events/SDL_touch_c.h"
 
 #include <switch.h>
 
@@ -37,6 +38,17 @@ static bool SWITCH_StopTextInput(SDL_VideoDevice *_this, SDL_Window *window);
 // has no keyboard, so the system software keyboard applet is opened from the event pump, and what
 // was typed is delivered as text input.
 static volatile bool s_keyboardRequested = false;
+
+// The touch screen reports up to 16 fingers in a fixed 1280x720 space, in handheld mode only.
+// Each finger is sent to SDL as a touch event; the engine routes the first one to the menus.
+#define SWITCH_TOUCH_ID 1
+#define SWITCH_TOUCH_W 1280.0f
+#define SWITCH_TOUCH_H 720.0f
+#define SWITCH_TOUCH_MAX 16
+static bool s_touchReady = false;
+static u32 s_touchDown[SWITCH_TOUCH_MAX];
+static float s_touchX[SWITCH_TOUCH_MAX], s_touchY[SWITCH_TOUCH_MAX];
+static int s_touchDownCount = 0;
 
 static bool SWITCH_GLES_LoadLibrary(SDL_VideoDevice *_this, const char *path)
 {
@@ -113,6 +125,8 @@ static bool SWITCH_VideoInit(SDL_VideoDevice *_this)
     if (SDL_AddBasicVideoDisplay(&mode) == 0) {
         return false;
     }
+    hidInitializeTouchScreen();
+    s_touchReady = SDL_AddTouch(SWITCH_TOUCH_ID, SDL_TOUCH_DEVICE_DIRECT, "Switch touch screen") >= 0;
     return true;
 }
 
@@ -199,8 +213,53 @@ static void SWITCH_ShowKeyboard(void)
     swkbdClose(&kbd);
 }
 
+static void SWITCH_PumpTouch(SDL_VideoDevice *_this)
+{
+    HidTouchScreenState state;
+    SDL_Window *window = _this->windows;
+    if (!s_touchReady || !window || hidGetTouchScreenStates(&state, 1) < 1) {
+        return;
+    }
+    const Uint64 now = SDL_GetTicksNS();
+    u32 held[SWITCH_TOUCH_MAX];
+    float heldX[SWITCH_TOUCH_MAX], heldY[SWITCH_TOUCH_MAX];
+    int heldCount = 0;
+    for (s32 i = 0; i < state.count && heldCount < SWITCH_TOUCH_MAX; i++) {
+        const HidTouchState *t = &state.touches[i];
+        const float x = SDL_clamp((float)t->x / SWITCH_TOUCH_W, 0.0f, 1.0f);
+        const float y = SDL_clamp((float)t->y / SWITCH_TOUCH_H, 0.0f, 1.0f);
+        bool known = false;
+        for (int j = 0; j < s_touchDownCount; j++) {
+            known |= s_touchDown[j] == t->finger_id;
+        }
+        if (known) {
+            SDL_SendTouchMotion(now, SWITCH_TOUCH_ID, t->finger_id + 1, window, x, y, 1.0f);
+        } else {
+            SDL_SendTouch(now, SWITCH_TOUCH_ID, t->finger_id + 1, window, SDL_EVENT_FINGER_DOWN, x, y, 1.0f);
+        }
+        held[heldCount] = t->finger_id;
+        heldX[heldCount] = x;
+        heldY[heldCount] = y;
+        heldCount++;
+    }
+    for (int j = 0; j < s_touchDownCount; j++) {
+        bool still = false;
+        for (int i = 0; i < heldCount; i++) {
+            still |= held[i] == s_touchDown[j];
+        }
+        if (!still) {
+            SDL_SendTouch(now, SWITCH_TOUCH_ID, s_touchDown[j] + 1, window, SDL_EVENT_FINGER_UP, s_touchX[j], s_touchY[j], 0.0f);
+        }
+    }
+    SDL_memcpy(s_touchDown, held, sizeof(held[0]) * heldCount);
+    SDL_memcpy(s_touchX, heldX, sizeof(heldX[0]) * heldCount);
+    SDL_memcpy(s_touchY, heldY, sizeof(heldY[0]) * heldCount);
+    s_touchDownCount = heldCount;
+}
+
 static void SWITCH_PumpEvents(SDL_VideoDevice *_this)
 {
+    SWITCH_PumpTouch(_this);
     if (s_keyboardRequested) {
         // once per request: asking again needs the field to lose and regain focus. Returning from the
         // keyboard applet can restart text input at once, so ignore requests right after one closed.

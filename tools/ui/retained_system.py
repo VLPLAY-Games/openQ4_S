@@ -687,11 +687,8 @@ def system_document() -> dict:
 
     tabs = [
         ("graphics", "#str_41098", [
-            [heading("#str_41098"), preset, autodetect, backend, gpu, renderer, renderer_status, restart, active, notice],
+            [heading("#str_41098"), preset, msaa, vsync],
             [heading("#str_230018"), ui_scale, text_scale, aspect, reset, fit]]),
-        ("screen", "#str_41099", [
-            [heading("#str_229900"), device, span, span_status, fullscreen, borderless, policy, msaa, vsync],
-            [heading("#str_229943"), width, height, mode, hint, custom_w, custom_h, refresh]]),
         ("image", "#str_41101", [
             [heading("#str_41101"), *image_rows, scale],
             [heading("#str_41102"), ambient_on, ambient, crt, irradiance, preload, preload_help, preload_status]]),
@@ -734,7 +731,7 @@ def system_document() -> dict:
                      "else": [{"op": "if", "condition": span_shown, "then": [focus("settings_multiscreen")],
                                "else": [focus("settings_fullscreen")]}]}]
     built = settings_subpage(doc, PREFIX, "#str_229900", tabs, activate=activate, overlays=dialogs(doc), back_event="onBack",
-                             back_id="settings_back", slots=SLOTS, footer=[footer], body=BODY, first_focus={"screen": screen_first})
+                             back_id="settings_back", slots=SLOTS, footer=[footer], body=BODY)
     return finish(built)
 
 
@@ -822,8 +819,6 @@ EXTENSIONS = {
                       "preloadRow": {"control": "settings_lightgrid_preload", "setting": "r_lightGridPreload",
                                      "status": {"pending": "#str_230078", "preloads": "#str_230079", "streams": "#str_230080",
                                                 "noGrids": "#str_230081"}},
-                      "rendererRow": {"control": "settings_renderer", "setting": "r_renderer", "values": ["best", "arb2"],
-                                      "fallbackNotice": "#str_230082"},
                       "localization": ["#str_229993", "#str_230077", "#str_230073", "#str_230074", "#str_230075", "#str_230076",
                                        "#str_42820", "#str_42821", "#str_230078", "#str_230079", "#str_230080", "#str_230081",
                                        "#str_41103", "#str_41104", "#str_230082"]},

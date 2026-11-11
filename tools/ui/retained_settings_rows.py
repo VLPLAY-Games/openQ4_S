@@ -386,6 +386,7 @@ def settings_subpage(doc: Document, prefix: str, title_key: str, tabs: list, *, 
     tab_<id>     switches to a tab at once, cross-fades the pages over 150 ms
                  and focuses the tab's first row; onTabPrevious and
                  onTabNext wrap around the strip."""
+    doc.prune_orphans = True
     check_settings_text(tabs, note)
     tabbed = len(tabs) > 1
     if back_event is None:

@@ -880,6 +880,18 @@ class Document:
             result["detail"] = self.detail
         result["timelines"] = self.timelines.items
         result["root"] = root
+        if getattr(self, "prune_orphans", False):
+            # A page that leaves rows out of its tabs keeps no bindings or
+            # timeline tracks for nodes that are not in the tree.
+            present = {node["id"] for node in walk_nodes(root)}
+            if self.bindings:
+                result["bindings"] = [item for item in self.bindings if item["node"] in present]
+            kept = []
+            for line in self.timelines.items:
+                tracks = [item for item in line["tracks"] if item["node"] in present]
+                if tracks:
+                    kept.append({**line, "tracks": tracks})
+            result["timelines"] = kept
         if extras:
             result.update(extras)
         return result

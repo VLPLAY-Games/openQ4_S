@@ -16,6 +16,9 @@ Source files:
 
 `docs/dev/settings-menu-registry.json` is the machine-readable inventory for the Settings surfaces touched by the current refactor. The coverage test uses it to validate source/widget presence, localization keys, cvar, GUI-state, or bind targets, UI ranges, shipped default keys, defaults, restart warnings, and accessibility notes for the registered rows, and it now asserts that every active Game Options value widget has a registry record.
 
+> [!NOTE]
+> Switch build (1.0.1): the retained settings pages (`tools/ui/retained_game.py`, `retained_system.py`, `retained_audio.py`) leave out the rows a console cannot use: the Mouse and VR tabs, controller rows for touchpad, battery rumble, prompt style and confirm swap, the System Screen tab (display device, window and fullscreen options, refresh rate), the renderer backend, GPU and fallback rows, and the audio device, EAX, speaker and HRTF rows. Multiplayer-only rows stay for the online work. The tables below describe the full legacy menu.
+
 ## Widget Type Key
 
 | Type | Meaning |

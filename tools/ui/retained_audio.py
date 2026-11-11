@@ -29,16 +29,7 @@ SECTIONS = (
         ("slider", "audio_music", "#str_201006", "audioMusic", "audio.music", (0, 100, 5)),
         ("slider", "audio_dialogue", "#str_231300", "audioDialogue", "audio.dialogue", (0, 100, 5)),
     )),
-    ("devices", "#str_229962", (
-        ("choice", "audio_backend", "#str_200971", "audioBackend", "audio.backend", (("#str_200970", 0, 0), ("#str_200970", 1, 1))),
-        ("device", "audio_device", "#str_201005", "audioDevice", "audio.device", None),
-    )),
     ("effects", "#str_229963", (
-        ("toggle", "audio_eax", "#str_200972", "audioEax", "audio.eax", None),
-        ("choice", "audio_speakers", "#str_200152", "audioSpeakers", "audio.speakers",
-         (("#str_229980", 0, 0), ("#str_229980", 1, 1), ("#str_229980", 2, 2))),
-        ("choice", "audio_hrtf", "#str_229981", "audioHrtf", "audio.hrtf",
-         (("#str_229980", 0, 0), ("#str_229980", 1, 1), ("#str_229980", 2, 2))),
         ("toggle", "audio_subtitles", "#str_231308", "audioSubtitles", "audio.subtitles", None),
         ("slider", "audio_subtitle_size", "#str_231309", "audioSubtitleSize", "audio.subtitleSize", (100, 200, 10)),
         ("slider", "audio_subtitle_background", "#str_231310", "audioSubtitleBackground", "audio.subtitleBackground", (0, 100, 10)),
@@ -49,7 +40,7 @@ VERBS = tuple(row[3] for _section, _heading, rows in SECTIONS for row in rows)
 
 
 # The columns: the sections each holds, by their place in SECTIONS.
-COLUMNS = ((0, 1), (2,))
+COLUMNS = ((0,), (1,))
 
 
 def audio_document() -> dict:

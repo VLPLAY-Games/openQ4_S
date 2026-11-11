@@ -67,19 +67,7 @@ SECTIONS = (
         choice("game_opponentweapons", "#str_41217", "g_mpFlatOpponentWeapons", "#str_41218", (0, 1)),
         ("verb_toggle", "game_forcemodel", "#str_223006", "gameForceModel", None),
     )),
-    ("mouse", "#str_229935", (
-        choice("game_invertmouse", "#str_200139", "m_pitch", "#str_200059", ("0.022", "-0.022")),
-        slider("game_msmooth", "#str_200140", "m_smooth", 1, 8, 1),
-        slider("game_msensitivity", "#str_200141", "sensitivity", 0.01, 30, 0.01, 2),
-        slider("game_mcpi", "#str_229936", "m_cpi", 0, 32000, 50),
-        slider("game_mfilter", "#str_229937", "m_filter", 0, 31, 1),
-        slider("game_maccel", "#str_229938", "cl_mouseAccel", -5, 5, 0.01, 2),
-        slider("game_macceloffset", "#str_229939", "cl_mouseAccelOffset", 0, 50, 0.1, 1),
-        slider("game_maccelpower", "#str_229940", "cl_mouseAccelPower", 1, 8, 0.05, 2),
-        slider("game_msenscap", "#str_229941", "cl_mouseSensCap", 0, 100, 0.1, 1),
-    )),
     ("controller", "#str_229924", (
-        toggle("game_controller", "#str_229925", "in_joystick"),
         choice("game_southpaw", "#str_229930", "in_joystickSouthpaw", "#str_229934", (0, 1)),
         slider("game_deadzone", "#str_229926", "in_joystickDeadZone", 0, 0.95, 0.01, 2),
         slider("game_looksensitivity", "#str_229931", "in_joystickLookSensitivity", 0.1, 4, 0.05, 2),
@@ -92,13 +80,7 @@ SECTIONS = (
         slider("game_rumblescale", "#str_229929", "in_joystickRumbleScale", 0, 2, 0.05, 2),
         toggle("game_gyro", "#str_229964", "in_gyro"),
         slider("game_gyrosensitivity", "#str_229965", "in_gyroSensitivity", 0, 8, 0.05, 2),
-        choice("game_touchpad", "#str_229966", "in_touchpadMode", "#str_229967", (0, 1, 2, 3)),
-        slider("game_touchpadsensitivity", "#str_229968", "in_touchpadSensitivity", 0, 8, 0.05, 2),
         toggle("game_touchscreen", "#str_229969", "in_touchscreen"),
-        slider("game_batterythreshold", "#str_229970", "in_joystickLowBatteryRumbleThreshold", 0, 100, 1),
-        slider("game_batteryscale", "#str_229971", "in_joystickLowBatteryRumbleScale", 0, 2, 0.05, 2),
-        choice("game_promptstyle", "#str_231526", "in_promptStyle", "#str_231527", (0, 1, 2, 3, 4, 5)),
-        choice("game_swapconfirm", "#str_231528", "in_swapConfirmBack", "#str_231529", (0, 1, 2)),
     )),
     ("crosshair", "#str_231543", (
         choice("game_customcrosshair", "#str_200307", "g_crosshairCustom", "#str_200296", ("0", "1")),
@@ -110,7 +92,6 @@ SECTIONS = (
     ("hud", "#str_231235", (
         choice("game_hudlayout", "#str_231236", "ui_hudLayout", "#str_231237", (0, 1, 2, 3)),
         slider("game_hudscale", "#str_231238", "ui_hudScale", 0.5, 2, 0.05, 2),
-        choice("game_hudwidth", "#str_231239", "ui_hudWidth", "#str_231240", (0, 1, 2)),
         slider("game_hudinset", "#str_231241", "ui_hudSafeInset", 0, 10, 0.5, 1),
         toggle("game_objectives", "#str_231247", "g_objectivesToggle"),
         slider("game_hudopacity", "#str_231270", "ui_hudOpacity", 0.25, 1, 0.05, 2),
@@ -124,7 +105,6 @@ SECTIONS = (
         choice("game_corpsesink", "#str_229917", "g_corpseSink", "#str_229921", (0, 1, 2)),
         verb_choice("game_corpsetime", "#str_229918", "gameCorpseTime", "#str_229919", 8, enabled=7),
         verb_choice("game_language", "#str_229907", "gameLanguage", "#str_229908", LANGUAGES),
-        choice("game_console", "#str_229922", "con_allowConsole", "#str_229923", (0, 1)),
         toggle("game_skipcinematics", "#str_229951", "g_autoSkipCinematics"),
         slider("game_cinematicshake", "#str_230157", "ui_cinematicShake", 0, 1, 0.1, 1),
     )),
@@ -135,21 +115,6 @@ SECTIONS = (
         slider("game_guny", "#str_229957", "cl_gun_y", -5, 5, 0.05, 2),
         slider("game_gunz", "#str_229958", "cl_gun_z", -5, 5, 0.05, 2),
         toggle("game_weaponkick", "#str_229982", "g_weaponMuzzleKick"),
-    )),
-    ("vr", "#str_230120", (
-        choice("game_vr", "#str_230121", "vr_enable", "#str_200246", (0, 1)),
-        choice("game_vraim", "#str_230122", "vr_aimMode", "#str_230123", (1, 0)),
-        choice("game_vrhand", "#str_230124", "vr_leftHanded", "#str_230125", (0, 1)),
-        choice("game_vrturn", "#str_230126", "vr_turnMode", "#str_230127", (0, 1)),
-        choice("game_vrsnap", "#str_230128", "vr_snapTurnAngle", "#str_230129", (30, 45, 60, 90)),
-        choice("game_vrmove", "#str_230130", "vr_moveDirection", "#str_230131", (0, 1)),
-        choice("game_vrroomscale", "#str_230132", "vr_roomScale", "#str_200246", (0, 1)),
-        choice("game_vrlaser", "#str_230133", "vr_aimLaser", "#str_230134", (0, 1, 2)),
-        choice("game_vrhaptics", "#str_230135", "vr_hapticStrength", "#str_230136", ("0", "0.5", "1")),
-        choice("game_vrtwohanded", "#str_230137", "vr_twoHanded", "#str_200246", (0, 1)),
-        choice("game_vrvignette", "#str_230138", "vr_comfortVignette", "#str_230136", ("0", "0.5", "1")),
-        choice("game_vrcrouch", "#str_230139", "vr_physicalCrouch", "#str_200246", (0, 1)),
-        choice("game_vrplayspace", "#str_231760", "vr_playSpace", "#str_231761", (0, 1, 2)),
     )),
 )
 # The session's verbs, in the order HandleRetainedGameRequest takes them.
@@ -184,10 +149,8 @@ def setting_action(doc: Document, cvar: str, kind: str) -> str:
 # (section, first, end) where the tab is that section alone.
 TABS = (
     ("general", "#str_231542", (("general",), ("gameplay", "viewweapon"))),
-    ("mouse", "#str_229935", (("mouse", 0, 5), ("mouse", 5, None))),
-    ("controller", "#str_229924", (("controller", 0, 9), ("controller", 9, None))),
+    ("controller", "#str_229924", (("controller", 0, 7), ("controller", 7, None))),
     ("hud", "#str_231235", (("hud",), ("crosshair",))),
-    ("vr", "#str_230120", (("vr", 0, 6), ("vr", 6, None))),
 )
 
 
