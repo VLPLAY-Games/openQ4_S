@@ -10,7 +10,7 @@ data.
 sdmc:/switch/openQ4/
 ├── openQ4.nro
 ├── q4base/        your Quake 4 data
-└── baseoq4/       openQ4's content packs
+└── baseoq4/       openQ4's content packs and openQ4Config.cfg
 ```
 
 - `openQ4.nro`: from a release, or built following [BUILDING.md](../BUILDING.md).
@@ -19,6 +19,11 @@ sdmc:/switch/openQ4/
   kept.
 - `baseoq4/`: the openQ4 content packs `pak0.pk4`, `pak1.pk4` and `pak2.pk4`
   (from a release, or `build-host/baseoq4/` after building).
+- `baseoq4/openQ4Config.cfg`: **recommended.** The settings file attached to each
+  release is the configuration the port was tested with (controller dead zone,
+  look curve and sensitivity, volume levels, button layout). Copy it into `baseoq4/`
+  before the first start, or replace your own file after keeping a backup. It holds
+  no personal data.
 
 ## 2. Start it in title takeover mode
 

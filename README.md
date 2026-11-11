@@ -62,12 +62,22 @@ sdmc:/switch/openQ4/
 ├── openQ4.nro            the application
 ├── q4base/               your retail Quake 4 data (pak001.pk4 ... pak0xx.pk4 and the rest of the folder)
 └── baseoq4/              openQ4's own content packs (pak0.pk4, pak1.pk4, pak2.pk4, ...)
+    └── openQ4Config.cfg  the tested settings file from the release (recommended, see below)
 ```
+
+> [!TIP]
+> **Use the tested settings file.** Every release has an `openQ4Config.cfg` attached. It is the
+> configuration the port was tested with: stick dead zone, look curve and sensitivity, volume
+> levels, the button layout and the other menu options. Copy it to
+> `sdmc:/switch/openQ4/baseoq4/` **before the first start** (or replace your own file; keep a
+> copy if you changed settings). It contains no personal data: the player name is the default
+> `Player`.
 
 1. Copy `openQ4.nro` to `sdmc:/switch/openQ4/`.
 2. Copy the `q4base` folder from your Quake 4 installation next to it.
 3. Copy the openQ4 content packs into `baseoq4/` (they are built from `content/baseoq4`, see [Building from source](#building-from-source)).
-4. Start `hbmenu` in title takeover mode and launch **openQ4**.
+4. Copy `openQ4Config.cfg` from the release into `baseoq4/` (recommended).
+5. Start `hbmenu` in title takeover mode and launch **openQ4**.
 
 Settings, saves and the log are written inside `baseoq4/` and next to the application (`log.txt`). If something goes wrong, `log.txt` is the file to attach to a bug report.
 
@@ -188,5 +198,7 @@ openQ4 contains components under different licences. The engine is covered by th
 **Требования к разгону:** нужен разгон процессора до **1785 МГц и выше**; видеокарту и память разгонять необязательно. **Тестировалось:** первые 3 уровня на частотах 1785 / 460 / 1600 МГц (CPU / GPU / RAM). **В тяжёлых боях сильные просадки FPS.**
 
 **Известные особенности:** выход из игры занимает некоторое время.
+
+**Рекомендуется:** к каждому релизу приложен проверенный файл настроек `openQ4Config.cfg`. Скопируйте его в `sdmc:/switch/openQ4/baseoq4/` до первого запуска (личных данных в нём нет).
 
 **Сборка:** см. раздел [Building from source](#building-from-source) (devkitPro, meson, `tools/switch/gen_ninja.py`).
