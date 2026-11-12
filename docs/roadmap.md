@@ -86,6 +86,13 @@ commits and about 300 files ahead, many of them Awakening repairs.
 
 ## Performance
 
+- **The new interface is heavy on the console.** On the 0.14.1 branch the frame
+  rate drops visibly when the weapon wheel opens and when a new objective appears
+  (the retained, RmlUi-based interface: layout and drawing on the CPU), and heavy
+  fights are slower than in 1.1.1. Ideas: make the Classic interface (`ui_retained 0`)
+  or a lighter HUD the Switch default, cache or simplify the wheel and the objective
+  popup, measure where the time goes (`g_frametime`, the render thread, the
+  retained UI update) before changing anything.
 - Strong frame-rate drops in heavy fights: the cost is in game logic (clip-model
   queries and traces, AI), effect updates and waiting for the render thread.
 - Closing the game takes a while.
@@ -102,12 +109,14 @@ commits and about 300 files ahead, many of them Awakening repairs.
 
 - Remove or rework the code kept for the multiplayer game tree if multiplayer is
   not pursued.
-- **Remove the code of other platforms, more carefully.** The merge of 0.14.1
-  deleted the Vulkan, Windows, Android and macOS files, but their traces remain in
-  shared files: `__ANDROID__` blocks in `sdl3_backend.cpp`, the Android setup in
-  `Session_menu.cpp`, `ApplicationResumed` in `AsyncClient`, VR/OpenXR code
-  (`VRVibrate` and `vrSystem` calls in the game), Linux X11 and Windows paths,
-  the `#ifdef` branches for them in the engine, and options in `meson.build`
-  and `meson_options.txt`. Go through them file by file after the merge builds
-  and runs, keeping the merge easy (small, separate commits).
-- Keep user documentation in `docs/` up to date with each release.
+- **Code of other platforms, in steps.** Done on the 0.14.1 merge branch: the
+  conditionals for Android, Windows, macOS, MSVC and the Vulkan module are resolved
+  away in every file (the preprocessed output of all 1461 translation units of
+  the Switch build is unchanged), the OpenXR session, the Windows input route,
+  X11 GL, ALSA and legacy Linux input files are deleted, and the source list
+  script (`tools/build/meson_sources.py`) only knows the Linux-style SDL3 build.
+  Still to do: the VR hooks that are woven into the game and the renderer
+  (`vrSystem`, `RenderSystem_vr.cpp`, `VRVibrate`), the X11 helper (`libXNVCtrl`),
+  the dedicated-server and stub sources, the `__ANDROID__`-free but Android-named
+  helpers, and `#ifdef __SWITCH__` branches that could become the only code once
+  nothing else is built (that makes later upstream merges harder, so last).
