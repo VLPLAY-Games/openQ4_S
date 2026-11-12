@@ -2942,7 +2942,28 @@ bool idFileSystemLocal::PromoteFile( const char *stagedRelativePath,
 	CreateOSPath( finalOS );
 
 	bool promoted = false;
-#if defined( USE_SDL3 )
+#if defined( __SWITCH__ )
+	// Horizon's file system cannot rename onto an existing file (SDL_RenamePath fails with "File exists"),
+	// so a file that is replaced stays stale. Move the old one aside first and bring it back if the
+	// rename fails, so the final file is never lost.
+	{
+		const idStr backupOS = finalOS + ".old";
+
+		remove( backupOS.c_str() );
+		const bool hadFinal = rename( finalOS.c_str(), backupOS.c_str() ) == 0;
+		promoted = rename( stagedOS.c_str(), finalOS.c_str() ) == 0;
+		if ( hadFinal ) {
+			if ( promoted ) {
+				remove( backupOS.c_str() );
+			} else {
+				rename( backupOS.c_str(), finalOS.c_str() );
+			}
+		}
+		if ( !promoted ) {
+			common->Warning( "Could not promote '%s' to '%s' (error %d)", stagedRelativePath, finalRelativePath, errno );
+		}
+	}
+#elif defined( USE_SDL3 )
 	promoted = SDL_RenamePath( stagedOS.c_str(), finalOS.c_str() );
 	if ( !promoted ) {
 		common->Warning( "Could not atomically promote '%s' to '%s': %s",
