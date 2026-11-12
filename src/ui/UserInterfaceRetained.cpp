@@ -35,7 +35,8 @@ int Sys_SDL_GamepadGlyphFamily(int faceLabels[4]);
 namespace {
 using namespace openq4::ui;
 constexpr const char* ActionMarker = "openq4-retained-actions";
-constexpr unsigned SaveTag = 0x49553451; // Q4UI, little endian through idFile.
+constexpr unsigned SaveTag = 0x49553451; // "Q4UI", little endian through idFile. Frozen
+// save framing: it predates the .rui name and stays so earlier saves load.
 constexpr int MaxStateEntries = 4096, MaxStringBytes = 65536;
 constexpr int MaxStateBytes = 16 * 1024 * 1024;
 constexpr int MaxFrameBytes = static_cast<int>(Runtime::MaxSnapshotBytes) + MaxStateBytes + MaxStateEntries*8 + 64;
@@ -71,6 +72,28 @@ std::string KeyEscapeNames(const char* text) {
 		}
 	}
 	return result;
+}
+
+// A string the stock interface built can carry bytes that are not UTF-8: text
+// typed into one of its fields is one byte a character, so an accented letter
+// in a chat line or a player's name arrives as a lone high byte. A document
+// refuses a whole batch of state over one such value, which froze the
+// Remastered HUD for everyone who was sent the line. Read such text the way
+// the text layer draws it and hand the document UTF-8.
+std::string StateText(std::string text) {
+	if (LangDict_IsUtf8(text.c_str(),static_cast<int>(text.size()))) return text;
+	std::string repaired;
+	for (size_t i = 0; i < text.size();) {
+		unsigned int codePoint = 0;
+		const int used = LangDict_NextCodePoint(text.c_str() + i,static_cast<int>(text.size() - i),codePoint);
+		if (used <= 0) break;
+		char encoded[UTF8_MAX_BYTES];
+		int count = LangDict_EncodeUtf8(codePoint,encoded);
+		if (count <= 0) count = LangDict_EncodeUtf8(UNICODE_REPLACEMENT,encoded);
+		repaired.append(encoded,static_cast<size_t>(count));
+		i += static_cast<size_t>(used);
+	}
+	return repaired;
 }
 
 // The glyph a prompt's chip draws for a bound key (ui-visual-design.md 13.4,
@@ -161,7 +184,7 @@ int FirstKeyEscape(const char* text) {
 
 bool ConvertState(const char* text, size_t type, StateValue& value) {
 	if (!text) return false;
-	if (type == 2) value = KeyEscapeNames(text);
+	if (type == 2) value = StateText(KeyEscapeNames(text));
 	else if (type == 1) {
 		if (!idStr::Cmp(text,"1") || !idStr::Cmp(text,"true")) value = true;
 		else if (!idStr::Cmp(text,"0") || !idStr::Cmp(text,"false")) value = false;
@@ -234,7 +257,8 @@ bool SessionMenuCommand(const std::string& command) {
         "joinSourceLan","joinClearSort","joinSortFavorite","joinSortLocked","joinSortName","joinSortPing","joinSortPlayers",
         "joinSortGameType","joinSortMap","joinSortDedicated","joinSortRepeater","joinFavorite","joinModPrevious","joinModNext",
         "joinFilterFull","joinFilterEmpty","joinFilterPassword","joinGameTypePrevious","joinGameTypeNext","joinClearFilters",
-        "noticeAction0","noticeAction1","noticeAction2","audioBack","gameBack","controlsBind","controlsClear","controlsBack",
+        "msgLeft","msgRight","msgMid",
+        "noticeAction0","noticeAction1","noticeAction2","audioBack","gameBack","controlsBind","controlsClear","controlsBack","controlsTouchLayout",
         "settingsBack","settingsControls","settingsGame","settingsDisplay","settingsAudio","settingsDefaults",
         "joinConnect","joinSearch","joinSearchClear","joinSortNext",
         "mpClose","mpMainMenu","mpDisconnect","mpStockPage","mpTeamAction",
@@ -306,7 +330,7 @@ bool SessionMenuValueCommand(const std::string& command) {
 		"createGameType","createLan","createDedicated","createAutoBalance","createFragLimit","createCaptureLimit","createControlTime",
 		"createTimeLimit","createMaxPlayers","createMinPlayers","createVoting","createTeamDamage","createTourneyLimit","createUsePass",
 		"createServerMods","createWeaponStay","createPure","createRate","createReady","createSpectators","createWarmup","createVoice",
-		"createBuying","createBots","createBotSkill",
+		"createBuying","createBots","createBotSkill","createShuffle","createOvertime","createMercy","createRoundLimit",
 		"audioVolume","audioMusic","audioDialogue","audioBackend","audioDevice","audioEax","audioSpeakers","audioHrtf",
 		"audioSubtitles","audioSubtitleSize","audioSubtitleBackground","audioSubtitleSpeakers",
 		"gameGunPosition","gameForceModel","gameCrosshair","gameCorpseTime","gameLanguage"};
@@ -330,6 +354,8 @@ const PlayerSetting* FindPlayerSetting(const std::string& cvar) {
 		"1 0.1 0.85","1 1 1"};
 	static const std::map<std::string,PlayerSetting> settings = {
 		{"ui_handicap",{0,1,100,true}},
+		// Join Game's list view: rows or tiles.
+		{"ui_browserView",{0,0,1,true,{},{0,1}}},
 		{"cl_player_outline_enemy",{2,0,0,false,levels}},{"cl_player_outline_team",{2,0,0,false,levels}},
 		{"cl_player_rimlight_enemy",{2,0,0,false,levels}},{"cl_player_rimlight_team",{2,0,0,false,levels}},
 		{"cl_player_brightskin_enemy",{2,0,0,false,levels}},{"cl_player_brightskin_team",{2,0,0,false,levels}},
@@ -355,7 +381,7 @@ const PlayerSetting* FindPlayerSetting(const std::string& cvar) {
 		{"in_swapConfirmBack",{0,0,2,true,{},{0,1,2}}},{"g_crosshairCustom",{2,0,0,false,{"0","1"}}},
 		{"g_crosshairSize",{0,16,48,true,{},{16,24,32,40,48}}},
 		{"g_crosshairColor",{2,0,0,false,{"1 1 1 1","1 0 0 1","1 0.5 0 1","1 1 0 1","0 1 0 1","0 1 1 1","0 0 1 1","1 0 0.5 1"}}},
-		{"hud_hitMarker",{1}},{"ui_hudLayout",{0,0,3,true,{},{0,1,2,3}}},{"ui_hudScale",{0,0.5,2,false}},
+		{"hud_hitMarker",{1}},{"hud_crosshairAnimated",{1}},{"ui_hudLayout",{0,0,3,true,{},{0,1,2,3}}},{"ui_hudScale",{0,0.5,2,false}},
 		{"ui_hudWidth",{0,0,2,true,{},{0,1,2}}},{"ui_hudSafeInset",{0,0,10,false}},{"g_objectivesToggle",{1}},
 		{"ui_hudOpacity",{0,0.25,1,false}},{"ui_hudDamageDirection",{1}},{"ui_hudPickups",{1}},{"ui_hudWeaponStrip",{1}},
 		{"ui_reducedFlashing",{1}},{"ui_retainedOpaqueBacking",{1}},{"g_corpseSink",{0,0,2,true,{},{0,1,2}}},{"con_allowConsole",{0,0,1,true,{},{0,1}}},
@@ -842,13 +868,16 @@ struct idUserInterfaceRetained::Impl {
 		if (!settingsFields) return SyncNumberDrafts();
 		StateValues current;
 		if (!UI_SettingsRead(settingsOwner,current)) return false;
-		StateValues updates, published; const auto live = RuntimeView()->GetState(false);
+		// One lookup per key. This runs on every Prepare - each redraw, event and
+		// value query - and copying the document's whole state to compare these
+		// few keys cost a map of every variable it declares each time.
+		StateValues updates, published;
 		for (const auto& [key,declaration] : document.Model().state) if (key.starts_with("settings.")) {
 			const auto source = current.find(key);
 			const auto& value = source == current.end() ? declaration.initial : source->second;
 			published.emplace(key,value);
-			const auto before = live.find(key);
-			if (before == live.end() || before->second != value) updates.emplace(key,value);
+			StateValue before;
+			if (declaration.HostSourced() || !RuntimeView()->GetStateValue(key,before) || before != value) updates.emplace(key,value);
 		}
 		std::string error;
 		if (!updates.empty() && !RuntimeView()->SetState(updates,error,RetainedUI_PresentationTime())) { Error(error); return false; }
@@ -874,8 +903,11 @@ struct idUserInterfaceRetained::Impl {
 		if (declarations.contains(NumberDraftPending)) values.emplace(NumberDraftPending,!summary.blocking.empty());
 		if (declarations.contains(NumberDraftMessage)) values.emplace(NumberDraftMessage,
 			std::string(summary.blocking.empty() ? "" : "#str_230006"));
-		const auto live = RuntimeView()->GetState(false); StateValues changes;
-		for (const auto& [key,value] : values) if (!live.contains(key) || live.at(key) != value) changes.emplace(key,value);
+		StateValues changes;
+		for (const auto& [key,value] : values) {
+			StateValue live;
+			if (declarations.at(key).HostSourced() || !RuntimeView()->GetStateValue(key,live) || live != value) changes.emplace(key,value);
+		}
 		std::string error;
 		if (!changes.empty() && !RuntimeView()->SetState(changes,error,RetainedUI_PresentationTime())) { Error(error); return false; }
 		for (const auto& [key,value] : values) {
@@ -1207,7 +1239,9 @@ bool idUserInterfaceRetained::InitFromFile(const char* qpath, bool rebuild, bool
 	const std::string source(static_cast<const char*>(data),static_cast<size_t>(size));
 	fileSystem->FreeFile(data);
 	Document candidate; std::vector<Diagnostic> diagnostics; std::string error;
-	if (!UI_RetainedTakePrefetched(path,source,candidate) && !candidate.Load(source,diagnostics)) {
+	const int loadStarted = Sys_Milliseconds();
+	const bool prefetched = UI_RetainedTakePrefetched(path,source,candidate);
+	if (!prefetched && !candidate.Load(source,diagnostics)) {
 		for (const auto& diagnostic : diagnostics) common->Warning("retained GUI %s:%u:%u %s: %s",path.c_str(),
 			static_cast<unsigned>(diagnostic.line),static_cast<unsigned>(diagnostic.column),diagnostic.pointer.c_str(),diagnostic.message.c_str());
 		return false;
@@ -1253,6 +1287,9 @@ bool idUserInterfaceRetained::InitFromFile(const char* qpath, bool rebuild, bool
 	RegisterLoaded(); RefreshThinking();
 	PrecacheImages(impl->document.Model().root);
 	common->Printf("RETAINED_GUI_LOADED %s\n",path.c_str());
+	// How long the page kept the frame, and whether a worker had parsed it.
+	common->DPrintf("retained GUI %s loaded in %d ms (%s)\n",path.c_str(),Sys_Milliseconds()-loadStarted,
+		prefetched ? "parse prefetched" : "parsed here");
 	return true;
 }
 
@@ -1397,18 +1434,50 @@ bool idUserInterfaceRetained::GetMaxTextIndex(const char* name, const char* text
 	info.maxIndex = fit.maxIndex; info.lastWhitespace = fit.lastWhitespace;
 	return fit.overflow;
 }
+// A binding state's keys, each in a slot of its own for a page that draws them
+// as glyphs (ui-visual-design.md 13.5). Beside a state with a keyBinding, a
+// document may declare, all optional:
+//   <state>.key0, .key1, ...   the action's keyboard and mouse keys in key
+//                              order, each a key state: with "<slot>.glyph"
+//                              it receives the glyph's kind and its label, as
+//                              a prompt's key does, and "" past the last key;
+//   <state>.pad0, .pad1, ...   its controller buttons, the same way;
+//   <slot>.arrow               1-4 for the keyboard's up, down, left and right
+//                              arrows, which a keycap draws, else 0;
+//   <state>.keyCount, .padCount how many of each family the action has;
+//   <state>.more               "+N" for the keys past the declared slots, else "".
 void idUserInterfaceRetained::SetKeyBindingNames() {
 	if (!impl->Prepare()) return;
-	for (const auto& [name,declaration] : impl->document.Model().state) {
+	const auto& states = impl->document.Model().state;
+	for (const auto& [name,declaration] : states) {
 		if (declaration.keyBinding.empty()) continue;
 		idStr names;
+		std::vector<int> keys[2];
 		for (int key = 0; key < K_LAST_KEY; ++key) {
 			if (!idKeyInput::KeyIsBoundTo(key,declaration.keyBinding.c_str())) continue;
 			idStr label = idKeyInput::KeyNumToString(key,true);
 			if (label.Length() == 1) label.ToUpper();
 			names = names.IsEmpty() ? label : idStr(va(common->GetLanguageDict()->GetString("#str_231533"),names.c_str(),label.c_str()));
+			keys[idKeyInput::IsControllerKey(key) ? 1 : 0].push_back(key);
 		}
 		SetStateString(name.c_str(),names.IsEmpty() ? common->GetLanguageDict()->GetString("#str_07133") : names.c_str());
+		static const char* const families[2] = {".key",".pad"};
+		static const char* const counts[2] = {".keyCount",".padCount"};
+		size_t hidden = 0;
+		for (int family = 0; family < 2; ++family) {
+			size_t slot = 0;
+			for (;; ++slot) {
+				const std::string slotName = name + families[family] + std::to_string(slot);
+				if (!states.contains(slotName)) break;
+				const int key = slot < keys[family].size() ? keys[family][slot] : -1;
+				SetStateString(slotName.c_str(),key >= 0 ? va("^ik%02x",key & 0xff) : "");
+				if (states.contains(slotName + ".arrow")) SetStateInt((slotName + ".arrow").c_str(),
+					key == K_UPARROW ? 1 : key == K_DOWNARROW ? 2 : key == K_LEFTARROW ? 3 : key == K_RIGHTARROW ? 4 : 0);
+			}
+			if (keys[family].size() > slot) hidden += keys[family].size() - slot;
+			if (states.contains(name + counts[family])) SetStateInt((name + counts[family]).c_str(),static_cast<int>(keys[family].size()));
+		}
+		if (states.contains(name + ".more")) SetStateString((name + ".more").c_str(),hidden ? va("+%d",static_cast<int>(hidden)) : "");
 	}
 }
 
@@ -2353,15 +2422,15 @@ bool AwakeningGame() {
 // The weapon wheels and quick chat the game names (WeaponWheel.inl,
 // QuickChat.inl), by family and campaign; the HUD documents come from the
 // Remastered routes of the stock HUD sources a spawn creates.
-constexpr const char* WheelDocuments[] = {"guis/hud/weapon_wheel_marine.q4ui","guis/hud/weapon_wheel_strogg.q4ui"};
-constexpr const char* AwakeningWheelDocuments[] = {"guis/hud/weapon_wheel_marine_awakening.q4ui","guis/hud/weapon_wheel_strogg_awakening.q4ui"};
+constexpr const char* WheelDocuments[] = {"guis/hud/weapon_wheel_marine.rui","guis/hud/weapon_wheel_strogg.rui"};
+constexpr const char* AwakeningWheelDocuments[] = {"guis/hud/weapon_wheel_marine_awakening.rui","guis/hud/weapon_wheel_strogg_awakening.rui"};
 // Single player precaches the scoreboard but never draws it, so its document
 // is not expected there; multiplayer draws the Marine HUD under its own.
 constexpr const char* SinglePlayerHudSources[] = {"guis/hud.gui","guis/hud_strogg.gui","guis/wristcomm.gui","guis/wristcomm_strogg.gui","guis/vehicles/hud.gui"};
 constexpr const char* AwakeningHudSources[] = {"guis/q4xhud.gui","guis/q4xhud_strogg.gui","guis/wristcomm.gui","guis/wristcomm_strogg.gui","guis/vehicles/hud.gui"};
 constexpr const char* MultiplayerHudSources[] = {"guis/mphud.gui","guis/hud.gui","guis/scoreboard.gui"};
-constexpr const char* QuickChatDocument = "guis/hud/quick_chat.q4ui";
-constexpr const char* ViewEffectsDocument = "guis/hud/view_effects.q4ui";
+constexpr const char* QuickChatDocument = "guis/hud/quick_chat.rui";
+constexpr const char* ViewEffectsDocument = "guis/hud/view_effects.rui";
 std::vector<const char*> GameplayDocuments(bool multiplayer) {
 	std::vector<const char*> documents;
 	const bool awakening = !multiplayer && AwakeningGame();

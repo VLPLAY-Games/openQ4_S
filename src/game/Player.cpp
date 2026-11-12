@@ -774,8 +774,12 @@ bool idInventory::DetermineAmmoAvailability( idPlayer* owner, const char *ammoNa
 	}
 
 	// Make sure the clip info is updated.
-	if ( owner->weapon ) {
-		clip[ owner->GetCurrentWeapon( ) ] = owner->weapon->AmmoInClip( );
+	// openQ4: there is no current weapon while a pickup is forcing a switch -
+	// GiveWeaponMod sets it to -1 for the weapon in hand - and this then wrote
+	// clip[-1], the last slot of the ammo table before it.
+	const int clipWeapon = owner->GetCurrentWeapon( );
+	if ( owner->weapon && clipWeapon >= 0 && clipWeapon < MAX_WEAPONS ) {
+		clip[ clipWeapon ] = owner->weapon->AmmoInClip( );
 	}
 
 	 if ( !idStr::Icmpn( ammoName, "start_ammo_", 11 ) ) {
@@ -1221,6 +1225,9 @@ idPlayer::idPlayer() {
 	vrVehicleDeltaYaw = 0.0f;
 	vrVehicleYaw = 0.0f;
 	vrVehicleYawValid = false;
+	vrVehicleSeatPending = false;
+	vrRoomScaleStep.Zero();
+	vrRoomScaleStepTime = -1;
 	memset( &usercmd, 0, sizeof( usercmd ) );
 
 	alreadyDidTeamAnnouncerSound = false;
@@ -1398,6 +1405,7 @@ idPlayer::idPlayer() {
 
 	lastDamageDef			= 0;
 	lastDamageDir			= vec3_zero;
+	hudHitDirTime			= 0;
 	lastDamageLocation		= 0;
 
 	predictedFrame			= 0;
@@ -2687,9 +2695,15 @@ void idPlayer::Restore( idRestoreGame *savefile ) {
  	memset( usercmd.angles, 0, sizeof( usercmd.angles ) );
 	SetViewAngles( viewAngles );
 	spawnAnglesSet = true;
-	// openQ4 VR: a seat restored in a vehicle faces the way the view did
+	// openQ4 VR: a restored seat faces the vehicle's eye, as boarding does
+	// (FaceVRVehicleSeat). Its facing was never saved, and deltaViewAngles in a
+	// vehicle carries the bind master's turns, which are no facing at all; a
+	// load takes the headset's body yaw again from the first usercmd, so the
+	// seat waits for that (UpdateVRVehicleFrame)
 	vrVehicleDeltaYaw = deltaViewAngles.yaw;
 	vrVehicleYawValid = false;
+	vrVehicleSeatPending = true;
+	vrRoomScaleStepTime = -1;
 
 	savefile->ReadInt( buttonMask );
  	savefile->ReadInt( oldButtons );
@@ -3876,10 +3890,16 @@ void idPlayer::UpdateHudStats( idUserInterface *_hud ) {
 	
 	assert ( _hud );
 
+	// openQ4: compare what the HUD shows. Against the raw value, a gibbed
+	// player (health below -100) re-sent updateHealth and a bogus delta every
+	// frame until the respawn.
+	// A Remastered layout reads 0 for the dead, as the retained HUD does;
+	// Classic keeps the stock readout, negative down to -100.
+	const int shownHealth = _hud->GetStateBool( "oq4_hudRemastered" ) ? Max( 0, health ) : ( health < -100 ? -100 : health );
 	temp = _hud->State().GetInt ( "player_health", "-1" );
-	if ( temp != health ) {		
-		_hud->SetStateInt   ( "player_healthDelta", temp == -1 ? 0 : (temp - health) );
-		_hud->SetStateInt	( "player_health", health < -100 ? -100 : health );
+	if ( temp != shownHealth ) {		
+		_hud->SetStateInt   ( "player_healthDelta", temp == -1 ? 0 : (temp - shownHealth) );
+		_hud->SetStateInt	( "player_health", shownHealth );
 		_hud->SetStateFloat	( "player_healthpct", idMath::ClampFloat ( 0.0f, 1.0f, (float)health / (float)inventory.maxHealth ) );
 		_hud->HandleNamedEvent ( "updateHealth" );
 	}
@@ -3909,10 +3929,15 @@ void idPlayer::UpdateHudStats( idUserInterface *_hud ) {
 	_hud->SetStateString( "player_god", va( "%i", (godmode && g_showGodDamage.GetBool()) ) );
 	_hud->SetStateString( "player_god_damage", va( "%i", godmodeDamage ) );
 
-	// Update the hit direction
-	idVec3 localDir;
-	viewAxis.ProjectVector( lastDamageDir, localDir );
-	_hud->SetStateFloat( "hitdir", localDir.ToAngles()[YAW] + 180.0f );
+	// Update the hit direction. openQ4: only while the indicator shows (it
+	// fades within 600 ms of the hit). Written every frame, the angle changed
+	// with every turn of the view, so the HUD's state never rested and both
+	// HUDs re-evaluated on every frame the player looked around.
+	if ( hudHitDirTime != 0 && gameLocal.time >= hudHitDirTime && gameLocal.time - hudHitDirTime < 1000 ) {
+		idVec3 localDir;
+		viewAxis.ProjectVector( lastDamageDir, localDir );
+		_hud->SetStateFloat( "hitdir", localDir.ToAngles()[YAW] + 180.0f );
+	}
 
 	//_hud->HandleNamedEvent( "updateArmorHealthAir" );
 
@@ -4399,7 +4424,14 @@ void idPlayer::DrawHUD( idUserInterface *_hud ) {
 
 				vehicleController.UpdateCursorGUI( cursor );
 				cursor->Redraw( gameLocal.time );
+				if ( rvAnimatedCrosshair::ConsumeToggle() ) {
+					g_crosshairColor.SetModified();
+				}
 				Player_RefreshCrosshairGUI( cursor, weapon, true );
+				// openQ4: the gun of the seat, drawn live in place of its picture
+				rvVehicle *crosshairVehicle = vehicleController.GetVehicle();
+				rvVehiclePosition *crosshairSeat = crosshairVehicle != NULL ? crosshairVehicle->GetPosition( vehicleController.GetPosition() ) : NULL;
+				rvAnimatedCrosshair::Draw( cursor, NULL, crosshairSeat != NULL ? crosshairSeat->GetActiveWeapon() : NULL );
 			}
 		}
 		_hud = GetHud();
@@ -4450,7 +4482,16 @@ void idPlayer::DrawHUD( idUserInterface *_hud ) {
 				cursor->SetStateInt( "g_crosshairSize", crossSize );
 // RAVEN END
 				cursor->Redraw( gameLocal.time );
+				// openQ4: switching the animated crosshair hands the combat picture
+				// over, or back, through the same refresh as a color change
+				if ( rvAnimatedCrosshair::ConsumeToggle() ) {
+					g_crosshairColor.SetModified();
+				}
 				Player_RefreshCrosshairGUI( cursor, weapon, false );
+
+				// openQ4: the weapon's design drawn live in place of the cursor's
+				// picture; it takes the hit marker's pulse with it
+				rvAnimatedCrosshair::Draw( cursor, weapon, NULL );
 
 				// openQ4: over the crosshair, and under the crosshair's own
 				// gating - no marker in a gui, a vehicle, or while dead
@@ -5495,6 +5536,10 @@ idPlayer::ClearPowerup
 ==============
 */
 void idPlayer::ClearPowerup( int i ) {
+	// openQ4: EVENT_POWERUP passes a short straight off the wire here.
+	if ( i < 0 || i >= POWERUP_MAX ) {
+		return;
+	}
 	if ( gameLocal.isServer ) {
 		idBitMsg	msg;
 		byte		msgBuf[MAX_EVENT_PARAM_SIZE];
@@ -8193,6 +8238,13 @@ void idPlayer::UpdateDeltaViewAngles( const idAngles &angles ) {
 	for( int i = 0; i < 3; i++ ) {
 		delta[ i ] = angles[ i ] - SHORT2ANGLE( usercmd.angles[ i ] );
 	}
+	// openQ4 VR: a tracked aim's pitch is the controller's (or the head's) own.
+	// An offset on it would send every shot off the line the laser draws, and
+	// nothing the player does with a hand could take it out again.
+	if ( ( usercmd.buttons & BUTTON_VRAIM ) != 0 ) {
+		delta.pitch = 0.0f;
+		delta.roll = 0.0f;
+	}
 	SetDeltaViewAngles( delta );
 }
 
@@ -8318,6 +8370,14 @@ void idPlayer::UpdateViewAngles( void ) {
 //		gameLocal.Printf( "\tUSERCMD: <%d, %d, %d>\n", usercmd.angles[ 0 ], usercmd.angles[ 1 ], usercmd.angles[ 2 ] );
 //		gameLocal.Printf( "\tDELTAVIEW: %s\n", deltaViewAngles.ToString() );
 //	}
+	// openQ4 VR: no pitch offset rides on a tracked aim (UpdateDeltaViewAngles).
+	// A spawn, a loaded save, a teleport or a pusher may have left one before
+	// this command carried the flag.
+	const bool vrAim = ( usercmd.buttons & BUTTON_VRAIM ) != 0;
+	if ( vrAim ) {
+		deltaViewAngles.pitch = 0.0f;
+		deltaViewAngles.roll = 0.0f;
+	}
 	for ( i = 0; i < 3; i++ ) {
 		cmdAngles[i] = SHORT2ANGLE( usercmd.angles[i] );
 		if ( influenceActive == INFLUENCE_LEVEL3 ) {
@@ -8326,7 +8386,8 @@ void idPlayer::UpdateViewAngles( void ) {
 			viewAngles[i] = idMath::AngleNormalize180( SHORT2ANGLE( usercmd.angles[i] ) + deltaViewAngles[i] );
 		}
 	}
-	if ( !centerView.IsDone( gameLocal.time ) ) {
+	// centring the view levels a mouse's pitch; a hand's is wherever the hand is
+	if ( !vrAim && !centerView.IsDone( gameLocal.time ) ) {
 		viewAngles.pitch = centerView.GetCurrentValue( gameLocal.time );
 	}
 //	if( gameLocal.localClientNum == entityNumber ) {
@@ -8723,7 +8784,9 @@ void idPlayer::UpdateAir( void ) {
 	airless = newAirless;
 
 	if ( hud ) {
-		hud->SetStateInt( "player_air", 100 * airTics / pm_airTics.GetInteger() );
+		// openQ4: pm_air 0 (no air supply to lose) divided by zero here.
+		const int airCapacity = pm_airTics.GetInteger();
+		hud->SetStateInt( "player_air", airCapacity > 0 ? idMath::ClampInt( 0, 100, (int)( (int64)airTics * 100 / airCapacity ) ) : 100 );
 	}
 }
 
@@ -8928,19 +8991,13 @@ bool idPlayer::EnterVehicle( idEntity* vehicle ) {
 	}
 	vrVehicleDeltaYaw = facing;
 	vrVehicleYawValid = false;
+	vrVehicleSeatPending = false;
 	const rvVehicle *entered = vehicleController.GetVehicle();
 	const rvVehiclePosition *seat = entered != NULL ? entered->GetPosition( vehicleController.GetPosition() ) : NULL;
 	vrFrameState_t vrFrame;
 	float vrTrackingYaw;
 	if ( seat != NULL && GetVRView( vrFrame, vrTrackingYaw ) ) {
-		// in the headset the seat faces where the vehicle's eye looks, as the
-		// flat view does at once: a rear gun must not end up behind a player
-		// who climbed aboard facing forwards
-		idVec3 eyeOrigin;
-		idMat3 eyeAxis;
-		seat->GetEyePosition( eyeOrigin, eyeAxis );
-		const float headYaw = vrFrame.head.valid ? vrFrame.head.axis[ 0 ].ToYaw() : 0.0f;
-		vrVehicleDeltaYaw = idMath::AngleNormalize180( eyeAxis[ 0 ].ToYaw() - vrFrame.bodyYaw - headYaw );
+		FaceVRVehicleSeat( entered, seat, vrFrame );
 		if ( cvarSystem->GetCVarInteger( "vr_debug" ) > 0 ) {
 			gameLocal.Printf( "VR vehicle %s: %s\n", entered->GetClassname(),
 				seat->TurretAlignsVehicle() ? "steers after its turret, the view stays put" : "its turns carry the view" );
@@ -8970,6 +9027,7 @@ bool idPlayer::ExitVehicle ( bool force ) {
 		return false;
 	}
 	vrVehicleYawValid = false;
+	vrVehicleSeatPending = false;
 
 	SetViewAngles( viewAxis[0].ToAngles() );
 	// openQ4 VR: stepping out keeps the world where the seat had it, rather
@@ -12304,8 +12362,58 @@ void idPlayer::UpdateVRRoomScale( void ) {
 	const idVec3 walked = physicsObj.VRWalk( ( offset * ( ( distance - freeRadius ) / distance ) ) * tracking );
 	idVec3 walkedTracking = walked * tracking.Transpose();
 	walkedTracking.z = 0.0f;
-	if ( walkedTracking.LengthSqr() > 0.0f ) {
-		vrSystem->ShiftTrackingOrigin( walkedTracking );
+	if ( walkedTracking.LengthSqr() > 0.0f && vrSystem->ShiftTrackingOrigin( walkedTracking ) ) {
+		// the eye is drawn interpolated towards this tic's sample, while the
+		// tracking space moved by the whole step now: GetPresentationViewPos
+		// adds the part of the step the eye has still to cover
+		vrRoomScaleStep = walkedTracking * tracking;
+		vrRoomScaleStepTime = gameLocal.time;
+	}
+}
+
+/*
+===============
+idPlayer::VRRoomScaleLag
+
+openQ4 VR: how far an eye drawn between two presentation samples lags the
+tracked head after room scale moved the tracking space by a whole step. The
+step belongs to the tic of the current sample; the eye still has the rest of
+it to cover, a fraction of one tic's walk. Without it a walk about the room
+shimmered by up to a tic's step, at every tic.
+===============
+*/
+idVec3 idPlayer::VRRoomScaleLag( float fraction ) const {
+	if ( vrRoomScaleStepTime < 0 || vrRoomScaleStepTime != presentationViewTime || fraction >= 1.0f ) {
+		return vec3_origin;
+	}
+	return vrRoomScaleStep * ( 1.0f - Max( fraction, 0.0f ) );
+}
+
+/*
+===============
+idPlayer::FaceVRVehicleSeat
+
+openQ4 VR: in the headset a seat faces where the vehicle's eye looks, as the
+flat view does at once: a rear gun must not end up behind a player who
+climbed aboard facing forwards, nor a seat restored from a save face
+wherever the saved view's bind left it.
+===============
+*/
+void idPlayer::FaceVRVehicleSeat( const rvVehicle *vehicle, const rvVehiclePosition *seat, const vrFrameState_t &frame ) {
+	idVec3 eyeOrigin;
+	idMat3 eyeAxis;
+	seat->GetEyePosition( eyeOrigin, eyeAxis );
+	const float headYaw = frame.head.valid ? frame.head.axis[ 0 ].ToYaw() : 0.0f;
+	vrVehicleDeltaYaw = idMath::AngleNormalize180( eyeAxis[ 0 ].ToYaw() - frame.bodyYaw - headYaw );
+	vrVehicleYawValid = false;
+	// the seat follows the vehicle's turns from here, not from the first
+	// frame it is driven: m07's race seats the player on the speeder and
+	// only then turns it 165 degrees, which a later start left behind, so
+	// the head-steered turret ran to its stop chasing the old facing
+	const idVec3 &nose = vehicle->GetAxis()[ 0 ];
+	if ( nose.ToVec2().LengthSqr() >= 0.01f ) {
+		vrVehicleYaw = nose.ToYaw();
+		vrVehicleYawValid = true;
 	}
 }
 
@@ -12328,9 +12436,30 @@ void idPlayer::UpdateVRVehicleFrame( void ) {
 	float trackingYaw;
 	rvVehicle *vehicle = vehicleController.GetVehicle();
 	const rvVehiclePosition *position = vehicle != NULL ? vehicle->GetPosition( vehicleController.GetPosition() ) : NULL;
-	if ( position == NULL || health <= 0 || !GetVRView( frame, trackingYaw ) ) {
+	if ( position == NULL || health <= 0 ) {
 		vrVehicleYawValid = false;
+		// a load on foot has no seat to face
+		vrVehicleSeatPending = position != NULL && vrVehicleSeatPending;
 		return;
+	}
+	const bool stereo = GetVRView( frame, trackingYaw );
+	// a seat restored from a save faces the vehicle's eye once the headset's
+	// body yaw is known again: the first usercmd VR aimed takes it afresh
+	if ( stereo && vrVehicleSeatPending && ( usercmd.buttons & BUTTON_VRAIM ) != 0 ) {
+		FaceVRVehicleSeat( vehicle, position, frame );
+		vrVehicleSeatPending = false;
+	}
+	if ( !stereo ) {
+		vrVehicleYawValid = false;
+		// on the floating screen (vr_vehicleStereo 0) the stick still arrives
+		// turned into the weapon hand's aim
+		if ( vrSystem == NULL || !vrSystem->IsActive() || gameLocal.GetLocalPlayer() != this ) {
+			return;
+		}
+		vrSystem->GetFrameState( frame );
+		if ( !frame.active ) {
+			return;
+		}
 	}
 
 	// the head turns a vehicle's guns, and with them its facing, and the stick
@@ -12344,6 +12473,9 @@ void idPlayer::UpdateVRVehicleFrame( void ) {
 		const float left = -static_cast<float>( usercmd.rightmove );
 		usercmd.forwardmove = idMath::ClampChar( idMath::FtoiFast( c * forward - s * left ) );
 		usercmd.rightmove = idMath::ClampChar( idMath::FtoiFast( -( s * forward + c * left ) ) );
+	}
+	if ( !stereo ) {
+		return;
 	}
 
 	if ( position->TurretAlignsVehicle() ) {
@@ -12397,6 +12529,30 @@ bool idPlayer::GetVRVehicleAim( idAngles &seatAim, idAngles &worldAim ) const {
 	worldAim.Set( idMath::AngleNormalize180( seatAim.pitch + deltaViewAngles.pitch ),
 		idMath::AngleNormalize180( seatAim.yaw + vrVehicleDeltaYaw ), 0.0f );
 	return false;
+}
+
+/*
+===============
+idPlayer::VRZoomScale
+
+openQ4 VR: how far a weapon's zoom narrows each eye's frustum now
+(VR_ZoomTangentScale): 1 unzoomed, eased with the flat screen's field of
+view while the zoom moves. While it moves CalcFov returns the moving value
+whether or not it honours the zoom, so that is measured against the unzoomed
+view; measured against itself, the eyes held still for the zoom's whole
+ease and then jumped to full magnification, and jumped back on release.
+===============
+*/
+float idPlayer::VRZoomScale( void ) {
+	const float current = CalcFov( true );
+	float normal = CalcFov( false );
+	if ( !fxFov && !influenceFov && !zoomFov.IsDone( gameLocal.time ) ) {
+		normal = DefaultFov();
+		if ( vehicleController.IsDriving() && vehicleController.GetVehicle() != NULL ) {
+			normal += vehicleController.GetVehicle()->GetFovOffset();
+		}
+	}
+	return VR_ZoomTangentScale( current, normal );
 }
 
 /*
@@ -12626,6 +12782,8 @@ void idPlayer::GetPresentationViewPos( idVec3 &origin, idMat3 &axis ) const {
 		const float fraction = GetPresentationViewBlendFraction();
 		origin.Lerp( presentationPrevViewOrigin, presentationCurViewOrigin, fraction );
 		axis = gameLocal.InterpolatePresentationAxis( presentationPrevViewAxis, presentationCurViewAxis, fraction );
+		// openQ4 VR: a room-scale step already moved the tracked head by all of it
+		origin += VRRoomScaleLag( fraction );
 	}
 	ApplyPresentationLookToView( origin, axis );
 }
@@ -15515,6 +15673,7 @@ void idPlayer::ClientDamageEffects ( const idDict& damageDef, const idVec3& dir,
 		// Let the hud know about the hit
 		if ( hud ) {
 			hud->SetStateFloat ( "hitdir", localDir.ToAngles()[YAW] + 180.0f );
+			hudHitDirTime = gameLocal.time;
 // openQ4 BEGIN
 			// The Classic HUD caps its indicator at 0.40 under reduced flashing.
 			hud->SetStateBool ( "reducedFlashing", cvarSystem->GetCVarBool( "ui_reducedFlashing" ) );

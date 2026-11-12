@@ -1696,6 +1696,16 @@ void idGameLocal::LoadMap( const char *mapName, int randseed ) {
 
 	networkSystem->SetLoadingText( mapName );
 
+	// Animations decoded from the generated cache must not outlive a pure lock
+	// (or fs_restrict): once the filesystem refuses those reads, derive them
+	// again from the pure paks before this map uses them.
+	if ( !fileSystem->GeneratedCacheReadsEnabled( GENERATED_CACHE_ANIMATION ) ) {
+		const int reloadedAnims = animationLib->ReloadGeneratedCacheAnims();
+		if ( reloadedAnims > 0 ) {
+			Printf( "%i animations decoded from the generated cache reloaded: generated-cache reads are refused\n", reloadedAnims );
+		}
+	}
+
 	InitAsyncNetwork();
 
 	// these can changed based upon sp / mp
@@ -2726,6 +2736,10 @@ bool idGameLocal::InitFromSaveGame( const char *mapName, idRenderWorld *renderWo
 // RAVEN END
 
 	savegame.ReadInt( localClientNum );
+	// openQ4: GetLocalPlayer indexes entities[] with this
+	if ( localClientNum < -1 || localClientNum >= MAX_CLIENTS ) {
+		savegame.Error( "idGameLocal::InitFromSaveGame: invalid local client %d", localClientNum );
+	}
 
 	// snapshotEntities is used for multiplayer only
 
@@ -5750,6 +5764,11 @@ void idGameLocal::RegisterEntity( idEntity *ent ) {
 		spawn_entnum = firstFreeIndex++;
 	} else {
 		assert( spawn_entnum < MAX_CLIENTS || spawn_entnum >= minSpawnIndex );
+		// openQ4: the number comes from spawn args, which a map or a script can
+		// set, and it indexes entities[] and spawnIds[] below
+		if ( spawn_entnum < 0 || spawn_entnum >= ENTITYNUM_NONE ) {
+			Error( "idGameLocal::RegisterEntity: spawn_entnum %d out of range", spawn_entnum );
+		}
 	}
 
 	entities[ spawn_entnum ] = ent;
@@ -6729,6 +6748,11 @@ int idGameLocal::EntitiesWithinRadius( const idVec3 org, float radius, idEntity 
 	bo.ExpandSelf( radius );
 	for( ent = spawnedEntities.Next(); ent != NULL; ent = ent->spawnNode.Next() ) {
 		if ( ent->GetPhysics()->GetAbsBounds().IntersectsBounds( bo ) ) {
+			// openQ4: maxCount was never looked at; callers pass arrays on the stack
+			if ( entCount >= maxCount ) {
+				Warning( "idGameLocal::EntitiesWithinRadius: max count" );
+				break;
+			}
 			entityList[entCount++] = ent;
 		}
 	}

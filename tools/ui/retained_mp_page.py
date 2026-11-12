@@ -3,7 +3,7 @@
 
 Built by tools/ui/build_retained_screens.py, which writes and checks it with
 the other retained screens. MULTIPLAYER on the title hands off to
-guis/menu/multiplayer.q4ui as LOAD GAME does to its page
+guis/menu/multiplayer.rui as LOAD GAME does to its page
 (idSessionLocal::BeginRetainedPage): the title docks its bands and carries
 its label into the title slot, and at 550 ms the page presents in the page
 state Single Player holds, that label its title. It is the stock Multiplayer
@@ -126,7 +126,8 @@ def multiplayer_document() -> dict:
         content_node = next(node for node in content["children"] if node["id"]==ident)
         content_node["properties"]["display"] = keyword("block" if ident=="details" else "flex")
         doc.bind(f"{ident}.setup-display",ident,"display",{"op":"select","args":[{"state":"setup.open"},"none","block" if ident=="details" else "flex"]})
-    doc.events["setupOpen"] = [{"op":"setState","values":{"setup.open":True}}, {"op":"focus","control":"setup-name"}]
+    # Each opening starts on the PLAYER tab, where its first focus is.
+    doc.events["setupOpen"] = [{"op":"setState","values":{"setup.open":True,"setup.tab":0}}, {"op":"focus","control":"setup-name"}]
     doc.events["setupClose"] = [{"op":"setState","values":{"setup.open":False}}, {"op":"focus","control":"setup"}]
     # Going deeper, the section's label carries from its row into the slot at
     # the step's foot (title.carry, 300 ms).

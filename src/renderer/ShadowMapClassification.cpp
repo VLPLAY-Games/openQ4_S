@@ -254,9 +254,450 @@ shadowMapPointReceiverSettings_t R_ShadowMapPointStorageAdjustedReceiverSettings
 		r_shadowMapPointMaxWorldBias.GetFloat() );
 }
 
-bool R_ShadowMapCasterTransformNeedsTwoSided( const float modelMatrix[ 16 ] ) {
-	if ( modelMatrix == NULL ) {
+int R_ShadowMapDynamicCasterFramesFor( float frameMsec ) {
+	if ( !std::isfinite( static_cast<double>( frameMsec ) ) || frameMsec <= 0.0f ) {
+		return SHADOWMAP_DYNAMIC_CASTER_MAX_FRAMES;
+	}
+	const double frames = std::ceil(
+		static_cast<double>( SHADOWMAP_DYNAMIC_CASTER_WINDOW_MSEC ) / frameMsec );
+	if ( frames >= static_cast<double>( SHADOWMAP_DYNAMIC_CASTER_MAX_FRAMES ) ) {
+		return SHADOWMAP_DYNAMIC_CASTER_MAX_FRAMES;
+	}
+	return Max( SHADOWMAP_DYNAMIC_CASTER_MIN_FRAMES, static_cast<int>( frames ) );
+}
+
+// A moving light is updated once a game tic, so on a fast display it holds
+// still on the frames between tics. Seventy milliseconds bridge two tics at
+// thirty or sixty a second. The casters' quarter second is not used: it would
+// keep a light that has stopped out of the cache that long, drawing its maps
+// afresh every frame meanwhile.
+static const int SHADOWMAP_MOVING_LIGHT_WINDOW_MSEC = 70;
+
+int R_ShadowMapMovingLightFramesFor( float frameMsec ) {
+	if ( !std::isfinite( static_cast<double>( frameMsec ) ) || frameMsec <= 0.0f ) {
+		return SHADOWMAP_DYNAMIC_CASTER_MIN_FRAMES;
+	}
+	const double frames = std::ceil(
+		static_cast<double>( SHADOWMAP_MOVING_LIGHT_WINDOW_MSEC ) / frameMsec ) + 1.0;
+	if ( frames >= static_cast<double>( SHADOWMAP_DYNAMIC_CASTER_MAX_FRAMES ) ) {
+		return SHADOWMAP_DYNAMIC_CASTER_MAX_FRAMES;
+	}
+	return Max( 2, static_cast<int>( frames ) );
+}
+
+// Written once per frame before the front end runs; front-end jobs only read.
+static int shadowMapMovingLightFrames = SHADOWMAP_DYNAMIC_CASTER_MIN_FRAMES;
+static int shadowMapDynamicCasterFrames = SHADOWMAP_DYNAMIC_CASTER_MIN_FRAMES;
+static int shadowMapLastFrameMsec = 0;
+static float shadowMapSmoothedFrameMsec = 0.0f;
+static int shadowMapLiveCasterSinceFrame = 0;
+static int shadowMapLiveCasterUpdatedFrame = 0;
+
+int R_ShadowMapAdvanceLiveCasterSince( const int liveSince, const int updatedFrame,
+		const int frame, const int windowFrames ) {
+	const int fromWindow = frame - windowFrames;
+	if ( frame < updatedFrame ) {
+		// the frame counter started again: nothing older is worth keeping
+		return fromWindow;
+	}
+	return Max( liveSince, fromWindow );
+}
+
+static void R_ShadowMapUpdateFrameWindows( const int nowMsec ) {
+	const int elapsed = nowMsec - shadowMapLastFrameMsec;
+	shadowMapLastFrameMsec = nowMsec;
+	if ( elapsed <= 0 || elapsed > 1000 ) {
+		// first frame, a clock that did not advance, or a load: keep the estimate
+		if ( shadowMapSmoothedFrameMsec <= 0.0f ) {
+			shadowMapDynamicCasterFrames = SHADOWMAP_DYNAMIC_CASTER_MAX_FRAMES;
+		}
+		return;
+	}
+	// A fast frame shortens the interval at once and a slow one lengthens it
+	// gradually, so a hitch cannot close the window on a moving caster.
+	const float sample = static_cast<float>( elapsed );
+	if ( shadowMapSmoothedFrameMsec <= 0.0f || sample < shadowMapSmoothedFrameMsec ) {
+		shadowMapSmoothedFrameMsec = sample;
+	} else {
+		shadowMapSmoothedFrameMsec += ( sample - shadowMapSmoothedFrameMsec ) * 0.05f;
+	}
+	shadowMapDynamicCasterFrames =
+		R_ShadowMapDynamicCasterFramesFor( shadowMapSmoothedFrameMsec );
+	shadowMapMovingLightFrames =
+		R_ShadowMapMovingLightFramesFor( shadowMapSmoothedFrameMsec );
+}
+
+void R_ShadowMapBeginFrame( int nowMsec ) {
+	R_ShadowMapUpdateFrameWindows( nowMsec );
+	// tr.frameCount is already this frame's: BeginFrame advances it first
+	shadowMapLiveCasterSinceFrame = R_ShadowMapAdvanceLiveCasterSince(
+		shadowMapLiveCasterSinceFrame, shadowMapLiveCasterUpdatedFrame,
+		tr.frameCount, shadowMapDynamicCasterFrames );
+	shadowMapLiveCasterUpdatedFrame = tr.frameCount;
+}
+
+int R_ShadowMapLiveCasterSinceFrame( void ) {
+	return shadowMapLiveCasterSinceFrame;
+}
+
+bool R_ShadowMapLightIsMoving( const idRenderLightLocal *lightDef, int frame ) {
+	return lightDef != NULL && lightDef->lastMovedFrameNum > 0
+		&& lightDef->lastMovedFrameNum >= frame - shadowMapMovingLightFrames;
+}
+
+bool R_ShadowMapMovingLightSkipsCache( const viewLight_t *vLight, int frame ) {
+	return !r_shadowMapCacheMovingLights.GetBool() && vLight != NULL
+		&& R_ShadowMapLightIsMoving( vLight->lightDef, frame );
+}
+
+int R_ShadowMapDynamicCasterFrames( void ) {
+	return shadowMapDynamicCasterFrames;
+}
+
+bool R_ShadowMapEmptyPassNeedsStencil( const bool globalVolumesLinked, const bool localVolumesLinked,
+		const int elidedStencilMask, const int receiverMask ) {
+	if ( globalVolumesLinked ) {
 		return true;
+	}
+	if ( localVolumesLinked && ( receiverMask & SHADOWMAP_RECEIVER_MASK_GLOBAL ) != 0 ) {
+		return true;
+	}
+	return ( elidedStencilMask & receiverMask ) != 0;
+}
+
+bool R_ShadowMapEmptyPassHasStencilVolumes( const viewLight_t *vLight, const int receiverMask ) {
+	return vLight != NULL && R_ShadowMapEmptyPassNeedsStencil(
+		vLight->globalShadows != NULL, vLight->localShadows != NULL,
+		vLight->shadowMapElidedStencilMask, receiverMask );
+}
+
+int R_ShadowMapPointCacheSlotLimitFor( int requestedSlots, int budgetMegs,
+		int faceSize, int bytesPerTexel, int maxSlots ) {
+	const int slotCeiling = idMath::ClampInt( 0,
+		SHADOWMAP_POINT_CACHE_MAX_SLOTS, maxSlots );
+	const int requested = idMath::ClampInt( 0, slotCeiling, requestedSlots );
+	if ( requested <= SHADOWMAP_POINT_CACHE_MIN_BUDGET_SLOTS ) {
+		return requested;
+	}
+	// 64-bit: six 2048 faces of eight bytes are 201 MiB each.
+	const double entryBytes = 6.0
+		* static_cast<double>( Max( 1, faceSize ) )
+		* static_cast<double>( Max( 1, faceSize ) )
+		* static_cast<double>( Max( 1, bytesPerTexel ) );
+	const double budgetBytes = static_cast<double>( Max( 0, budgetMegs ) )
+		* 1048576.0;
+	const double affordable = std::floor( budgetBytes / entryBytes );
+	const int budgetSlots = affordable >= static_cast<double>( slotCeiling )
+		? slotCeiling : static_cast<int>( affordable );
+	return Min( requested,
+		Max( SHADOWMAP_POINT_CACHE_MIN_BUDGET_SLOTS, budgetSlots ) );
+}
+
+int R_ShadowMapPointCacheSlotLimit( int faceSize, int bytesPerTexel,
+		int maxSlots ) {
+	return R_ShadowMapPointCacheSlotLimitFor(
+		r_shadowMapPointCacheSize.GetInteger(),
+		r_shadowMapPointCacheMegs.GetInteger(),
+		faceSize, bytesPerTexel, maxSlots );
+}
+
+int R_ShadowMapAtlasBlockEdge( int tileSize, int atlasDiv ) {
+	if ( tileSize <= 0 || atlasDiv <= 0 ) {
+		return 0;
+	}
+	const long long blockSize = static_cast<long long>( tileSize ) * atlasDiv;
+	long long edge = 1;
+	while ( edge < blockSize ) {
+		edge <<= 1;
+	}
+	return edge > 0x40000000 ? 0 : static_cast<int>( edge );
+}
+
+int R_ShadowMapAtlasRootEdge( int atlasSize ) {
+	if ( atlasSize <= 0 ) {
+		return 0;
+	}
+	int edge = 1;
+	while ( edge <= atlasSize / 2 ) {
+		edge <<= 1;
+	}
+	return edge;
+}
+
+int R_ShadowMapAtlasBlockCapacity( int atlasSize, int tileSize, int atlasDiv ) {
+	const int blockEdge = R_ShadowMapAtlasBlockEdge( tileSize, atlasDiv );
+	const int rootEdge = R_ShadowMapAtlasRootEdge( atlasSize );
+	if ( blockEdge <= 0 || rootEdge <= 0 ) {
+		return 0;
+	}
+	const int perRow = rootEdge / blockEdge;
+	return perRow * perRow;
+}
+
+int R_ShadowMapAtlasMinTileSize( int tileSize ) {
+	return Min( tileSize, Max( 128, tileSize / 4 ) );
+}
+
+static long long R_ShadowMapAtlasRequestArea( const shadowMapAtlasRequest_t &request ) {
+	const long long edge = R_ShadowMapAtlasBlockEdge( request.tileSize, request.atlasDiv );
+	return edge * edge * Max( 1, request.passes );
+}
+
+bool R_ShadowMapFitAtlasTiles( int atlasSize, shadowMapAtlasRequest_t *requests, int count ) {
+	const long long rootEdge = R_ShadowMapAtlasRootEdge( atlasSize );
+	const long long capacity = rootEdge * rootEdge;
+	if ( requests == NULL || count <= 0 ) {
+		return true;
+	}
+	count = Min( count, SHADOWMAP_ATLAS_MAX_REQUESTS );
+
+	long long demand = 0;
+	int order[SHADOWMAP_ATLAS_MAX_REQUESTS];
+	for ( int i = 0; i < count; ++i ) {
+		demand += R_ShadowMapAtlasRequestArea( requests[i] );
+		// ascending extent; among equals the later light gives way first
+		int slot = i;
+		while ( slot > 0 && requests[order[slot - 1]].extent >= requests[i].extent ) {
+			order[slot] = order[slot - 1];
+			--slot;
+		}
+		order[slot] = i;
+	}
+
+	// One halving for each light in turn before any light takes a second:
+	// the view loses resolution evenly from its smallest lights up.
+	while ( demand > capacity ) {
+		bool halved = false;
+		for ( int i = 0; i < count && demand > capacity; ++i ) {
+			shadowMapAtlasRequest_t &request = requests[order[i]];
+			const int smaller = request.tileSize / 2;
+			if ( smaller < request.minTileSize || smaller < 1 ) {
+				continue;
+			}
+			demand -= R_ShadowMapAtlasRequestArea( request );
+			request.tileSize = smaller;
+			demand += R_ShadowMapAtlasRequestArea( request );
+			halved = true;
+		}
+		if ( !halved ) {
+			break;
+		}
+	}
+	return demand <= capacity;
+}
+
+int R_ShadowMapProjectedTileSize( const viewLight_t *vLight, int atlasDiv, int maxBlockSize ) {
+	const int maxTileSize = maxBlockSize / Max( 1, atlasDiv );
+	if ( maxTileSize < 128 ) {
+		return 0;
+	}
+	const int wanted = ( vLight != NULL && vLight->shadowMapTileSize > 0 )
+		? vLight->shadowMapTileSize : r_shadowMapSize.GetInteger();
+	return idMath::ClampInt( 128, maxTileSize, wanted );
+}
+
+long long R_ShadowMapProjectedCacheTexelBudgetFor( int cacheSize, int tileSize ) {
+	const long long tiles = idMath::ClampInt( 0, 16, cacheSize );
+	const long long edge = idMath::ClampInt( 128, 4096, tileSize );
+	return tiles * edge * edge;
+}
+
+long long R_ShadowMapProjectedCacheTexelBudget( void ) {
+	return R_ShadowMapProjectedCacheTexelBudgetFor(
+		r_shadowMapProjectedCacheSize.GetInteger(), r_shadowMapSize.GetInteger() );
+}
+
+bool R_ShadowMapProjectedCacheAdmits( long long budgetTexels, long long residentTexels, int tileSize ) {
+	if ( tileSize <= 0 || budgetTexels <= 0 ) {
+		return false;
+	}
+	const long long tile = static_cast<long long>( tileSize ) * tileSize;
+	return Max( 0LL, residentTexels ) + tile <= budgetTexels;
+}
+
+// Pins the pure policies above: the point cache holds a dense view's lights
+// at the shipped cube size inside its memory bound, never fewer than the
+// twelve slots it always had; the live-caster window spans a game tic at
+// every display rate; a view's atlas lights are cut down, smallest first,
+// until they fit; and the projected cache is counted in texels, so smaller
+// tiles take a proportional share of it.
+bool R_ShadowMapCachePolicySelfTest( void ) {
+	// Quality and Ultra cut four tiles, Enhanced sixteen; Maximum's cascades
+	// take a quarter of its atlas each
+	if ( R_ShadowMapAtlasBlockCapacity( 4096, 2048, 1 ) != 4
+			|| R_ShadowMapAtlasBlockCapacity( 8192, 4096, 1 ) != 4
+			|| R_ShadowMapAtlasBlockCapacity( 4096, 1024, 1 ) != 16
+			|| R_ShadowMapAtlasBlockCapacity( 16384, 4096, 2 ) != 4
+			|| R_ShadowMapAtlasBlockCapacity( 4096, 2048, 2 ) != 1
+			|| R_ShadowMapAtlasBlockCapacity( 4096, 4096, 2 ) != 0
+			|| R_ShadowMapAtlasBlockCapacity( 0, 1024, 1 ) != 0
+			|| R_ShadowMapAtlasBlockCapacity( 4096, 0, 1 ) != 0
+			// blocks are power-of-two squares inside a power-of-two root
+			|| R_ShadowMapAtlasBlockEdge( 1500, 1 ) != 2048
+			|| R_ShadowMapAtlasBlockEdge( 1024, 2 ) != 2048
+			|| R_ShadowMapAtlasRootEdge( 6000 ) != 4096
+			|| R_ShadowMapAtlasRootEdge( 4096 ) != 4096
+			|| R_ShadowMapAtlasMinTileSize( 2048 ) != 512
+			|| R_ShadowMapAtlasMinTileSize( 256 ) != 128
+			|| R_ShadowMapAtlasMinTileSize( 128 ) != 128 ) {
+		return false;
+	}
+	{
+		// Quality: two lights with both ownerships fill the four tiles and
+		// keep their size
+		shadowMapAtlasRequest_t fits[2] = {
+			{ 2048, 512, 1, 2, 300.0f }, { 2048, 512, 1, 2, 900.0f } };
+		if ( !R_ShadowMapFitAtlasTiles( 4096, fits, 2 )
+				|| fits[0].tileSize != 2048 || fits[1].tileSize != 2048 ) {
+			return false;
+		}
+		// a third light: the two smallest halve, the largest keeps its tile
+		shadowMapAtlasRequest_t three[3] = {
+			{ 2048, 512, 1, 2, 900.0f }, { 2048, 512, 1, 2, 300.0f }, { 2048, 512, 1, 2, 600.0f } };
+		if ( !R_ShadowMapFitAtlasTiles( 4096, three, 3 )
+				|| three[0].tileSize != 2048 || three[1].tileSize != 1024 || three[2].tileSize != 1024 ) {
+			return false;
+		}
+		// thirty-two lights at the floor are the most the atlas takes
+		shadowMapAtlasRequest_t many[33];
+		for ( int i = 0; i < 33; ++i ) {
+			const shadowMapAtlasRequest_t request = { 2048, 512, 1, 2, static_cast<float>( i ) };
+			many[i] = request;
+		}
+		if ( !R_ShadowMapFitAtlasTiles( 4096, many, 32 ) || many[0].tileSize != 512 || many[31].tileSize != 512 ) {
+			return false;
+		}
+		for ( int i = 0; i < 33; ++i ) {
+			many[i].tileSize = 2048;
+		}
+		if ( R_ShadowMapFitAtlasTiles( 4096, many, 33 ) || many[32].tileSize != 512 ) {
+			return false;
+		}
+		// a cascaded light's block is the whole Quality atlas until it halves
+		shadowMapAtlasRequest_t cascaded[2] = {
+			{ 2048, 512, 2, 1, 1.0e9f }, { 2048, 512, 1, 1, 400.0f } };
+		if ( !R_ShadowMapFitAtlasTiles( 4096, cascaded, 2 )
+				|| cascaded[0].tileSize != 1024 || cascaded[1].tileSize != 1024 ) {
+			return false;
+		}
+	}
+	{
+		// The projected cache is counted in full-size maps. Quality's eight
+		// hold eight maps of 2048 tiles and no ninth, as eight slots did, or
+		// thirty-two of the 1024 tiles a crowded view is cut to.
+		const long long quality = R_ShadowMapProjectedCacheTexelBudgetFor( 8, 2048 );
+		const long long full = 2048LL * 2048LL;
+		if ( quality != 8 * full
+				|| !R_ShadowMapProjectedCacheAdmits( quality, 7 * full, 2048 )
+				|| R_ShadowMapProjectedCacheAdmits( quality, 8 * full, 2048 )
+				|| !R_ShadowMapProjectedCacheAdmits( quality, 31 * ( full / 4 ), 1024 )
+				|| R_ShadowMapProjectedCacheAdmits( quality, 32 * ( full / 4 ), 1024 )
+				// a mixed view: two full maps and twenty-four half-size ones
+				|| !R_ShadowMapProjectedCacheAdmits( quality, 2 * full + 23 * ( full / 4 ), 1024 )
+				// a tile larger than the whole budget is never resident
+				|| R_ShadowMapProjectedCacheAdmits( R_ShadowMapProjectedCacheTexelBudgetFor( 1, 1024 ), 0, 2048 )
+				// 0 turns the cache off; the count and the tile are clamped
+				|| R_ShadowMapProjectedCacheTexelBudgetFor( 0, 2048 ) != 0
+				|| R_ShadowMapProjectedCacheAdmits( 0, 0, 128 )
+				|| R_ShadowMapProjectedCacheAdmits( quality, 0, 0 )
+				|| R_ShadowMapProjectedCacheTexelBudgetFor( 99, 2048 ) != 16 * full
+				|| R_ShadowMapProjectedCacheTexelBudgetFor( 8, 16 ) != 8LL * 128 * 128 ) {
+			return false;
+		}
+	}
+	const int maxSlots = SHADOWMAP_POINT_CACHE_MAX_SLOTS;
+	// 512 cubes of colour and depth are 12 MiB each: 42 fit in 512 MiB
+	if ( R_ShadowMapPointCacheSlotLimitFor( 64, 512, 512, 8, maxSlots ) != 42 ) {
+		return false;
+	}
+	// depth-only 512 cubes are 6 MiB: the requested 64 fit
+	if ( R_ShadowMapPointCacheSlotLimitFor( 64, 512, 512, 4, maxSlots ) != 64 ) {
+		return false;
+	}
+	// 2048 cubes are 192 MiB each, yet the first twelve slots stay available
+	if ( R_ShadowMapPointCacheSlotLimitFor( 64, 512, 2048, 8, maxSlots ) != 12 ) {
+		return false;
+	}
+	// an explicit small count is honoured, the record bound is never exceeded
+	if ( R_ShadowMapPointCacheSlotLimitFor( 4, 512, 512, 8, maxSlots ) != 4
+			|| R_ShadowMapPointCacheSlotLimitFor( 0, 512, 512, 8, maxSlots ) != 0
+			|| R_ShadowMapPointCacheSlotLimitFor( 4096, 1 << 20, 128, 4, maxSlots ) != maxSlots
+			|| R_ShadowMapPointCacheSlotLimitFor( 64, 512, 512, 8, 16 ) != 16 ) {
+		return false;
+	}
+	// 60 Hz tics are 16.7 ms apart: the window must exceed one tic's worth of
+	// frames at 60, 144, 240 and 1000 frames a second, with room to spare
+	const float frameMsec[] = { 16.667f, 6.944f, 4.167f, 1.0f };
+	for ( int i = 0; i < 4; ++i ) {
+		const int frames = R_ShadowMapDynamicCasterFramesFor( frameMsec[i] );
+		const float ticFrames = 16.667f / frameMsec[i];
+		if ( frames < SHADOWMAP_DYNAMIC_CASTER_MIN_FRAMES
+				|| frames > SHADOWMAP_DYNAMIC_CASTER_MAX_FRAMES
+				|| static_cast<float>( frames ) < ticFrames * 4.0f ) {
+			return false;
+		}
+	}
+	// a stalled or broken clock holds casters live rather than freezing them
+	if ( R_ShadowMapDynamicCasterFramesFor( 0.0f ) != SHADOWMAP_DYNAMIC_CASTER_MAX_FRAMES
+			|| R_ShadowMapDynamicCasterFramesFor( 1000.0f ) != SHADOWMAP_DYNAMIC_CASTER_MIN_FRAMES ) {
+		return false;
+	}
+	// The frame a change must postdate to count as live never moves back. A
+	// frame rate that doubles doubles the window: the caster that aged out at
+	// frame 1000 under a 15-frame window must not be live again at frame 1001
+	// under a 30-frame one.
+	int liveSince = 0;
+	int updated = 0;
+	for ( int frame = 900; frame <= 1000; ++frame ) {
+		liveSince = R_ShadowMapAdvanceLiveCasterSince( liveSince, updated, frame, 15 );
+		updated = frame;
+	}
+	if ( liveSince != 985 ) {
+		return false;
+	}
+	for ( int frame = 1001; frame <= 1040; ++frame ) {
+		const int next = R_ShadowMapAdvanceLiveCasterSince( liveSince, updated, frame, 30 );
+		if ( next < liveSince || next != Max( 985, frame - 30 ) ) {
+			return false;
+		}
+		liveSince = next;
+		updated = frame;
+	}
+	// a window that shrinks is followed at once, and a frame counter that
+	// starts again does not leave every caster of the new count looking old
+	if ( R_ShadowMapAdvanceLiveCasterSince( liveSince, updated, 1041, 4 ) != 1037
+			|| R_ShadowMapAdvanceLiveCasterSince( liveSince, updated, 10, 30 ) != -20 ) {
+		return false;
+	}
+	// A pass with nothing to cast is a failed map only where stencil has a
+	// volume for it. A light with no volume at all has not failed.
+	const int local = SHADOWMAP_RECEIVER_MASK_LOCAL;
+	const int global = SHADOWMAP_RECEIVER_MASK_GLOBAL;
+	if ( R_ShadowMapEmptyPassNeedsStencil( false, false, 0, local )
+			|| R_ShadowMapEmptyPassNeedsStencil( false, false, 0, global ) ) {
+		return false;
+	}
+	// a noSelfShadow caster's volume shadows global receivers and no local one
+	if ( R_ShadowMapEmptyPassNeedsStencil( false, false, global, local )
+			|| !R_ShadowMapEmptyPassNeedsStencil( false, false, global, global )
+			|| R_ShadowMapEmptyPassNeedsStencil( false, true, 0, local )
+			|| !R_ShadowMapEmptyPassNeedsStencil( false, true, 0, global ) ) {
+		return false;
+	}
+	// any other caster's volume shadows both
+	return R_ShadowMapEmptyPassNeedsStencil( false, false, local | global, local )
+		&& R_ShadowMapEmptyPassNeedsStencil( false, false, local | global, global )
+		&& R_ShadowMapEmptyPassNeedsStencil( true, false, 0, local )
+		&& R_ShadowMapEmptyPassNeedsStencil( true, false, 0, global );
+}
+
+bool R_ShadowMapCasterTransformNeedsTwoSided( const float modelMatrix[ 16 ] ) {
+	return R_ShadowMapCasterTransformWinding( modelMatrix ) <= 0;
+}
+
+int R_ShadowMapCasterTransformWinding( const float modelMatrix[ 16 ] ) {
+	if ( modelMatrix == NULL ) {
+		return 0;
 	}
 
 	// Evaluate the affine linear transform in double precision so large, but
@@ -274,7 +715,74 @@ bool R_ShadowMapCasterTransformNeedsTwoSided( const float modelMatrix[ 16 ] ) {
 	// A singular transform has no reliable winding either. It can arise from
 	// malformed or transient entity state; AUTO must fail conservatively rather
 	// than culling one side of the collapsed caster.
-	return !std::isfinite( determinant ) || determinant <= 0.0;
+	if ( !std::isfinite( determinant ) || determinant == 0.0 ) {
+		return 0;
+	}
+	return determinant > 0.0 ? 1 : -1;
+}
+
+int R_ShadowMapCasterCullingMode( void ) {
+	return idMath::ClampInt( 0, SHADOWMAP_CASTER_CULLING_MAX,
+		r_shadowMapCasterCulling.GetInteger() );
+}
+
+static shadowMapCasterFaces_t R_ShadowMapSwapCasterFaces(
+		const shadowMapCasterFaces_t faces ) {
+	switch ( faces ) {
+	case SHADOWMAP_CASTER_FACES_NEAR:
+		return SHADOWMAP_CASTER_FACES_FAR;
+	case SHADOWMAP_CASTER_FACES_FAR:
+		return SHADOWMAP_CASTER_FACES_NEAR;
+	default:
+		return faces;
+	}
+}
+
+shadowMapCasterFaces_t R_ShadowMapCasterFaces( const int cullingMode,
+		const viewLight_t *vLight, const bool windingMirrored,
+		const bool haveGeometry, const bool perfectHull,
+		const float modelMatrix[ 16 ], const float boundsMin[ 3 ],
+		const float boundsMax[ 3 ], const int materialCull ) {
+	const int mode = idMath::ClampInt( 0, SHADOWMAP_CASTER_CULLING_MAX,
+		cullingMode );
+	if ( mode == 0 ) {
+		return SHADOWMAP_CASTER_FACES_BOTH;
+	}
+	// A near-shell store honours the side the material was authored to show.
+	shadowMapCasterFaces_t nearShell =
+		materialCull == CT_TWO_SIDED ? SHADOWMAP_CASTER_FACES_BOTH
+		: ( materialCull == CT_BACK_SIDED ? SHADOWMAP_CASTER_FACES_FAR
+			: SHADOWMAP_CASTER_FACES_NEAR );
+	if ( windingMirrored ) {
+		nearShell = R_ShadowMapSwapCasterFaces( nearShell );
+	}
+	if ( mode == 1 ) {
+		return nearShell;
+	}
+	if ( !haveGeometry ) {
+		return SHADOWMAP_CASTER_FACES_BOTH;
+	}
+	const int winding = R_ShadowMapCasterTransformWinding( modelMatrix );
+	if ( winding == 0 ) {
+		return SHADOWMAP_CASTER_FACES_BOTH;
+	}
+	if ( ( mode == 2 || mode == 4 ) && perfectHull ) {
+		if ( winding < 0 || R_ShadowMapLightOriginInsideCasterBounds( vLight,
+				modelMatrix, boundsMin, boundsMax ) ) {
+			return SHADOWMAP_CASTER_FACES_BOTH;
+		}
+		return nearShell;
+	}
+	if ( mode == 4 ) {
+		// the earlier automatic mode drew open geometry two-sided
+		return SHADOWMAP_CASTER_FACES_BOTH;
+	}
+	// The stencil rule looks at the triangle, never at the material: the side
+	// of its plane the light is on. A mirrored transform or projection leaves
+	// that answer alone and swaps the face the rasterizer reports.
+	const bool swapped = ( winding < 0 ) != windingMirrored;
+	return swapped ? SHADOWMAP_CASTER_FACES_NEAR
+		: SHADOWMAP_CASTER_FACES_FAR;
 }
 
 bool R_ShadowMapLightOriginInsideCasterBounds( const viewLight_t *vLight,
@@ -355,6 +863,85 @@ bool R_ShadowMapCasterOutsidePointFace( const viewLight_t *vLight,
 		}
 	}
 	return false;
+}
+
+// The registers a cutout stage's coverage is read from: whether the stage is
+// on, its alpha scale, its alpha reference and its texture matrix. A register
+// is constant when the parser folded it to a literal; one that follows time,
+// an entity parm, a global or a table is written by an expression every view
+// (idMaterial::GetConstantRegisterValue). The material's whole-register
+// constness (idMaterial::ConstantRegisters()) is not asked: an animated glow
+// stage beside a fixed alpha stage does not move the holes, and that answer
+// also follows r_useConstantMaterials.
+static bool R_ShadowMapCutoutStageRegistersConstant( const idMaterial *shader, const shaderStage_t *pStage ) {
+	float value = 0.0f;
+	if ( !shader->GetConstantRegisterValue( pStage->conditionRegister, value )
+			|| !shader->GetConstantRegisterValue( pStage->color.registers[3], value )
+			|| !shader->GetConstantRegisterValue( pStage->alphaTestRegister, value ) ) {
+		return false;
+	}
+	if ( pStage->texture.hasMatrix ) {
+		for ( int row = 0; row < 2; ++row ) {
+			for ( int column = 0; column < 3; ++column ) {
+				if ( !shader->GetConstantRegisterValue( pStage->texture.matrix[row][column], value ) ) {
+					return false;
+				}
+			}
+		}
+	}
+	return true;
+}
+
+bool R_ShadowMapCutoutCoverageAnimates( const idMaterial *shader ) {
+	if ( shader == NULL || shader->Coverage() != MC_PERFORATED ) {
+		return false;
+	}
+	if ( !r_shadowMapStaticCutouts.GetBool() || shader->Deform() != DFRM_NONE ) {
+		return true;
+	}
+	const int stageCount = shader->GetNumStages();
+	for ( int stage = 0; stage < stageCount; ++stage ) {
+		const shaderStage_t *pStage = shader->GetStage( stage );
+		if ( pStage == NULL || !pStage->hasAlphaTest ) {
+			continue;
+		}
+		if ( !R_ShadowMapCutoutStageRegistersConstant( shader, pStage ) ) {
+			return true;
+		}
+		// a video or a render target changes under a constant material
+		if ( pStage->texture.cinematic != NULL || pStage->texture.dynamic != DI_STATIC ) {
+			return true;
+		}
+		// An image that is not there yet is not the coverage the cutout will
+		// have: stay live until it is, and the signature then renders the map.
+		const idImage *image = pStage->texture.image;
+		if ( image == NULL || !image->IsLoaded() || image->IsDefaulted() ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+int R_ShadowMapCutoutCoverageSignature( const idMaterial *shader, int hash ) {
+	if ( shader == NULL || shader->Coverage() != MC_PERFORATED ) {
+		return hash;
+	}
+	unsigned int h = static_cast<unsigned int>( hash );
+	const int stageCount = shader->GetNumStages();
+	for ( int stage = 0; stage < stageCount; ++stage ) {
+		const shaderStage_t *pStage = shader->GetStage( stage );
+		if ( pStage == NULL || !pStage->hasAlphaTest ) {
+			continue;
+		}
+		const idImage *image = pStage->texture.image;
+		const uint64_t generation = image != NULL ? image->GetStorageGeneration() : 0;
+		h = ( h ^ static_cast<unsigned int>( generation ) ) * 16777619u;
+		h = ( h ^ static_cast<unsigned int>( generation >> 32 ) ) * 16777619u;
+		h = ( h ^ static_cast<unsigned int>( pStage->alphaTestMode ) ) * 16777619u;
+	}
+	h = ( h ^ ( r_shadowMapHashedAlpha.GetBool() ? 1u : 0u ) ) * 16777619u;
+	h = ( h ^ ( r_shadowMapStableAlphaHash.GetBool() ? 1u : 0u ) ) * 16777619u;
+	return static_cast<int>( h );
 }
 
 const char *R_ShadowMapLightClassName( shadowMapLightClass_t lightClass ) {

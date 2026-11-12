@@ -11,17 +11,18 @@ difficulty's description at 239,181 u in Lowpixel (textscale 0.25) at 0.60;
 the primary plate (b6_light) at 237,222 u, 356x43 u; the prompt bar in the
 bottom band, its BACK where the stock BACK plate stood at 532,441 u.
 
-The pause's RESTART LEVEL hands off to restartlevel.q4ui as LOAD GAME does to
+The pause's RESTART LEVEL hands off to restartlevel.rui as LOAD GAME does to
 its page (idSessionLocal::BeginRetainedPage): the page is the stock page's
 content over the departed pause, whose carried label is the page's title. The
 choice stays on the page until RESTART LEVEL restarts the level at it
 (RestartLevelAtSkill), so Back changes nothing. The in-game page offers no
 turbo mode, as the stock one hid it. The Strogg pause hands off to the same
-page in the Strogg family (restartlevel_strogg.q4ui, see retained_saves.py).
+page in the Strogg family (restartlevel_strogg.rui, see retained_saves.py).
 """
 from __future__ import annotations
 
 from build_retained_screens import fit_narrow
+from build_retained_screens import pop
 from build_retained_screens import (CANVAS_W, FULL, LANGUAGES, OLIVE, U, Document, absolute, colour, fixed_text, font,
                                     group, keyword, label, length, linear, number, page_prompts, path, rgb,
                                     solid, stroke, text_width, track, transform, typeface, vector, wrap_menu)
@@ -96,9 +97,9 @@ def primary_plate(doc: Document, ident: str, key: str, left: float, top: float, 
                 (f"{ident}-label", "color", colour(tint)), (f"{ident}-label", "transform", moved)]
     states = {
         "default": state(0.4, 0.4, 0, 0, list(family.read), transform()),
-        "hover": state(1, 0, 1, 0, rgb(hot), transform(sx=1.03, sy=1.03)),
-        "focus": state(1, 0, 1, 1, rgb(hot), transform(sx=1.03, sy=1.03)),
-        "pressed": state(1, 0, 1, 1, rgb(hot), transform(tx=1, ty=1, sx=1.03, sy=1.03)),
+        "hover": state(1, 0, 1, 0, rgb(hot), pop(U * label_w)),
+        "focus": state(1, 0, 1, 1, rgb(hot), pop(U * label_w)),
+        "pressed": state(1, 0, 1, 1, rgb(hot), pop(U * label_w, 1, 1)),
         "disabled": state(0.4, 0.4, 0, 0, family.tint(0.3), transform()),
     }
     for name, tracks in (extra_states or {}).items():

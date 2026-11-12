@@ -34,6 +34,7 @@ class idWinVec4;
 class idChatWindow;
 class idRetainedHud;
 class idRemasteredHud;
+class idDeviceContext;
 
 struct LegacyLevelLoadCache;
 
@@ -115,6 +116,14 @@ public:
 	// Engine-scripted validation: runs a window's onAction script, or its
 	// onBackAction when back is set, as a click on the window would.
 	bool						RunWindowAction( const char *windowName, bool back, idStr &command );
+	// Steps the focus as a menu's Down (1) or Up (-1) arrow does, or leaves
+	// it (0), and reports the focused window: its name, its screen rectangle
+	// and whether it and every parent are shown.
+	bool						StepFocus( int direction, idStr &report );
+	// The focused window when it stands inside the window `ancestorName`:
+	// its name, its rectangle in that window's coordinates, and the height
+	// of the view that window scrolls in (its parent).
+	bool						FocusWithin( const char *ancestorName, idStr &focusName, idRectangle &rect, float &viewHeight );
 	bool						HasWindow( const char *windowName ) const;
 	bool						HasNamedEvent( const char *eventName ) const;
 
@@ -147,10 +156,62 @@ private:
 public:
 	// The Remastered layout draws this stock HUD in place of its own windows.
 	bool                        RemasteredActive() const;
+	// The stock interface's Remastered layout of this HUD (idLegacyHudLayout):
+	// its edge anchors this frame (left, top, right, bottom), when it moves them.
+	bool                        LegacyEdges( float edges[4] ) const;
+	// The retained interface's Classic draws this HUD on the centered 4:3
+	// canvas, without edge expansion (as of its last Redraw).
+	bool                        ClassicCanvas() const { return classicCanvas; }
+	// This HUD's stock windows follow the Remastered layout this frame.
+	bool                        LegacyRemastered() const { return legacyEdges; }
+	// The stock interface's HUD scale for this HUD this frame (1: none).
+	float                       LegacyScale() const { return legacyScale; }
+	// The same for the centre column on the bottom edge, which narrow views limit.
+	float                       LegacyCenterScale() const { return legacyCenterScale; }
 private:
+	friend class idLegacyHudGroup;
+	// What this GUI is to the HUD presentations, resolved once per source: its
+	// Remastered document and Classic air overlay, whether the coverage bridge
+	// draws it, whether a mod owns the file, and whether the stock interface's
+	// HUD opacity and scale apply to it.
+	struct HudRoute {
+		bool resolved = false, coverage = false, modOwned = false, fades = false, scales = false;
+		const char *document = nullptr, *air = nullptr;
+	};
+	HudRoute                    hudRoute;
+	const HudRoute &            ResolveHudRoute();
+	// The stock interface's Remastered layout (idLegacyHudLayout); transient
+	// presentation, never saved.
+	bool                        legacyEdges = false;
+	bool                        classicCanvas = false;
+	float                       legacyEdge[4] = {};
+	float                       legacyScale = 1.0f, legacyCenterScale = 1.0f, legacyOpacity = 1.0f;
+	// The scale group being drawn, per axis: 0 the centre, 1 the leading or
+	// top edge, 2 the trailing or bottom edge (idLegacyHudGroup).
+	int                         legacyGroupX = 0, legacyGroupY = 0;
+	void                        ApplyLegacyGroup( idDeviceContext &dc ) const;
+	// The settings and edges last written to the dictionary, which a restore
+	// or a reload replaces.
+	float                       legacyPublished[11] = {};
+	bool                        legacyPublishedValid = false;
+	// The frame's engine-owned layout state last written (Redraw).
+	float                       publishedFrame[24] = {};
+	bool                        publishedFrameValid = false;
+	// Forget everything derived from the dictionary or the source.
+	void                        ResetHudPresentation( bool sourceChanged );
+	struct LegacyPickupLine { idStr text; int count = 0, start = 0; bool used = false; };
+	LegacyPickupLine            legacyPickups[2];
+	int                         legacyPickupNewest = 0;
+	void                        PublishLegacyHud( float xExpand, float yExpand );
+	void                        PublishLegacyPickup();
+	float                       MeasureWindowText( const char *windowName, const char *text ) const;
 	idWindow *					bindHandler;
 
 	idStr						source;
+	// openQ4: the file the windows were parsed from (idLegacyHudLayout::DefinitionFor),
+	// and whether to parse the named file itself: a save's earlier definition.
+	idStr						definition;
+	bool						literalDefinition = false;
 	idStr						activateStr;
 	idStr						pendingCmd;
 	idStr						returnCmd;
@@ -163,6 +224,25 @@ private:
 	int							time;
 
 	idWinVec4 *					lightColorVar;
+};
+
+// The stock interface's HUD scale (idLegacyHudLayout): a window that anchors to
+// a screen edge, by its alignment or by naming the anchor, starts a group that
+// scales about that edge; an axis it leaves alone keeps its ancestors' anchor,
+// the centre by default. anchorX/anchorY: 0 the centre, 1 the leading or top
+// edge, 2 the trailing or bottom edge, -1 inherit.
+class idLegacyHudGroup {
+public:
+	idLegacyHudGroup( idUserInterfaceLocal *gui, idDeviceContext *dc, int anchorX, int anchorY );
+	~idLegacyHudGroup();
+	idLegacyHudGroup( const idLegacyHudGroup & ) = delete;
+	idLegacyHudGroup &operator=( const idLegacyHudGroup & ) = delete;
+private:
+	idUserInterfaceLocal *gui;
+	idDeviceContext *dc;
+	bool active;
+	int oldX = 0, oldY = 0;
+	float oldAnchorX = 0.0f, oldAnchorY = 0.0f, oldScale = 1.0f;
 };
 
 class idUserInterfaceManagerLocal : public idUserInterfaceManager {

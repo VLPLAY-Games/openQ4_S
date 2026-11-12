@@ -1316,6 +1316,7 @@ public:
 								const char *settingsKey );
 	virtual bool			GeneratedCacheReadsEnabled( generatedCacheKind_t kind ) const;
 	virtual bool			GeneratedCacheWritesEnabled( generatedCacheKind_t kind ) const;
+	virtual bool			TakePureImageCacheEviction( void );
 	virtual idFile *		GetNewFileMemory( void );
 	virtual idFile *		GetNewFilePermanent( void );
 	virtual idFile *		OpenFileReadFlags( const char *relativePath, int searchFlags, pack_t **foundInPak = NULL, bool allowCopyFiles = true, const char* gamedir = NULL );
@@ -1393,6 +1394,8 @@ private:
 
 	idList<pack_t *>		serverPaks;
 	bool					loadedFileFromDir;		// set to true once a file was loaded from a directory - can't switch to pure anymore
+	bool					loadedImageCacheFromDir;	// a generated image cache entry or expanded loading background was read: a pure lock must evict those images
+	bool					pureImageCacheEvictionPending;	// the pure lock was taken over such reads; TakePureImageCacheEviction hands it on
 	idList<int>				restartChecksums;		// used during a restart to set things in right order
 	idList<int>				addonChecksums;			// list of checksums that should go to the search list directly ( for restarts )
 	int						restartGamePakChecksum;
@@ -1433,6 +1436,7 @@ private:
 	void					CopyFile( idFile *src, const char *toOSPath );
 	void					AddAssetLogEntry( const char *relativePath );
 	void					BuildLevelLoadContentKey( idStr &key ) const;
+	bool					GeneratedCacheReadsRefused( void ) const;
 	void					RecordOpenedLevelLoadSource( const char *relativePath, idFile *file );
 	idFile *				UsePreloadedLevelLoadSource( const char *relativePath, idFile *file );
 	idFile *				OpenFileReadSearch( const char *relativePath, int searchFlags, pack_t **foundInPak, bool allowCopyFiles, const char* gamedir, packMemberProbe_t *probe );
@@ -1534,6 +1538,8 @@ idFileSystemLocal::idFileSystemLocal( void ) {
 	dir_cache_count = 0;
 	d3xp = 0;
 	loadedFileFromDir = false;
+	loadedImageCacheFromDir = false;
+	pureImageCacheEvictionPending = false;
 	restartGamePakChecksum = 0;
 	gameDLLChecksum = 0;
 	gamePakChecksum = 0;
@@ -1810,11 +1816,46 @@ void idFileSystemLocal::DiscardGeneratedCache( const generatedCacheKind_t kind,
 		settingsKey, contentKey.c_str() );
 }
 
+/*
+================
+idFileSystemLocal::GeneratedCacheReadsRefused
+
+The level-load caches (render models, worlds, collision, and the game's
+animation cache) are openQ4's own derived data. Their owners read them from
+fs_savepath with OpenExplicitFileRead, outside the search paths, so the pure
+directory gate in OpenFileReadSearch never sees them. Like a generated image
+cache entry, an entry names its source by public pak metadata and binds its
+payload to nothing, so a forged entry would pass every check. None is read
+while a pure lock or fs_restrict holds. A resident decoded from one before
+the lock is re-derived from its source at the next level load, once its owner
+sees reads refused: idRenderModelManagerLocal::BeginLevelLoad,
+idRenderWorldLocal::InitFromMap, idCollisionModelManagerLocal::LoadMap and the
+game's idGameLocal::LoadMap. The lock is only taken when every pak the session
+has read from is in the server's list, so each source can be read again.
+
+The learned manifests stay readable: they only schedule reads, and each entry
+is opened again through the pure search paths and must match its recorded
+identity before a byte of it is used.
+================
+*/
+bool idFileSystemLocal::GeneratedCacheReadsRefused( void ) const {
+	return fs_restrict.GetBool() || serverPaks.Num() > 0;
+}
+
 bool idFileSystemLocal::GeneratedCacheReadsEnabled( const generatedCacheKind_t kind ) const {
+	if ( GeneratedCacheReadsRefused() ) {
+		return false;
+	}
 	return levelLoadCache != NULL && levelLoadCache->GeneratedCacheReadsEnabled( kind );
 }
 
 bool idFileSystemLocal::GeneratedCacheWritesEnabled( const generatedCacheKind_t kind ) const {
+	// An entry written under a pure lock carries the lock in its content key
+	// (BuildLevelLoadContentKey), and nothing is read while a lock holds, so
+	// no session could ever read it back: skip the serialization.
+	if ( serverPaks.Num() > 0 ) {
+		return false;
+	}
 	return levelLoadCache != NULL && levelLoadCache->GeneratedCacheWritesEnabled( kind );
 }
 
@@ -3475,7 +3516,10 @@ int idFileSystemLocal::GetFileList( const char *relativePath, const idStrList &e
 				}
  
 				// ensure we have a path, and not just a filename containing the path
-				if ( name[ pathLength ] == '\0' || name[pathLength - 1] != '/' ) {
+				// openQ4: only when there is a path. For the root, name[-1] was
+				// read from before the string and every file in a pak was
+				// skipped, so completing "exec" never offered a pak's configs.
+				if ( pathLength && ( name[ pathLength ] == '\0' || name[pathLength - 1] != '/' ) ) {
 					continue;
 				}
  
@@ -6612,6 +6656,7 @@ idFileSystemLocal::ClearPureChecksums
 void idFileSystemLocal::ClearPureChecksums( void ) {
 	common->DPrintf( "Cleared pure server lock\n" );
 	serverPaks.Clear();
+	pureImageCacheEvictionPending = false;
 	memset( gamePakForOS, 0, sizeof( gamePakForOS ) );
 }
 
@@ -6739,7 +6784,33 @@ fsPureReply_t idFileSystemLocal::SetPureServerChecksums( const int pureChecksums
 			common->Printf( "SetPureServerChecksums: there are files loaded from dir\n" );
 		}
 	}
+	// Generated image cache entries and expanded loading backgrounds alone do
+	// not need a restart: the lock now refuses both, and the caller evicts the
+	// images they supplied (see FS_IsGeneratedImageCachePath,
+	// FS_IsGeneratedLoadscreenPath and TakePureImageCacheEviction).
+	if ( success && loadedImageCacheFromDir && serverPaks.Num() ) {
+		pureImageCacheEvictionPending = true;
+		if ( fs_debug.GetBool() ) {
+			common->Printf( "SetPureServerChecksums: generated images were loaded from a directory; they must be evicted\n" );
+		}
+	}
 	return ( success ? PURE_OK : PURE_RESTART );
+}
+
+/*
+=====================
+idFileSystemLocal::TakePureImageCacheEviction
+=====================
+*/
+bool idFileSystemLocal::TakePureImageCacheEviction( void ) {
+	if ( !pureImageCacheEvictionPending ) {
+		return false;
+	}
+	pureImageCacheEvictionPending = false;
+	// No cache entry or loading background can be read again until the lock
+	// is cleared.
+	loadedImageCacheFromDir = false;
+	return true;
 }
 
 /*
@@ -6976,6 +7047,8 @@ void idFileSystemLocal::Shutdown( bool reloading ) {
 		addonChecksums.Clear();
 	}
 	loadedFileFromDir = false;
+	loadedImageCacheFromDir = false;
+	pureImageCacheEvictionPending = false;
 	gameDLLChecksum = 0;
 	gamePakChecksum = 0;
 	gameModuleOrigin = GAME_MODULE_ORIGIN_NONE;
@@ -7080,6 +7153,94 @@ bool idFileSystemLocal::FileAllowedFromDir( const char *path ) {
 	}
 
 	return false;
+}
+
+/*
+===========
+FS_IsGeneratedImageCachePath
+
+A binary image cache entry that idBinaryImage writes under generated/images/.
+It is derived data, and its payload is bound to nothing a client could check
+short of deriving it again: the header's source stamp is the pak member's
+CRC-32 and length, which anyone can copy. So such an entry is never read while
+pure (the directory gate in OpenFileReadSearch still refuses it), and one read
+before the pure lock does not force a restart: SetPureServerChecksums leaves a
+pending eviction instead, and the client reloads every image that came from the
+cache once the lock is in place (idRenderSystem::ReloadGeneratedCacheImages),
+or restarts if that fails. Any other directory read still requires a restart.
+===========
+*/
+static bool FS_IsGeneratedImageCachePath( const char *path ) {
+	static const char prefix[] = "generated/images/";
+	static const char extension[] = ".bimage";
+	const size_t prefixLength = sizeof( prefix ) - 1;
+	const size_t extensionLength = sizeof( extension ) - 1;
+	if ( path == NULL ) {
+		return false;
+	}
+	const size_t length = strlen( path );
+	return length > prefixLength + extensionLength &&
+		idStr::Icmpn( path, prefix, static_cast<int>( prefixLength ) ) == 0 &&
+		idStr::Icmp( path + length - extensionLength, extension ) == 0;
+}
+
+/*
+===========
+FS_IsGeneratedLoadscreenPath
+
+An expanded loading background left by an older build. Builds until
+9 November 2026 composed the wide loading screen of a window that is not 4:3,
+published it under fs_savepath as
+guis/assets/generated/loadscreens/<map>_<w>x<h>.tga and loaded it back through
+the search paths. The session now composes it in memory and never names these
+files (Session_PrepareExpandedLoadingBackground), but they stay in players' save
+folders, and a stray reference can still open one: an older build's learned
+level-load manifest, for example. Like a generated image cache entry such a file
+is openQ4's own derived data, so it is never read while pure: the directory gate
+refuses it. A read before the pure lock leaves the same pending eviction as a
+cache entry instead of a restart, and the client then purges every resident
+image from that folder (idImageManager::ReloadGeneratedCacheImages). Only the
+names those builds wrote qualify: a single segment ending in
+_<width>x<height>.tga.
+===========
+*/
+static bool FS_IsGeneratedLoadscreenPath( const char *path ) {
+	static const char prefix[] = "guis/assets/generated/loadscreens/";
+	static const char extension[] = ".tga";
+	const size_t prefixLength = sizeof( prefix ) - 1;
+	const size_t extensionLength = sizeof( extension ) - 1;
+	if ( path == NULL ) {
+		return false;
+	}
+	const size_t length = strlen( path );
+	if ( length <= prefixLength + extensionLength ||
+		idStr::Icmpn( path, prefix, static_cast<int>( prefixLength ) ) != 0 ||
+		idStr::Icmp( path + length - extensionLength, extension ) != 0 ) {
+		return false;
+	}
+	const char *name = path + prefixLength;
+	const char *cursor = path + length - extensionLength;
+	for ( const char *c = name; c < cursor; c++ ) {
+		if ( *c == '/' || *c == '\\' ) {
+			return false;
+		}
+	}
+	// walk back over <height>, 'x', <width> and '_'; a map name must remain
+	const char *digits = cursor;
+	while ( cursor > name && cursor[ -1 ] >= '0' && cursor[ -1 ] <= '9' ) {
+		cursor--;
+	}
+	if ( cursor == digits || cursor == name || ( cursor[ -1 ] != 'x' && cursor[ -1 ] != 'X' ) ) {
+		return false;
+	}
+	digits = --cursor;
+	while ( cursor > name && cursor[ -1 ] >= '0' && cursor[ -1 ] <= '9' ) {
+		cursor--;
+	}
+	if ( cursor == digits || cursor == name || cursor[ -1 ] != '_' ) {
+		return false;
+	}
+	return cursor - 1 > name;
 }
 
 /*
@@ -7325,7 +7486,18 @@ idFile *idFileSystemLocal::OpenFileReadSearch( const char *relativePath, int sea
 				common->Printf( "idFileSystem::OpenFileRead: %s (found in '%s/%s')\n", relativePath, dir->path.c_str(), dir->gamedir.c_str() );
 			}
 
-			if ( !loadedFileFromDir && !FileAllowedFromDir( relativePath ) ) {
+			if ( FS_IsGeneratedImageCachePath( relativePath ) || FS_IsGeneratedLoadscreenPath( relativePath ) ) {
+				// openQ4's own derived images: a pure lock evicts them instead
+				// of restarting the engine. See FS_IsGeneratedImageCachePath
+				// and FS_IsGeneratedLoadscreenPath.
+				if ( !loadedImageCacheFromDir ) {
+					if ( restartChecksums.Num() ) {
+						common->FatalError( "'%s' loaded from directory: Failed to restart with pure mode restrictions for server connect", relativePath );
+					}
+					common->DPrintf( "filesystem: switching to pure mode will evict generated images. '%s' is a generated image.\n", relativePath );
+					loadedImageCacheFromDir = true;
+				}
+			} else if ( !loadedFileFromDir && !FileAllowedFromDir( relativePath ) ) {
 				if ( restartChecksums.Num() ) {
 					common->FatalError( "'%s' loaded from directory: Failed to restart with pure mode restrictions for server connect", relativePath );
 				}

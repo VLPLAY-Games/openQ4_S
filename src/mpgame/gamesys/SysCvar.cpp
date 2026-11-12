@@ -250,6 +250,11 @@ idCVar hud_damageNumberScale(		"hud_damageNumberScale",	"1",			CVAR_GAME | CVAR_
 idCVar hud_hitMarker(				"hud_hitMarker",			"0",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "crosshair hit marker on hits you land" );
 idCVar hud_hitMarkerScale(			"hud_hitMarkerScale",		"1",			CVAR_GAME | CVAR_ARCHIVE | CVAR_FLOAT, "hit marker size multiplier, on top of g_crosshairSize", 0.25f, 4.0f );
 idCVar hud_crosshairHitFlash(		"hud_crosshairHitFlash",	"0",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "recolour the crosshair on a hit, as stock Quake 4 does; implied when hud_hitMarker is off" );
+// openQ4: the weapon's own crosshair design drawn live.  Its pieces assemble as
+// the weapon is raised, kick with each shot, close as it charges, wait while it
+// cycles and stand down while it reloads, and hit feedback docks into the design.
+// Retained interface only: the stock interface keeps the still picture.
+idCVar hud_crosshairAnimated(		"hud_crosshairAnimated",	"1",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "animated crosshair: the weapon's crosshair drawn live, answering shots, charge, reload and hits; needs ui_retained 1" );
 // openQ4 END
 
 // change anytime vars
@@ -607,6 +612,26 @@ idCVar pm_vehicleSoundLerpScale(	"pm_vehicleSoundLerpScale",		"10",		CVAR_GAME |
 idCVar g_showPlayerShadow(			"g_showPlayerShadow",		"1",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "enables shadow of player model" );
 idCVar g_showPresentationPose(		"g_showPresentationPose",	"0",			CVAR_GAME | CVAR_BOOL, "report whether the local player's body reaches the presentation clock" );
 idCVar g_presentationClockCapture(	"g_presentationClockCapture",	"0",		CVAR_GAME | CVAR_INTEGER, "capture this many presentation-clock samples, then dump them once" );
+idCVar g_dynamicLightShadows(		"g_dynamicLightShadows",	"-1",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_INTEGER, "gun flashlight and projectile lights request shadows: -1 = auto (the flashlight wherever shadows are drawn, projectile lights at the highest machine spec as in retail), 0 = never, 1 = always", -1, 1 );
+
+// Mirrors the single-player gate in src/game/gamesys/SysCvar.cpp.
+bool G_DynamicLightShadowsEnabled( void ) {
+	const int mode = g_dynamicLightShadows.GetInteger();
+	if ( mode < 0 ) {
+		// retail gate: dluetscher disabled these shadows below high machine
+		// spec for stencil-volume performance
+		return cvarSystem->GetCVarInteger( "com_machineSpec" ) >= 3;
+	}
+	return mode != 0;
+}
+
+// The flashlight is one projected light per player, not a crowd of
+// short-lived projectile lights, so auto asks for its shadow on every preset;
+// presets that draw no shadows (r_shadows 0) skip it in the renderer.
+bool G_FlashlightShadowsEnabled( void ) {
+	// auto (-1) and always (1) both ask for it
+	return g_dynamicLightShadows.GetInteger() != 0;
+}
 
 idCVar g_skipPlayerShadowsMP(		"g_skipPlayerShadowsMP",	"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "disables all player shadows in multiplayer" );
 idCVar g_skipItemShadowsMP(			"g_skipItemShadowsMP",		"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "disables all item shadows in multiplayer" );

@@ -270,8 +270,9 @@ public:
 	// Returns the validated initial state, which the document keeps.
 	State Read(const Json::Value& root, bool treeCheck) {
 		if (treeCheck) FiniteTree(root);
-		Fields(root,"",{"format","version","id","canvas","tokens","root","timelines","state","bindings","actions","presentationVariables","aliases","events","detail","editor","extensions"});
-		Require(root["format"] == "openq4-ui",root,"/format","Expected format 'openq4-ui'");
+		Fields(root,"",{"format","version","id","canvas","tokens","symbols","root","timelines","state","bindings","actions","presentationVariables","aliases","events","detail","editor","extensions"});
+		// "openq4-ui" is the name the format had before the id Tech 4 ports shared it.
+		Require(root["format"] == "retained-ui" || root["format"] == "openq4-ui",root,"/format","Expected format 'retained-ui'");
 		Require(root["version"].isUInt() && root["version"].asUInt() == 1,root["version"],"/version","Unsupported document version; expected 1");
 		model.id = Id(root["id"],"/id");
 		if (root.isMember("extensions")) {
@@ -294,6 +295,27 @@ public:
 		}
 		ReadState(root);
 		ReadPresentationVariables(root);
+		if (root.isMember("symbols")) {
+			// Vector art that many nodes draw, such as a key glyph a page repeats
+			// in every row: a vector node that names a symbol draws its paths, so
+			// a document carries the art once.
+			const auto& shared = root["symbols"];
+			Require(shared.isObject(),shared,"/symbols","Expected a symbol object");
+			for (const auto& name : shared.getMemberNames()) {
+				const auto at = "/symbols/"+PointerPart(name);
+				Require(Identifier(name),shared[name],at,"Invalid symbol ID");
+				Require(shared[name].isArray(),shared[name],at,"A symbol is a path array");
+				std::set<std::string> ids;
+				auto& paths = symbols[name];
+				paths.reserve(shared[name].size());
+				for (Json::ArrayIndex i = 0; i < shared[name].size(); ++i) {
+					const auto p = at+"/"+std::to_string(i);
+					auto shape = ReadPath(shared[name][i],p);
+					Require(ids.insert(shape.id).second,shared[name][i]["id"],p+"/id","Duplicate path ID within symbol");
+					paths.push_back(std::move(shape));
+				}
+			}
+		}
 		model.root = ReadNode(root["root"],"/root",0);
 		model.IndexNodes(); // The tree is complete; validation resolves its references.
 		if (root.isMember("timelines")) {
@@ -422,7 +444,9 @@ private:
 	}
 	Expression ReadExpression(const Json::Value& value, const std::string& path, unsigned depth = 0, bool allowPresentation = false,
 		std::optional<size_t> inputType = std::nullopt) {
-		Require(depth <= 32 && ++expressionCount <= 65536,value,path,"Expression node/depth budget exceeded");
+		// 131072 nodes: Join Game's rows, whose cells each bind for the text
+		// size, a tall view and the list's tiles, hold about 75,000.
+		Require(depth <= 32 && ++expressionCount <= 131072,value,path,"Expression node/depth budget exceeded");
 		Expression result;
 		if (value.isNumeric()) result.literal = Numeric(value,path,-1000000000000.0,1000000000000.0);
 		else if (value.isBool()) result.literal = value.asBool();
@@ -1180,9 +1204,10 @@ private:
 		Require(ResolveModelScene(result,initial,resolved,error),value,path,error);
 		return result;
 	}
+	std::map<std::string,std::vector<VectorPath>> symbols; // The document's shared vector art, by ID.
 	Node ReadNode(const Json::Value& value, const std::string& path, unsigned depth) {
 		Require(depth <= 48 && ++nodeCount <= 65536,value,path,"Document hierarchy exceeds the node/depth limit");
-		Fields(value,path,{"id","type","properties","children","paths","mask","control","modal","legacyText","scene","extensions"});
+		Fields(value,path,{"id","type","properties","children","paths","symbol","mask","control","modal","legacyText","scene","extensions"});
 		Node result;
 		result.id = Id(value["id"],path,"/id");
 		Require(nodeIds.insert(result.id).second,value["id"],path+"/id","Duplicate node ID '"+result.id+"'");
@@ -1407,7 +1432,13 @@ private:
 					parsed.navigation[name] = Id(control["navigation"][name],p+"/navigation/"+name);
 			}
 		}
-		if (result.type == "vector") {
+		if (result.type == "vector" && value.isMember("symbol")) {
+			Require(!value.isMember("paths"),value["paths"],path+"/paths","A vector node draws its own paths or a symbol's, not both");
+			Require(value["symbol"].isString(),value["symbol"],path+"/symbol","Expected a symbol ID");
+			const auto found = symbols.find(value["symbol"].asString());
+			Require(found != symbols.end(),value["symbol"],path+"/symbol","Unknown symbol '"+value["symbol"].asString()+"'");
+			result.paths = found->second;
+		} else if (result.type == "vector") {
 			const auto& paths = value["paths"];
 			Require(paths.isArray(),paths,path+"/paths","Vector node requires a path array");
 			std::set<std::string> pathIds;
@@ -1418,7 +1449,7 @@ private:
 				Require(pathIds.insert(shape.id).second,paths[i]["id"],p+"/id","Duplicate path ID within vector node");
 				result.paths.push_back(std::move(shape));
 			}
-		} else Require(!value.isMember("paths"),value["paths"],path+"/paths","Paths require a vector node");
+		} else Require(!value.isMember("paths") && !value.isMember("symbol"),value,path,"Paths and symbols require a vector node");
 		if (value.isMember("mask")) {
 			const auto& mask = value["mask"]; const auto p = path+"/mask";
 			Fields(mask,p,{"paths","extensions"});

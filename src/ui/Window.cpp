@@ -267,13 +267,63 @@ static bool WindowConsumesDirectionalNavigation( idWindow *window, int key ) {
 			key == K_PGUP || key == K_PGDN;
 	}
 
-	if ( dynamic_cast<idEditWindow *>( window ) != NULL ) {
+	if ( const idEditWindow *edit = dynamic_cast<idEditWindow *>( window ) ) {
+		// A one-line field has no use for Up and Down, so they step on: a
+		// settings page's number field would otherwise hold the focus for good.
+		if ( key == K_UPARROW || key == K_KP_UPARROW || key == K_DOWNARROW || key == K_KP_DOWNARROW ) {
+			return edit->IsMultiLine();
+		}
 		return key == K_LEFTARROW || key == K_KP_LEFTARROW || key == K_RIGHTARROW || key == K_KP_RIGHTARROW ||
-			key == K_UPARROW || key == K_KP_UPARROW || key == K_DOWNARROW || key == K_KP_DOWNARROW ||
 			key == K_HOME || key == K_END || key == K_DEL || key == K_INS || key == K_BACKSPACE;
 	}
 
 	return false;
+}
+
+/*
+================
+KeyboardMenuFocusDirection
+
+The focus step an arrow key asks of a menu: none while the focused control
+uses that key itself (a list's rows, a slider's or choice's value, an edit
+field's caret, a field of several lines' scroll) or while a control holds the
+capture.
+================
+*/
+static bool KeyboardMenuFocusDirection( idWindow *desktop, const sysEvent_t *event, int &focusDirection ) {
+	if ( desktop == NULL || event == NULL || event->evType != SE_KEY ) {
+		return false;
+	}
+	int direction = 0;
+	switch ( event->evValue ) {
+		case K_UPARROW:
+		case K_KP_UPARROW:
+		case K_LEFTARROW:
+		case K_KP_LEFTARROW:
+			direction = -1;
+			break;
+		case K_DOWNARROW:
+		case K_KP_DOWNARROW:
+		case K_RIGHTARROW:
+		case K_KP_RIGHTARROW:
+			direction = 1;
+			break;
+		default:
+			return false;
+	}
+	if ( desktop->GetCaptureChild() != NULL ) {
+		return false;
+	}
+	idWindow *focused = desktop->GetFocusedChild();
+	// A key row steps like any other control: while it waits for its key the
+	// GUI hands the next key to the row before this window sees it
+	// (idUserInterfaceLocal::HandleEvent's bind handler), so no arrow arrives
+	// here to be mistaken for a step.
+	if ( WindowConsumesDirectionalNavigation( focused, event->evValue ) ) {
+		return false;
+	}
+	focusDirection = direction;
+	return true;
 }
 
 static bool WindowHasNativeEnterHandling( idWindow *window ) {
@@ -282,14 +332,159 @@ static bool WindowHasNativeEnterHandling( idWindow *window ) {
 		dynamic_cast<idListWindow *>( window ) != NULL;
 }
 
+/*
+================
+SortFocusRows
+
+Reading order within one column: rows from the top, each from its leading
+edge (SortFocusOrder).
+================
+*/
+static void SortFocusRows( idList<idWindow *> &windows ) {
+	const int count = windows.Num();
+	for ( int i = 1; i < count; ++i ) {
+		idWindow *moving = windows[ i ];
+		const float center = moving->GetDrawRect().y + moving->GetDrawRect().h * 0.5f;
+		int at = i;
+		while ( at > 0 && windows[ at - 1 ]->GetDrawRect().y + windows[ at - 1 ]->GetDrawRect().h * 0.5f > center ) {
+			windows[ at ] = windows[ at - 1 ];
+			--at;
+		}
+		windows[ at ] = moving;
+	}
+	for ( int start = 0; start < count; ) {
+		const idRectangle &first = windows[ start ]->GetDrawRect();
+		int end = start + 1;
+		while ( end < count ) {
+			const idRectangle &next = windows[ end ]->GetDrawRect();
+			const float apart = ( next.y + next.h * 0.5f ) - ( first.y + first.h * 0.5f );
+			if ( apart > Min( first.h, next.h ) * 0.5f ) {
+				break;
+			}
+			++end;
+		}
+		for ( int i = start + 1; i < end; ++i ) {
+			idWindow *moving = windows[ i ];
+			int at = i;
+			while ( at > start && windows[ at - 1 ]->GetDrawRect().x > moving->GetDrawRect().x ) {
+				windows[ at ] = windows[ at - 1 ];
+				--at;
+			}
+			windows[ at ] = moving;
+		}
+		start = end;
+	}
+}
+
+/*
+================
+SortFocusOrder
+
+The order a window's children are stepped in: column by column from the
+leading edge, each column in reading order. Windows whose horizontal extents
+overlap, directly or through others, form one column, so a page's list of
+tiers stands apart from the list of matches beside it while a settings row's
+value and the button after it stay together. Within a column rows run from
+the top, each from its leading edge; two windows share a row when their
+vertical centers lie within half the shorter one's height. Windows in one
+place keep their file order, so full-size pages stay as the GUI lists them.
+A settings page authored out of order (the stock DISPLAY page lists V-Sync
+after Ambient brightness) then steps the way it reads.
+================
+*/
+static void SortFocusOrder( idList<idWindow *> &windows ) {
+	const int count = windows.Num();
+	if ( count < 2 ) {
+		return;
+	}
+	// Columns: the connected groups of overlapping horizontal extents.
+	idList<int> column;
+	column.SetNum( count );
+	for ( int i = 0; i < count; ++i ) {
+		column[ i ] = i;
+	}
+	for ( bool merged = true; merged; ) {
+		merged = false;
+		for ( int i = 0; i < count; ++i ) {
+			const idRectangle &a = windows[ i ]->GetDrawRect();
+			for ( int j = i + 1; j < count; ++j ) {
+				if ( column[ i ] == column[ j ] ) {
+					continue;
+				}
+				const idRectangle &b = windows[ j ]->GetDrawRect();
+				if ( Min( a.x + a.w, b.x + b.w ) - Max( a.x, b.x ) > 1.0f ) {
+					const int from = column[ j ], to = column[ i ];
+					for ( int k = 0; k < count; ++k ) {
+						if ( column[ k ] == from ) {
+							column[ k ] = to;
+						}
+					}
+					merged = true;
+				}
+			}
+		}
+	}
+	idList<idWindow *> ordered;
+	idList<bool> taken;
+	taken.SetNum( count );
+	for ( int i = 0; i < count; ++i ) {
+		taken[ i ] = false;
+	}
+	for ( int placed = 0; placed < count; ) {
+		// The leftmost column not yet placed; the first listed where two start together.
+		int pick = -1;
+		float leading = 0.0f;
+		for ( int i = 0; i < count; ++i ) {
+			if ( taken[ i ] ) {
+				continue;
+			}
+			float edge = windows[ i ]->GetDrawRect().x;
+			for ( int k = 0; k < count; ++k ) {
+				if ( column[ k ] == column[ i ] ) {
+					edge = Min( edge, windows[ k ]->GetDrawRect().x );
+				}
+			}
+			if ( pick < 0 || edge < leading ) {
+				pick = i;
+				leading = edge;
+			}
+		}
+		idList<idWindow *> members;
+		for ( int k = 0; k < count; ++k ) {
+			if ( column[ k ] == column[ pick ] ) {
+				members.Append( windows[ k ] );
+				taken[ k ] = true;
+				++placed;
+			}
+		}
+		SortFocusRows( members );
+		for ( int k = 0; k < members.Num(); ++k ) {
+			ordered.Append( members[ k ] );
+		}
+	}
+	windows = ordered;
+}
+
 static void CollectFocusWindows( idWindow *window, idList<idWindow *> &candidates ) {
+	idList<idWindow *> children;
 	for ( int i = 0; i < window->GetChildCount(); ++i ) {
 		idWindow *child = window->GetChild( i );
 		if ( child == NULL || !child->IsVisible() || child->HasNoEvents() ) {
 			continue;
 		}
+		children.Append( child );
+	}
+	SortFocusOrder( children );
+	for ( int i = 0; i < children.Num(); ++i ) {
+		idWindow *child = children[ i ];
 		if ( child->GetFlags() & WIN_CANFOCUS ) {
-			candidates.Append( child );
+			// A page's scroll bar is the pointer's: a step that landed on it
+			// had nowhere to go, since Up and Down are the bar's own. The page
+			// follows the focus instead.
+			const idSliderWindow *slider = dynamic_cast<idSliderWindow *>( child );
+			if ( slider == NULL || !slider->IsVertical() ) {
+				candidates.Append( child );
+			}
 		} else {
 			CollectFocusWindows( child, candidates );
 		}
@@ -752,17 +947,98 @@ float idWindow::GetMaxCharWidth() {
 
 /*
 ================
+idWindow::MeasureText
+
+openQ4: "textwidth" and "textlines" for the windows something reads them from,
+and the "ellipsis" line. The widest of the text's explicit lines, up to the
+text rectangle; a single line too wide for an ellipsis window is shortened to
+fit with "...". Measured again only when the text, its scale, font or spacing
+or the rectangle's width changes: fitted plates read these every frame.
+================
+*/
+void idWindow::MeasureText() {
+	const float scale = textScale;
+	const float spacing = textspacing;
+	const bool remastered = gui != NULL && gui->LegacyRemastered();
+	if ( measuredFont == fontNum && measuredScale == scale && measuredSpacing == spacing && measuredRect == textRect.w &&
+			measuredRemastered == remastered && measuredText.Cmp( text.c_str() ) == 0 ) {
+		return;
+	}
+	measuredRemastered = remastered;
+	measuredFont = fontNum;
+	measuredScale = scale;
+	measuredSpacing = spacing;
+	measuredRect = textRect.w;
+	measuredText = text.c_str();
+	// What draws: the text, with its keys named and its lines joined where a
+	// Remastered layout's window asks for that.
+	measuredShortened = remastered && textKeyNames && idDeviceContext::PlainKeyNames( measuredText.c_str(), measuredDrawn );
+	idStr shownText = measuredShortened ? measuredDrawn : measuredText;
+	if ( remastered && textOneLine && shownText.Find( '\n' ) >= 0 ) {
+		shownText.Replace( "\n", " " );
+		measuredDrawn = shownText;
+		measuredShortened = true;
+	}
+	const int adjust = static_cast<int>( spacing );
+	float widest = 0.0f;
+	int lines = 0;
+	const char *line = shownText.c_str();
+	while ( line != NULL && *line != '\0' ) {
+		const char *end = strchr( line, '\n' );
+		const idStr part = end != NULL ? idStr( line, 0, static_cast<int>( end - line ) ) : idStr( line );
+		widest = Max( widest, static_cast<float>( dc->TextWidth( part, scale, 0, adjust ) ) );
+		++lines;
+		line = end != NULL ? end + 1 : NULL;
+	}
+	if ( textEllipsis && lines == 1 && widest > textRect.w && textRect.w > 0.0f ) {
+		// Drop whole characters (UTF-8 continuation bytes with their lead, a
+		// color escape whole) until the line and its dots fit.
+		const float dots = static_cast<float>( dc->TextWidth( "...", scale, 0, adjust ) );
+		idStr shown = shownText;
+		while ( shown.Length() > 0 ) {
+			int cut = shown.Length() - 1;
+			while ( cut > 0 && ( static_cast<unsigned char>( shown[cut] ) & 0xC0 ) == 0x80 ) {
+				cut--;
+			}
+			shown.CapLength( cut );
+			shown.StripTrailingWhitespace();
+			// never leave half of a "^N" color escape behind
+			if ( shown.Length() > 0 && shown[shown.Length() - 1] == '^' ) {
+				shown.CapLength( shown.Length() - 1 );
+			}
+			widest = static_cast<float>( dc->TextWidth( shown, scale, 0, adjust ) ) + dots;
+			if ( widest <= textRect.w ) {
+				break;
+			}
+		}
+		measuredDrawn = shown + "...";
+		measuredShortened = true;
+	}
+	measuredWidth = Min( textRect.w, widest );
+	measuredLines = static_cast<float>( lines );
+}
+
+/*
+================
 idWindow::Draw
 ================
 */
 void idWindow::Draw( int time, float x, float y ) {
+	if ( measureTextWidth || textEllipsis || textKeyNames || textOneLine ) {
+		MeasureText();
+		if ( measureTextWidth ) {
+			textWidth = measuredWidth;
+			textLines = measuredLines;
+		}
+	}
 	if ( text.Length() == 0 ) {
 		return;
 	}
 	const int textAdjust = static_cast<int>( textspacing );
 	const int style = static_cast<int>( textstyle );
 	const bool isChatWindow = ( flags & WIN_CHATWINDOW ) != 0;
-	dc->DrawText( text, textScale, textAlign, foreColor, textRect, !( flags & WIN_NOWRAP ), -1, false, NULL, 0, textAdjust, style, isChatWindow );
+	const char *drawn = ( textEllipsis || textKeyNames || textOneLine ) && measuredShortened ? measuredDrawn.c_str() : text.c_str();
+	dc->DrawText( drawn, textScale, textAlign, foreColor, textRect, !( flags & WIN_NOWRAP ), -1, false, NULL, 0, textAdjust, style, isChatWindow );
 
 	if ( gui_edit.GetBool() ) {
 		dc->EnableClipping( false );
@@ -1216,9 +1492,13 @@ const char *idWindow::HandleEvent(const sysEvent_t *event, bool *updateVisuals) 
 		return "";
 	}
 
-	const bool controllerEvent = TranslateControllerMenuKey( event, translatedEvent, controllerFocusDirection );
+	bool controllerEvent = TranslateControllerMenuKey( event, translatedEvent, controllerFocusDirection );
 	if ( controllerEvent ) {
 		event = &translatedEvent;
+	} else if ( ( flags & WIN_DESKTOP ) && ( flags & WIN_MENUGUI ) && KeyboardMenuFocusDirection( this, event, controllerFocusDirection ) ) {
+		// The arrow keys move a menu's focus and light the item they reach,
+		// as the D-pad does. The stock menus answered only Tab, unseen.
+		controllerEvent = true;
 	}
 
 	cmd = "";
@@ -1931,6 +2211,22 @@ void idWindow::Redraw(float x, float y) {
 
 	CalcClientRect(0, 0);
 
+	// openQ4: the stock interface's HUD scale. This window's group scales
+	// about its screen anchor for as long as it and its children draw.
+	const bool hudScaled = !( flags & WIN_DESKTOP ) && gui->LegacyScale() != 1.0f;
+	const idLegacyHudGroup hudGroup( hudScaled ? gui : NULL, dc, hudScaled ? HudGroupAnchorX() : -1, hudScaled ? HudGroupAnchorY() : -1 );
+	// A window that fills the canvas is a full-screen layer (a fade, a damage
+	// vignette), not a HUD group: it draws itself unscaled, so a smaller HUD
+	// leaves no uncovered border, unless it names its anchor. Its children
+	// keep their groups.
+	const bool hudWholeCanvas = hudScaled && hudAnchorX == HUD_ANCHOR_UNSET && hudAnchorY == HUD_ANCHOR_UNSET &&
+		rect.w() >= forceAspectWidth && rect.h() >= forceAspectHeight;
+	float hudGroupX = 0.0f, hudGroupY = 0.0f, hudGroupScale = 1.0f;
+	if ( hudWholeCanvas ) {
+		dc->GetGroupScale( hudGroupX, hudGroupY, hudGroupScale );
+		dc->SetGroupScale( 0.0f, 0.0f, 1.0f );
+	}
+
 	SetFont();
 	//if (flags & WIN_DESKTOP) {
 		// see if this window forces a new aspect ratio
@@ -1978,6 +2274,10 @@ void idWindow::Redraw(float x, float y) {
 
 	if ( gui_debug.GetInteger() ) {
 		DebugDraw(time, x, y);
+	}
+
+	if ( hudWholeCanvas ) {
+		dc->SetGroupScale( hudGroupX, hudGroupY, hudGroupScale );
 	}
 
 	int c = drawWindows.Num();
@@ -2058,6 +2358,31 @@ void idWindow::InitFromDictionary(idDict *dict, bool byName) {
 
 /*
 ================
+idWindow::HudGroupAnchorX / HudGroupAnchorY
+
+openQ4: the anchor this window gives its HUD scale group on each axis: the one
+it names (hudanchorx, hudanchory), else the screen edge its alignment moves it
+to, where that alignment applies (CalcClientRect), else its ancestors'.
+================
+*/
+int idWindow::HudGroupAnchorX() const {
+	if ( hudAnchorX != HUD_ANCHOR_UNSET ) {
+		return hudAnchorX;
+	}
+	const bool applies = ( parent == NULL ) || ( ( parent->GetFlags() & WIN_DESKTOP ) != 0 ) || ( parent->GetScreenAlignX() == SCREEN_ALIGN_X_MIDDLE );
+	return applies && screenAlignX != SCREEN_ALIGN_X_MIDDLE ? screenAlignX : -1;
+}
+
+int idWindow::HudGroupAnchorY() const {
+	if ( hudAnchorY != HUD_ANCHOR_UNSET ) {
+		return hudAnchorY;
+	}
+	const bool applies = ( parent == NULL ) || ( ( parent->GetFlags() & WIN_DESKTOP ) != 0 ) || ( parent->GetScreenAlignY() == SCREEN_ALIGN_Y_MIDDLE );
+	return applies && screenAlignY != SCREEN_ALIGN_Y_MIDDLE ? screenAlignY : -1;
+}
+
+/*
+================
 idWindow::CalcClientRect
 ================
 */
@@ -2086,24 +2411,29 @@ void idWindow::CalcClientRect(float xofs, float yofs) {
 	const bool applyScreenAlignX = ( parent == NULL ) || ( ( parent->GetFlags() & WIN_DESKTOP ) != 0 ) || ( parent->GetScreenAlignX() == SCREEN_ALIGN_X_MIDDLE );
 	const bool applyScreenAlignY = ( parent == NULL ) || ( ( parent->GetFlags() & WIN_DESKTOP ) != 0 ) || ( parent->GetScreenAlignY() == SCREEN_ALIGN_Y_MIDDLE );
 	if ( dc != NULL && ( applyScreenAlignX || applyScreenAlignY ) &&
-			!( gui != NULL && idRetainedHud::UsesClassicCanvas( gui->GetSourceFile() ) ) ) {
+			!( gui != NULL && gui->ClassicCanvas() ) ) {
 		float xExpand = 0.0f;
 		float yExpand = 0.0f;
 		dc->GetVirtualScreenExpansion( forceAspectWidth, forceAspectHeight, xExpand, yExpand );
+		// A HUD in the stock interface's Remastered layout caps its side screens
+		// and insets its edges (idLegacyHudLayout); the inset also moves edge
+		// groups on a 4:3 view, where nothing expands.
+		float edges[4] = { xExpand, yExpand, xExpand, yExpand };
+		const bool legacyEdges = gui != NULL && gui->LegacyEdges( edges );
 
-		if ( xExpand > 0.0f && applyScreenAlignX ) {
+		if ( ( legacyEdges || xExpand > 0.0f ) && applyScreenAlignX ) {
 			if ( screenAlignX == SCREEN_ALIGN_X_LEFT ) {
-				drawRect.x -= xExpand;
+				drawRect.x -= edges[0];
 			} else if ( screenAlignX == SCREEN_ALIGN_X_RIGHT ) {
-				drawRect.x += xExpand;
+				drawRect.x += edges[2];
 			}
 		}
 
-		if ( yExpand > 0.0f && applyScreenAlignY ) {
+		if ( ( legacyEdges || yExpand > 0.0f ) && applyScreenAlignY ) {
 			if ( screenAlignY == SCREEN_ALIGN_Y_TOP ) {
-				drawRect.y -= yExpand;
+				drawRect.y -= edges[1];
 			} else if ( screenAlignY == SCREEN_ALIGN_Y_BOTTOM ) {
-				drawRect.y += yExpand;
+				drawRect.y += edges[3];
 			}
 		}
 
@@ -2740,6 +3070,14 @@ idWinVar *idWindow::GetWinVarByName(const char *_name, bool fixup, drawWin_t** o
 		*owner = NULL;
 	}
 
+	if (idStr::Icmp(_name, "textwidth") == 0) {
+		measureTextWidth = true;
+		retVar = &textWidth;
+	}
+	if (idStr::Icmp(_name, "textlines") == 0) {
+		measureTextWidth = true;
+		retVar = &textLines;
+	}
 	if (idStr::Icmp(_name, "notime") == 0) {
 		retVar = &noTime;
 	}
@@ -3116,6 +3454,48 @@ bool idWindow::ParseInternalVar(const char *_name, idParser *src) {
 		if ( !ParseScreenAlignYToken( token, screenAlignY ) ) {
 			src->Warning( "Unknown screenAlignY value '%s' in window '%s' (expected: middle|top|bottom)", token.c_str(), GetName() );
 		}
+		return true;
+	}
+	if ( idStr::Icmp( _name, "hudanchorx" ) == 0 ) {
+		idToken token;
+		if ( !src->ReadToken( &token ) ) {
+			return false;
+		}
+		unsigned char anchor = SCREEN_ALIGN_X_MIDDLE;
+		if ( token.Icmp( "none" ) == 0 ) {
+			hudAnchorX = HUD_ANCHOR_NONE;
+		} else if ( ParseScreenAlignXToken( token, anchor ) ) {
+			hudAnchorX = anchor;
+		} else {
+			src->Warning( "Unknown hudanchorx value '%s' in window '%s' (expected: middle|left|right)", token.c_str(), GetName() );
+		}
+		return true;
+	}
+	if ( idStr::Icmp( _name, "hudanchory" ) == 0 ) {
+		idToken token;
+		if ( !src->ReadToken( &token ) ) {
+			return false;
+		}
+		unsigned char anchor = SCREEN_ALIGN_Y_MIDDLE;
+		if ( token.Icmp( "none" ) == 0 ) {
+			hudAnchorY = HUD_ANCHOR_NONE;
+		} else if ( ParseScreenAlignYToken( token, anchor ) ) {
+			hudAnchorY = anchor;
+		} else {
+			src->Warning( "Unknown hudanchory value '%s' in window '%s' (expected: middle|top|bottom)", token.c_str(), GetName() );
+		}
+		return true;
+	}
+	if ( idStr::Icmp( _name, "ellipsis" ) == 0 ) {
+		textEllipsis = src->ParseBool();
+		return true;
+	}
+	if ( idStr::Icmp( _name, "keynames" ) == 0 ) {
+		textKeyNames = src->ParseBool();
+		return true;
+	}
+	if ( idStr::Icmp( _name, "oneline" ) == 0 ) {
+		textOneLine = src->ParseBool();
 		return true;
 	}
 	if (idStr::Icmp(_name, "shear") == 0) {
@@ -4483,9 +4863,10 @@ void idWindow::EvaluateRegisters(float *registers) {
 				break;
 			}
 			if ( op->b >= 0 && registers[op->b] >= 0 && registers[op->b] < 4 ) {
-				// grabs vector components
+				// grabs vector components. The inherited ((idVec4&)var) cast
+				// read the local pointer's own bytes and the stack beyond them.
 				idWinVec4 *var = (idWinVec4 *)( op->a );
-				registers[op->c] = ((idVec4&)var)[registers[op->b]];
+				registers[op->c] = static_cast<const idVec4 &>( *var )[ static_cast<int>( registers[op->b] ) ];
 			} else {
 				registers[op->c] = ((idWinVar*)(op->a))->x();
 			}

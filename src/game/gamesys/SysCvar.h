@@ -295,8 +295,10 @@ extern idCVar	g_showPresentationPose;
 extern idCVar	g_presentationClockCapture;
 extern idCVar	g_dynamicLightShadows;
 
-// gun flashlight / projectile light shadow gate (SysCvar.cpp)
+// projectile light shadow gate (SysCvar.cpp)
 bool G_DynamicLightShadowsEnabled( void );
+// gun flashlight shadow gate (SysCvar.cpp)
+bool G_FlashlightShadowsEnabled( void );
 // gib/corpse-dissolve shadow gate for the shadow-map caster path (SysCvar.cpp)
 bool G_ShadowMapCorpseShadowsEnabled( void );
 
@@ -316,6 +318,7 @@ extern idCVar	g_crosshairCharInfoFar;
 extern idCVar	hud_hitMarker;
 extern idCVar	hud_hitMarkerScale;
 extern idCVar	hud_crosshairHitFlash;
+extern idCVar	hud_crosshairAnimated;
 // openQ4 END
 // bdube: hud popups
 extern idCVar	g_showHudPopups;

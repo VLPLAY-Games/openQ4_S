@@ -13,8 +13,8 @@ each tab holds at most two columns of section 7 setting rows on the stock
 column, its label taking two lines where a language needs them. Up and Down
 read the rows down the first column and on down the second, then wrap; Up
 from the first row reaches the tab, and Left and Right cross between the
-columns where the row has no value to change. The prompt bar holds Select and
-Back, Back the page's button.
+columns where the row has no value to change, and stop at the columns' outer
+edges. The prompt bar holds Select and Back, Back the page's button.
 
 A portrait view of 3:4 or taller (the runtime's view.aspect source) gives the
 rows its height instead of shrinking the two columns into it: the columns
@@ -51,12 +51,19 @@ BACKING_STOPS = ((4.0, 0.0), (40.0, 1.0), (636.0, 1.0), (660.0, 0.0))   # u on t
 TAB_STATE, LEAVING_STATE = "page.tab", "page.leaving"   # "settings." states belong to the settings service
 TAB_FADE_MS = 150                         # the Escape card's page cross-fade
 HEADING_FACE = ("lowpixel", 14, [1, 1, 1, 0.4])   # Create Server's headings
+# A heading or a note starts where its rows' labels do, 21 dp in: at the
+# column's edge it began before the strip's backing and the header band's
+# cut, over their leading end.
+HEADING_INDENT = 21.0
 VIEW_STATE = "view.aspect"                # the runtime's view source: the view's width over its height
 # Views of 3:4 and taller take the single column: there it holds a landscape
 # column's fourteen rows at TALL_SCALE between the strip and the bottom band.
 TALL_ASPECT = 0.76
 TALL_SCALE = CONTENT_W / COLUMN_W         # a column's rows across the content's width
 TALL = {"op": "<", "args": [{"state": VIEW_STATE}, TALL_ASPECT]}
+# A note's width keeps its place while its indent grows with the rows in the
+# single column, so the note gives up the indent at its largest.
+NOTE_INSET = round(HEADING_INDENT * TALL_SCALE, 3)
 TEXT = {"state": TEXT_STATE}
 # The single column, in a tall view or at a text size above 100 %, where two
 # columns grown by the text size would not fit side by side.
@@ -206,7 +213,7 @@ def check_settings_text(tabs: list, note: str | None) -> None:
             for item in column:
                 if isinstance(item, tuple):
                     for language, text in any_text(item[1]).items():
-                        if text_width(face, text, size) > U * COLUMN_W - 8:
+                        if text_width(face, text, size) > U * COLUMN_W - 8 - HEADING_INDENT:
                             over[(item[1], language)] = round(text_width(face, text, size))
                 elif item.get("control", {}).get("label"):
                     key = item["control"]["label"]
@@ -216,7 +223,7 @@ def check_settings_text(tabs: list, note: str | None) -> None:
                             over[(key, language)] = round(wrapped_width(text))
     if note is not None:
         for language, text in any_text(note).items():
-            if text_width(face, text, size) > U * CONTENT_W:
+            if text_width(face, text, size) > U * CONTENT_W - NOTE_INSET:
                 over[(note, language)] = round(text_width(face, text, size))
     if over:
         raise SystemExit(f"settings page text past its room: {over}")
@@ -235,8 +242,10 @@ def settings_backing(ident: str) -> dict:
 
 
 def heading_label(ident: str, key: str, left: float, top: float, width: float, height: float) -> dict:
+    """A heading in a box `width` wide from `left`, its text HEADING_INDENT in."""
     face, size, tint = HEADING_FACE
-    return label(ident, key, {**absolute(left=left, top=top, width=width, height=height), **typeface(face, size, height, tint),
+    return label(ident, key, {**absolute(left=left, top=top, width=width - HEADING_INDENT, height=height),
+                              "padding-left": length(HEADING_INDENT), **typeface(face, size, height, tint),
                               "white-space": keyword("nowrap"), "overflow": keyword("hidden"), "pointer-events": keyword("none")})
 
 
@@ -361,15 +370,16 @@ def _note_line(ident: str, key: str, lead: float) -> dict:
     """The page's note across the content in the slot above the rows: one line
     in a landscape view, as many as it needs at the tall size."""
     face, size, tint = HEADING_FACE
-    return label(ident, key, {"position": keyword("relative"), "display": keyword("block"), "width": length(U * CONTENT_W),
-                              "margin-bottom": length(U * (lead - HEAD_H)), **typeface(face, size, U * HEAD_H, tint),
+    return label(ident, key, {"position": keyword("relative"), "display": keyword("block"), "width": length(U * CONTENT_W - NOTE_INSET),
+                              "padding-left": length(HEADING_INDENT), "margin-bottom": length(U * (lead - HEAD_H)),
+                              **typeface(face, size, U * HEAD_H, tint),
                               "white-space": keyword("normal"), "pointer-events": keyword("none")})
 
 
 def settings_subpage(doc: Document, prefix: str, title_key: str, tabs: list, *, note: str | None = None,
                      activate=None, overlays: list = (), back_event: str | None = None, back_id: str | None = None,
                      slots: int = COLUMN_SLOTS, footer: list = (), body: str | None = None,
-                     first_focus: dict | None = None, portrait: bool = True) -> dict:
+                     first_focus: dict | None = None, portrait: bool = True, prompts: dict | None = None) -> dict:
     """The page: `tabs` holds each tab's (id, label, columns), a column a list
     of rows, notes and headings (heading()), at most two columns a tab. One
     tab shows no strip: its columns' first headings stand in the header band.
@@ -380,7 +390,8 @@ def settings_subpage(doc: Document, prefix: str, title_key: str, tabs: list, *, 
     its rows' lists unfold within; `first_focus` gives a tab whose first rows
     may be hidden the steps that focus its first row shown. Without
     `portrait` the two columns keep their places in every view, shrinking in
-    a portrait one.
+    a portrait one. `prompts` are more of page_prompts' arguments: the page's
+    own verbs and legends.
     onActivate   the sub-page's arrival, then the current tab's first row
                  takes the focus: the steps `activate` makes of those;
     tab_<id>     switches to a tab at once, cross-fades the pages over 150 ms
@@ -399,7 +410,10 @@ def settings_subpage(doc: Document, prefix: str, title_key: str, tabs: list, *, 
         # The strip follows the pages in the tree: each page is a full-size
         # group, and a later group's box takes the pointer's hits over earlier
         # controls, so a strip under the pages left its tabs dead to the mouse
-        # and the VR pointer. They never overlap on screen.
+        # and the VR pointer. They never overlap on screen. It also follows
+        # the footer and Back, the last controls in reading order: Next and
+        # Previous walk the tree as a ring, so a tab's last row leads on to
+        # Back and Back to the strip, the order the page reads in.
         above.append(group(f"{prefix}-strip", absolute(left=U * CONTENT_LEFT, top=U * STRIP_TOP, width=width, height=2 * TAB_RISE),
                            strip))
         # The tabs keep their size in the strip's slots at any text size.
@@ -495,6 +509,16 @@ def settings_subpage(doc: Document, prefix: str, title_key: str, tabs: list, *, 
                 other = order[1 - side]
                 for slot, unit in enumerate(rows):
                     unit[0]["control"]["navigation"]["right" if side == 0 else "left"] = other[min(slot, len(other) - 1)][0]["id"]
+        # The columns' outer edges hold the focus: a row with no value to
+        # change would otherwise send Left or Right looking for the nearest
+        # control in that direction, which from the trailing column is a tab.
+        columns = [rows for rows in order if rows]
+        for side, rows in enumerate(columns):
+            for unit in rows:
+                if side == 0:
+                    unit[0]["control"]["navigation"].setdefault("left", unit[0]["id"])
+                if side == len(columns) - 1:
+                    unit[-1]["control"]["navigation"].setdefault("right", unit[-1]["id"])
         firsts.append(sequence[0])
         if tabbed:
             for control in sequence:
@@ -512,12 +536,12 @@ def settings_subpage(doc: Document, prefix: str, title_key: str, tabs: list, *, 
                   "then": list(focus[index]), "else": steps}]
     if back_event is None:
         doc.events["onBack"] = [{"op": "action", "action": "back"}]
-        back = page_prompts(doc, back_id or f"{prefix}_back", action="back")
+        back = page_prompts(doc, back_id or f"{prefix}_back", action="back", **(prompts or {}))
     else:
-        back = page_prompts(doc, back_id or f"{prefix}_back", event=back_event)
+        back = page_prompts(doc, back_id or f"{prefix}_back", event=back_event, **(prompts or {}))
     if body is not None:
         pages = [group(body, FULL, pages)]
-    return subpage_document(doc, prefix, CRUMB, title_key, firsts[0], [*chrome, *pages, *above, *footer, back], list(overlays),
+    return subpage_document(doc, prefix, CRUMB, title_key, firsts[0], [*chrome, *pages, *footer, back, *above], list(overlays),
                             stretch=tuple(scrollers), activate=activate(steps) if activate else steps,
                             backing_node=settings_backing(f"{prefix}-backing"))
 

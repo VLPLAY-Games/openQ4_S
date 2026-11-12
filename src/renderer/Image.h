@@ -219,8 +219,15 @@ public:
 	bool		IsDefaulted() const { return defaulted; }
 	bool		IsScratchImage() const { return scratchImage; }
 	bool IsFileBacked() const { return generatorFunction == NULL && !opts.isPersistant && !scratchImage; }
+	// The resident pixels came from a generated/images cache entry rather than
+	// from the image's source. A pure lock reloads such images (see
+	// idImageManager::ReloadGeneratedCacheImages).
+	bool		HoldsGeneratedCacheContent() const { return generatedCacheContent && IsLoaded(); }
 
 	void		SetReferencedOutsideLevelLoad() { referencedOutsideLevelLoad = true; }
+	bool		IsReferencedOutsideLevelLoad() const { return referencedOutsideLevelLoad; }
+	// An image that replaces another takes over whether a level load may purge it.
+	void		SetLevelLoadLifetime( bool outsideLevelLoad ) { referencedOutsideLevelLoad = outsideLevelLoad; }
 	void		SetReferencedInsideLevelLoad() { levelLoadReferenced = true; }
 	void		ClearUseCount() { useCount = 0; }
 	void		AddUseCount( int count ) { useCount += count; }
@@ -343,6 +350,7 @@ private:
 	imageConsumedPolicy_t consumedPolicy{};
 	uint64_t consumedLoadRevision = 0;
 	const uint64_t		imagePolicyIdentity;
+	bool				generatedCacheContent = false;	// set by the last ActuallyLoadImage that uploaded content
 
 
 };
@@ -453,6 +461,15 @@ public:
 
 	// reloads all apropriate images after a vid_restart
 	void				ReloadImages(bool all, bool fileBackedOnly = false);
+
+	// Reloads, from their sources, every image whose resident pixels came from
+	// the generated image cache. The client calls it once a pure lock is in
+	// place, when the filesystem's directory gate already refuses the cache,
+	// so the reload derives each image from the pure paks. Resident expanded
+	// loading backgrounds, which have no pure source, are purged. False when
+	// any such image still holds its pixels; the caller must then restart the
+	// engine.
+	bool				ReloadGeneratedCacheImages();
 	void ClearCheckedImagePolicyChanges(); // Only after an exact checked restart.
 
 	// reloads every image when a texture reduction cvar changed this frame

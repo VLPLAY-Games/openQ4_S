@@ -96,7 +96,16 @@
 //      the Vulkan device and renderVRFrame_t the VkImage swapchain images.
 //      renderVRGraphicsBinding_t also carries an EGL context (an OpenGL
 //      renderer on native Wayland) for XR_MNDX_egl_enable.
-#define RENDER_API_VERSION			32
+// 33 - A pure connect no longer restarts the engine over generated image cache
+//      or expanded loading background reads: idFileSystem appends
+//      TakePureImageCacheEviction and idRenderSystem appends
+//      ReloadGeneratedCacheImages, which the client must run once the lock is
+//      in place (a stale module would leave derived pixels on the GPU of a
+//      pure session).
+// 34 - renderExport_t appends TryDisplayTransition: a strict display request
+//      applied to the running device, without the teardown TryDeviceRestart
+//      performs.
+#define RENDER_API_VERSION			34
 #define RENDER_API_ENTRY_POINT		"GetRenderAPI"
 
 class idSys;
@@ -474,6 +483,13 @@ typedef struct renderExport_s {
     bool (*ReleaseImagePolicyRecovery)(const renderImageRecoveryLease_t*,uint32_t,const renderImagePolicyResult_t*,char*,int);
 	bool (*GetRenderingDevices)(renderDeviceCatalog_t*);
 	void (*SyncConfiguration)(void);
+	// Version 34: the request applied to the running device at a frame boundary.
+	// The window changes mode, size, display, borders or swap interval in place;
+	// the device, its images and its buffers stay. Refused before any change
+	// when the request needs a new device (another window sample count). A
+	// failure after that leaves the device running with the window possibly
+	// part-way; the caller restores its captured display or restarts the device.
+	bool			( *TryDisplayTransition )( const renderWindowRequest_t *request, char *error, int errorSize );
 } renderExport_t;
 
 extern "C" {

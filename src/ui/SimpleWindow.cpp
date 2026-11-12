@@ -465,24 +465,27 @@ void idSimpleWindow::CalcClientRect(float xofs, float yofs) {
 	const bool applyScreenAlignX = ( mParent == NULL ) || ( ( mParent->GetFlags() & WIN_DESKTOP ) != 0 ) || ( mParent->GetScreenAlignX() == idWindow::SCREEN_ALIGN_X_MIDDLE );
 	const bool applyScreenAlignY = ( mParent == NULL ) || ( ( mParent->GetFlags() & WIN_DESKTOP ) != 0 ) || ( mParent->GetScreenAlignY() == idWindow::SCREEN_ALIGN_Y_MIDDLE );
 	if ( dc != NULL && ( applyScreenAlignX || applyScreenAlignY ) &&
-			!( gui != NULL && idRetainedHud::UsesClassicCanvas( gui->GetSourceFile() ) ) ) {
+			!( gui != NULL && gui->ClassicCanvas() ) ) {
 		float xExpand = 0.0f;
 		float yExpand = 0.0f;
 		dc->GetVirtualScreenExpansion( forceAspectWidth, forceAspectHeight, xExpand, yExpand );
+		// The stock interface's Remastered HUD edges, as idWindow::CalcClientRect.
+		float edges[4] = { xExpand, yExpand, xExpand, yExpand };
+		const bool legacyEdges = gui != NULL && gui->LegacyEdges( edges );
 
-		if ( xExpand > 0.0f && applyScreenAlignX ) {
+		if ( ( legacyEdges || xExpand > 0.0f ) && applyScreenAlignX ) {
 			if ( screenAlignX == idWindow::SCREEN_ALIGN_X_LEFT ) {
-				drawRect.x -= xExpand;
+				drawRect.x -= edges[0];
 			} else if ( screenAlignX == idWindow::SCREEN_ALIGN_X_RIGHT ) {
-				drawRect.x += xExpand;
+				drawRect.x += edges[2];
 			}
 		}
 
-		if ( yExpand > 0.0f && applyScreenAlignY ) {
+		if ( ( legacyEdges || yExpand > 0.0f ) && applyScreenAlignY ) {
 			if ( screenAlignY == idWindow::SCREEN_ALIGN_Y_TOP ) {
-				drawRect.y -= yExpand;
+				drawRect.y -= edges[1];
 			} else if ( screenAlignY == idWindow::SCREEN_ALIGN_Y_BOTTOM ) {
-				drawRect.y += yExpand;
+				drawRect.y += edges[3];
 			}
 		}
 

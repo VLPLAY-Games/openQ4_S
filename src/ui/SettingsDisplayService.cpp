@@ -3,21 +3,35 @@
 #include "SettingsDisplayService.h"
 #ifndef ID_DEDICATED
 #include "../framework/SettingsPersistence.h"
+#include "../sound/SoundRestart.h"
 #include <cmath>
 #include <limits>
 
 using namespace openq4;
 using namespace openq4::ui;
+// DeviceContext.cpp: the classic GUI fonts rebuild for the display on their next use.
+void UI_ClassicFontsDisplayChanged( void );
 bool EngineSettingsDisplayHost::SupportsMultisampling() const {
 	rendererDisplayState_t state{};
 	if (!R_RendererModule_QueryDisplay(&state) || !state.rendererReady || !state.windowValid || !state.presentation.available)
 		return false;
-	// Vulkan multisamples the scene targets its device restart re-creates.
-	return WindowMultisampling() || R_RendererModule_GetStatus().activeApi == RENDER_MODULE_API_VULKAN;
+	// Every known back end multisamples: in its window where the window
+	// carries the samples, otherwise in render targets that follow
+	// r_multiSamples on the running device.
+	const auto api = R_RendererModule_GetStatus().activeApi;
+	return api == RENDER_MODULE_API_GL || api == RENDER_MODULE_API_GL_MODULE || api == RENDER_MODULE_API_GLES || api == RENDER_MODULE_API_VULKAN;
 }
 bool EngineSettingsDisplayHost::WindowMultisampling() const {
+	// Vulkan's swapchain is single-sample. An OpenGL ES window always carries
+	// the samples; a desktop OpenGL window does only where r_glWindowMultisample
+	// asks (Apple's default). The renderer reads that when its device starts,
+	// and a request that names another count than the window has is refused
+	// and falls back to a device restart, so a stale answer here costs a
+	// restart, never a wrong window.
 	const auto api = R_RendererModule_GetStatus().activeApi;
-	return api == RENDER_MODULE_API_GL || api == RENDER_MODULE_API_GL_MODULE || api == RENDER_MODULE_API_GLES;
+	if (api == RENDER_MODULE_API_GLES) return true;
+	return (api == RENDER_MODULE_API_GL || api == RENDER_MODULE_API_GL_MODULE) &&
+		(cvarSystem->GetCVarBool("r_glWindowMultisample") || cvarSystem->GetCVarBool("r_glesContext"));
 }
 bool EngineSettingsDisplayHost::LightGridLoad(renderLightGridLoadReceipt_t& receipt, std::uint64_t& serial) const {
 	std::uint64_t epoch = 0;
@@ -44,6 +58,63 @@ bool EngineSettingsDisplayHost::SupportsRendererSelection() const {
 	if (api != RENDER_MODULE_API_GL && api != RENDER_MODULE_API_GL_MODULE) return false;
 	renderRendererSelection_t selection{}; std::uint64_t serial = 0, epoch = 0;
 	return R_RendererModule_QueryRendererSelection(selection,serial,epoch);
+}
+bool EngineSettingsDisplayHost::SupportsCombined(const StateValues& baseline, const StateValues& target) const {
+	if (!ReadyForAutomatic()) return false;
+	const auto before = baseline.find("r_renderer"), after = target.find("r_renderer");
+	const bool renderer = before == baseline.end() || after == target.end() || !SettingsValueEqual(before->second,after->second);
+	return !renderer || SupportsRendererSelection();
+}
+bool EngineSettingsDisplayHost::DeviceWork() const {
+	return kind == Kind::Display || kind == Kind::Renderer || (kind == Kind::Combined && (effects.plan.domainMask & 19u) != 0);
+}
+bool EngineSettingsDisplayHost::DeviceRestart() const {
+	if (kind != Kind::Combined) return DeviceWork();
+	if (!DeviceWork()) return false;
+	// The display itself, and the renderer fallback a new device must resolve.
+	// Everything else finishes on the running device: texture settings reload
+	// in place, the benchmark budget is read on each use, and OpenGL resizes
+	// its upload stream at the next frame (Vulkan reads neither upload setting).
+	return (effects.plan.domainMask & SystemSettingDisplayRestart) != 0 || effects.patch.contains("r_renderer");
+}
+bool EngineSettingsDisplayHost::DisplayTransition(const SystemDisplayPlan& plan, const rendererDisplayState_t& before) const {
+	// Only the display itself changed, on a device that is presenting, and the
+	// window keeps its sample count: a count is fixed when the device is
+	// created. Under OpenGL an MSAA change is a change to that count. Vulkan's
+	// window is single-sample: MSAA lives in the scene targets, which the game
+	// rebuilds on its next scene when r_multiSamples changed, so the request
+	// below asks for the window the device already has.
+	if (!DisplayOwned() || RendererOwned()) return false;
+	const auto& patch = kind == Kind::Display ? journal.patch : effects.patch;
+	if (patch.contains("r_multiSamples") && WindowMultisampling()) return false;
+	return before.rendererReady && before.windowValid && before.presentation.available != 0 &&
+		(before.presentation.parametersValid & RDP_PARAMETER_SAMPLES) != 0 &&
+		before.presentation.samples == plan.request.parms.multiSamples;
+}
+bool EngineSettingsDisplayHost::DisplayOwned() const {
+	return kind == Kind::Display || (kind == Kind::Combined && (effects.plan.domainMask & SystemSettingDisplayRestart) != 0);
+}
+bool EngineSettingsDisplayHost::RendererOwned() const {
+	return kind == Kind::Renderer || (kind == Kind::Combined && effects.patch.contains("r_renderer"));
+}
+void EngineSettingsDisplayHost::RestartSound(bool restoring) {
+	soundRequested = false;
+	// The device reads the speaker layout and EFX when it opens. The emitter
+	// limit is read by every sound update and needs no restart.
+	if (kind != Kind::Combined || (!effects.patch.contains("s_numberOfSpeakers") && !effects.patch.contains("s_useEAXReverb"))) return;
+	// A restart still pending from the other direction serves this one too.
+	soundRequested = Sound_RequestOutputRestart() || Sound_OutputState() == SOUND_OUTPUT_RESTARTING;
+	if (cvarSystem->GetCVarBool("ui_retainedTrace"))
+		common->Printf("UI_SETTINGS_SOUND restore=%d requested=%d\n",restoring?1:0,soundRequested?1:0);
+}
+bool EngineSettingsDisplayHost::SoundReady(bool& ready, std::string& error) const {
+	ready = true;
+	if (!soundRequested) return true;
+	switch (Sound_OutputState()) {
+	case SOUND_OUTPUT_RESTARTING: ready = false; return true;
+	case SOUND_OUTPUT_FAILED: error = "The sound device did not reopen under the new settings"; return false;
+	default: return true;
+	}
 }
 bool EngineSettingsDisplayHost::RendererSelection(renderRendererSelection_t& selection, std::uint64_t& serial) const {
 	std::uint64_t epoch = 0;
@@ -100,16 +171,25 @@ bool EngineSettingsDisplayHost::RendererCurrent(bool restoring, std::string& err
 	return true;
 }
 std::string EngineSettingsDisplayHost::RendererRequest(bool restoring) const {
+	// A renderer record names its request; a combined record keeps each
+	// domain's settings under their own names.
 	const auto& map = restoring ? effects.resourceRestore : effects.resourceTarget;
-	const auto found = map.find("request");
+	const auto found = map.find(kind == Kind::Combined ? "r_renderer" : "request");
 	return found != map.end() && std::holds_alternative<std::string>(found->second) ? std::get<std::string>(found->second) : std::string();
 }
 const StateValues& EngineSettingsDisplayHost::SavedDisplay(bool restoring) const {
-	if (kind == Kind::Renderer) return restoring ? effects.displayRestore : effects.displayTarget;
+	if (kind == Kind::Renderer || kind == Kind::Combined) return restoring ? effects.displayRestore : effects.displayTarget;
 	return restoring ? journal.displayRestore : journal.displayTarget;
 }
 namespace {
 bool Fail(std::string& error, const char* message) { error = message; return false; }
+// The swap interval is an immediate setting, but a device restart names one in
+// its request and then owns it. A restart that keeps the display therefore
+// carries the interval the batch asks for.
+void CarrySwapInterval(const SettingsAttempt& attempt, SystemDisplayPlan& plan) {
+	const auto& before = attempt.baseline.at("r_swapInterval"); const auto& after = attempt.target.at("r_swapInterval");
+	if (!SettingsValueEqual(before,after)) plan.request.swapInterval = int(std::get<double>(after));
+}
 bool ObserveDevice(rendererDisplayState_t& state, SettingsDisplayObservation& output, std::string& error) {
 	if (!R_RendererModule_QueryDisplay(&state)) return Fail(error,"Actual renderer display observation is unavailable");
 	const auto& p = state.presentation;
@@ -143,14 +223,41 @@ bool ReadPlacement(const StateValues& fields, const char* prefix, sysWindowPlace
 		(p.normalValid && (p.normalWidth<=0 || p.normalWidth>16384 || p.normalHeight<=0 || p.normalHeight>16384))) return false;
 	output=p; return true;
 }
+// Each participating domain's settings in both directions, under the names
+// the catalog gives them: the portable policy a combined record carries.
+void CombinedPolicy(SettingsEffectRecoveryJournal& record) {
+	for (const auto& item:SystemSettingsHost::Catalog()) {
+		StateValues* restore=nullptr; StateValues* target=nullptr;
+		switch (item.effects) {
+		case SystemSettingImageReload: restore=&record.imageRestore; target=&record.imageTarget; break;
+		case SystemSettingAudioRestart: restore=&record.audioRestore; target=&record.audioTarget; break;
+		case SystemSettingNextMap: restore=&record.deferredRestore; target=&record.deferredTarget; break;
+		case SystemSettingRendererResources: restore=&record.resourceRestore; target=&record.resourceTarget; break;
+		default: continue;
+		}
+		if (!(record.plan.domainMask & item.effects)) continue;
+		restore->emplace(item.key,record.baseline.at(item.key)); target->emplace(item.key,record.target.at(item.key));
+	}
+}
+bool CombinedPolicyAgrees(const SettingsEffectRecoveryJournal& record) {
+	SettingsEffectRecoveryJournal expected;
+	expected.plan=record.plan; expected.baseline=record.baseline; expected.target=record.target;
+	CombinedPolicy(expected);
+	return SettingsValuesEqual(expected.imageRestore,record.imageRestore) && SettingsValuesEqual(expected.imageTarget,record.imageTarget) &&
+		SettingsValuesEqual(expected.audioRestore,record.audioRestore) && SettingsValuesEqual(expected.audioTarget,record.audioTarget) &&
+		SettingsValuesEqual(expected.deferredRestore,record.deferredRestore) && SettingsValuesEqual(expected.deferredTarget,record.deferredTarget) &&
+		SettingsValuesEqual(expected.resourceRestore,record.resourceRestore) && SettingsValuesEqual(expected.resourceTarget,record.resourceTarget);
+}
 bool RecoveryMetadata(const SettingsRecoveryJournal& journal,
-	const sysWindowPlacementSnapshot_t& before,const sysWindowPlacementSnapshot_t& after,std::string& error) {
+	const sysWindowPlacementSnapshot_t& before,const sysWindowPlacementSnapshot_t& after,bool combined,std::string& error) {
 	const auto dimensions=[](const sysWindowPlacementSnapshot_t& placement,const StateValues& values) {
 		return double(placement.width)==std::get<double>(values.at("r_windowWidth")) &&
 			double(placement.height)==std::get<double>(values.at("r_windowHeight"));
 	};
 	const unsigned effects=SystemSettingsHost::ChangedEffects(journal.baseline,journal.target);
-	if (!dimensions(before,journal.baseline) || !dimensions(after,journal.target) || effects!=SystemSettingDisplayRestart)
+	// A schema-1 record changes the display alone; a combined one changes it among other domains.
+	if (!dimensions(before,journal.baseline) || !dimensions(after,journal.target) ||
+		(combined ? (effects & SystemSettingDisplayRestart)==0 : effects!=SystemSettingDisplayRestart))
 		return Fail(error,"Saved placement or effect batch contradicts the settings catalog");
 	// Unused historical hardware need not still be connected, but both saved
 	// records must be structurally valid and agree with the frozen target.
@@ -166,6 +273,7 @@ void EngineSettingsDisplayHost::Clear() {
 	placement={}; expectedPlacement={}; committedPlacement={}; startupTarget.clear();
 	placementToken=0; writtenBytes.clear(); attemptedBytes.clear(); recoveryError.clear();
 	ownsJournal=placed=blocked=startup=startupReady=startupConfirmed=false; startupDeadline=0; startupLastTime=-1;
+	soundRequested=false;
 }
 bool EngineSettingsDisplayHost::VerifyJournal(bool allowMissing, std::string& error) {
 	if (!processLease.IsHeld()) return Fail(error,"Settings recovery lease is unavailable");
@@ -211,8 +319,11 @@ bool EngineSettingsDisplayHost::Prepare(const SettingsAttempt& attempt, std::str
 	// before any lease or journal exists.
 	const auto applyClass=SystemSettingsHost::ApplyClassOf(attempt.baseline,attempt.target);
 	const bool deferred=applyClass==SystemApplyClass::Deferred, renderer=applyClass==SystemApplyClass::Renderer;
-	if (applyClass!=SystemApplyClass::Display && !deferred && !renderer) return Fail(error,"The settings attempt has no executor");
-	if (deferred || renderer ? attempt.completion!=SettingsCompletion::Automatic : attempt.completion!=SettingsCompletion::UserConfirmation)
+	const bool combined=applyClass==SystemApplyClass::Combined;
+	if (applyClass!=SystemApplyClass::Display && !deferred && !renderer && !combined) return Fail(error,"The settings attempt has no executor");
+	// Only a change to the display itself asks the user to keep it.
+	const bool automatic=deferred || renderer || (combined && !SystemSettingsHost::ChangedRequiresDisplayRestart(attempt.baseline,attempt.target));
+	if (automatic ? attempt.completion!=SettingsCompletion::Automatic : attempt.completion!=SettingsCompletion::UserConfirmation)
 		return Fail(error,"The settings attempt's effects and completion disagree");
 	if (!Paths(error) || !processLease.TryAcquire(lockPath,error)) return false;
 	std::string bytes;
@@ -220,6 +331,7 @@ bool EngineSettingsDisplayHost::Prepare(const SettingsAttempt& attempt, std::str
 	if (read!=DurableReadResult::Missing) { blocked=true; return read==DurableReadResult::Failed?false:Fail(error,"An existing settings recovery journal requires startup recovery"); }
 	if (deferred) return PrepareDeferred(attempt,error);
 	if (renderer) return PrepareRenderer(attempt,error);
+	if (combined) return PrepareCombined(attempt,error);
 	if (!ValidateLive(attempt.baseline,error) || !R_RendererModule_QueryDisplay(&baselineDevice))
 		return Fail(error,error.empty()?"Actual baseline display is unavailable":error.c_str());
 	SystemDisplayTopology topology;
@@ -264,7 +376,7 @@ bool EngineSettingsDisplayHost::PrepareRenderer(const SettingsAttempt& attempt, 
 	// The renderer restarts on the display it has now, in both directions.
 	SystemDisplayTopology topology;
 	if (!CaptureDisplayTopology(topology,error) || !BuildDisplayRestore(baselineDevice,topology,restorePlan,error)) return false;
-	targetPlan=restorePlan;
+	targetPlan=restorePlan; CarrySwapInterval(attempt,targetPlan);
 	SettingsEffectRecoveryJournal candidate;
 	candidate.baseline=attempt.baseline; candidate.target=attempt.target; candidate.patch=attempt.patch;
 	if (!BuildSettingsEffectPlan(attempt.baseline,attempt.target,SystemSettingsHost::Schema(),candidate.plan,error)) return false;
@@ -285,6 +397,46 @@ bool EngineSettingsDisplayHost::PrepareRenderer(const SettingsAttempt& attempt, 
 	AddPlacement(candidate.placement,"target.",placement);
 	committedPlacement=placement;
 	kind=Kind::Renderer; effects=std::move(candidate); currentDevice=baselineDevice;
+	return WriteJournal(error);
+}
+bool EngineSettingsDisplayHost::PrepareCombined(const SettingsAttempt& attempt, std::string& error) {
+	SettingsDisplayObservation ready;
+	if (!ValidateLive(attempt.baseline,error)) return false;
+	if (!ObserveDevice(baselineDevice,ready,error) || !ready.ready) return Fail(error,error.empty()?"No presenting renderer can prove the settings change":error.c_str());
+	if (attempt.patch.contains("r_renderer") && !SupportsRendererSelection()) return Fail(error,"The active renderer cannot report its selection");
+	SettingsEffectRecoveryJournal candidate;
+	candidate.baseline=attempt.baseline; candidate.target=attempt.target; candidate.patch=attempt.patch;
+	if (!BuildSettingsEffectPlan(attempt.baseline,attempt.target,SystemSettingsHost::Schema(),candidate.plan,error)) return false;
+	CombinedPolicy(candidate);
+	// The display, image and renderer resource domains record the display the
+	// renderer has and lease its placement, whether the batch then needs a new
+	// device or the running one takes it in place (DeviceRestart). Without a
+	// display change a restart runs on the display the renderer has now, in
+	// both directions.
+	const bool device=(candidate.plan.domainMask & 19u)!=0, display=(candidate.plan.domainMask & SystemSettingDisplayRestart)!=0;
+	if (device) {
+		SystemDisplayTopology topology;
+		if (!CaptureDisplayTopology(topology,error) || !BuildDisplayRestore(baselineDevice,topology,restorePlan,error)) return false;
+		if (!display) { targetPlan=restorePlan; CarrySwapInterval(attempt,targetPlan); }
+		else if (!BuildDisplayRequest(attempt.target,baselineDevice,topology,targetPlan,error,WindowMultisampling())) return false;
+		if (!CaptureDisplayRecovery(restorePlan,topology,candidate.displayRestore,error) ||
+			!CaptureDisplayRecovery(targetPlan,topology,candidate.displayTarget,error)) return false;
+		if (!display && !ValidateDisplayPreserveActualPair(candidate.displayRestore,candidate.displayTarget,attempt.baseline,attempt.target,error)) return false;
+	}
+	if (!NewAttemptIdentity(candidate.attempt,error)) return false;
+	if (device) {
+		char diagnostic[512]{};
+		if (!Sys_BeginWindowPlacementLease(attempt.request,&placement,diagnostic,sizeof(diagnostic))) return Fail(error,diagnostic);
+		placementToken=attempt.request; expectedPlacement=placement;
+		if (double(placement.width)!=std::get<double>(attempt.baseline.at("r_windowWidth")) ||
+			double(placement.height)!=std::get<double>(attempt.baseline.at("r_windowHeight"))) return Fail(error,"Window placement changed while preparing settings");
+		AddPlacement(candidate.placement,"baseline.",placement);
+		committedPlacement=placement;
+		committedPlacement.width=int(std::get<double>(attempt.target.at("r_windowWidth")));
+		committedPlacement.height=int(std::get<double>(attempt.target.at("r_windowHeight")));
+		AddPlacement(candidate.placement,"target.",committedPlacement);
+	}
+	kind=Kind::Combined; effects=std::move(candidate); currentDevice=baselineDevice;
 	return WriteJournal(error);
 }
 bool EngineSettingsDisplayHost::Place(const sysWindowPlacementSnapshot_t& finalState, std::string& error) {
@@ -329,14 +481,20 @@ bool EngineSettingsDisplayHost::CancelPreparation(std::string& error) {
 }
 bool EngineSettingsDisplayHost::Restart(bool restoring, SettingsDisplayObservation& output, std::string& error) {
 	if (!VerifyJournal(false,error)) return false;
-	if (kind==Kind::Deferred) {
-		// The next level load reads the committed policy; nothing restarts. The
-		// controller still waits for a later presented frame on this device.
+	if (!DeviceRestart()) {
+		// Nothing restarts. The next level load reads a committed load policy.
+		// The running renderer takes a texture setting in place: it reloads its
+		// file-backed images when it ends the frame that follows the write, so
+		// the later presented frame the controller waits for already shows them.
+		// A combined attempt without a renderer restart may still reopen the
+		// sound device.
 		rendererDisplayState_t observed{}; SettingsDisplayObservation candidate;
 		if (!ObserveDevice(observed,candidate,error) || !candidate.ready || candidate.epoch!=baselineDevice.moduleEpoch)
 			return Fail(error,error.empty()?"The renderer stopped presenting during the settings change":error.c_str());
+		RestartSound(restoring);
 		currentDevice=observed; output=candidate;
-		if (cvarSystem->GetCVarBool("ui_retainedTrace")) common->Printf("UI_SETTINGS_DEFERRED restore=%d epoch=%llu generation=%llu submitted=%llu presented=%llu\n",
+		if (cvarSystem->GetCVarBool("ui_retainedTrace")) common->Printf("%s restore=%d epoch=%llu generation=%llu submitted=%llu presented=%llu\n",
+			DeviceWork()?"UI_SETTINGS_INPLACE":"UI_SETTINGS_DEFERRED",
 			restoring?1:0,static_cast<unsigned long long>(candidate.epoch),static_cast<unsigned long long>(candidate.generation),
 			static_cast<unsigned long long>(candidate.submitted),static_cast<unsigned long long>(candidate.presented));
 		return true;
@@ -353,16 +511,31 @@ bool EngineSettingsDisplayHost::Restart(bool restoring, SettingsDisplayObservati
 	rendererDisplayState_t before{};
 	if (!R_RendererModule_QueryDisplay(&before) || before.moduleEpoch!=baselineDevice.moduleEpoch) return Fail(error,"The renderer module changed during display recovery");
 	std::uint64_t selectionBefore=0;
-	if (kind==Kind::Renderer) {
+	if (RendererOwned()) {
 		renderRendererSelection_t ignored{}; std::uint64_t epoch=0;
 		if (!R_RendererModule_QueryRendererSelection(ignored,selectionBefore,epoch)) selectionBefore=0;
 	}
-	if (!R_RendererModule_TryDeviceRestart(&plan.request,diagnostic,sizeof(diagnostic))) return Fail(error,diagnostic);
+	// A display change the running device can take is applied to its window in
+	// place: nothing is torn down or reloaded. A request it refuses, or one that
+	// fails part-way, gets a new device on the same request, which starts from
+	// whatever state the window was left in.
+	bool transitioned=false;
+	if (DisplayTransition(plan,before)) {
+		transitioned=R_RendererModule_TryDisplayTransition(&plan.request,diagnostic,sizeof(diagnostic));
+		// The renderer's restart count stays where it was: nothing was lost, and
+		// advancing it makes the retained interface reload every document. The
+		// classic GUI fonts are sized for the display and rebuild on next use.
+		if (transitioned) UI_ClassicFontsDisplayChanged();
+		if (!transitioned && cvarSystem->GetCVarBool("ui_retainedTrace")) common->Printf("UI_SETTINGS_TRANSITION_REFUSED restore=%d detail=%s\n",restoring?1:0,diagnostic);
+	}
+	if (!transitioned) {
+		if (!R_RendererModule_TryDeviceRestart(&plan.request,diagnostic,sizeof(diagnostic))) return Fail(error,diagnostic);
+	}
 	rendererDisplayState_t observed{}; SettingsDisplayObservation candidate;
 	if (!ObserveDevice(observed,candidate,error) || candidate.epoch!=baselineDevice.moduleEpoch ||
 		candidate.generation<=before.presentation.generation || !MatchesDisplay(plan,observed,error))
 		return Fail(error,error.empty()?"The renderer did not create the requested new device":error.c_str());
-	if (kind==Kind::Renderer) {
+	if (RendererOwned()) {
 		// The new device resolved r_renderer again and reported it.
 		std::uint64_t serial=0;
 		if (!RendererAgrees(RendererRequest(restoring),serial,error)) return false;
@@ -372,26 +545,40 @@ bool EngineSettingsDisplayHost::Restart(bool restoring, SettingsDisplayObservati
 			restoring?1:0,RendererRequest(restoring).c_str(),static_cast<unsigned long long>(serial));
 	}
 	if (restoring) restorePlan=std::move(plan); else targetPlan=std::move(plan);
+	// A new device loaded every image and its upload resources under the
+	// settings now in effect; after a transition the running device reloads
+	// its images when it ends the next frame, if a texture setting changed too.
+	// The sound device follows on the next sound frame.
+	RestartSound(restoring);
 	currentDevice=observed; output=candidate;
-	if (cvarSystem->GetCVarBool("ui_retainedTrace")) common->Printf("UI_SETTINGS_DEVICE restore=%d epoch=%llu generation=%llu submitted=%llu presented=%llu failures=%llu width=%d height=%d\n",
-		restoring?1:0,static_cast<unsigned long long>(candidate.epoch),static_cast<unsigned long long>(candidate.generation),
+	if (cvarSystem->GetCVarBool("ui_retainedTrace")) common->Printf("%s restore=%d epoch=%llu generation=%llu submitted=%llu presented=%llu failures=%llu width=%d height=%d\n",
+		transitioned?"UI_SETTINGS_TRANSITION":"UI_SETTINGS_DEVICE",restoring?1:0,static_cast<unsigned long long>(candidate.epoch),static_cast<unsigned long long>(candidate.generation),
 		static_cast<unsigned long long>(candidate.submitted),static_cast<unsigned long long>(candidate.presented),static_cast<unsigned long long>(candidate.failures),
 		observed.window.logicalWidth,observed.window.logicalHeight);
 	return true;
 }
 bool EngineSettingsDisplayHost::Observe(bool restoring, SettingsDisplayObservation& output, std::string& error) {
 	rendererDisplayState_t observed{}; SettingsDisplayObservation candidate;
-	if (kind==Kind::Deferred) {
-		if (!ObserveDevice(observed,candidate,error)) return false;
+	if (!DeviceRestart()) {
+		if (!ObserveDevice(observed,candidate,error) || !SoundReady(candidate.effectsReady,error)) return false;
 		output=candidate; return true;
 	}
 	if (!ObserveDevice(observed,candidate,error) || !MatchesDisplay(restoring?restorePlan:targetPlan,observed,error)) return false;
-	if (kind==Kind::Renderer && !RendererCurrent(restoring,error)) return false;
+	if (RendererOwned()) {
+		if (!startup) { if (!RendererCurrent(restoring,error)) return false; }
+		else {
+			// A cold start has no restart of its own to name: the started device
+			// reports the recovered request. Vulkan has one back end.
+			const auto api=R_RendererModule_GetStatus().activeApi; std::uint64_t serial=0;
+			if ((api==RENDER_MODULE_API_GL || api==RENDER_MODULE_API_GL_MODULE) && !RendererAgrees(RendererRequest(restoring),serial,error)) return false;
+		}
+	}
+	if (!SoundReady(candidate.effectsReady,error)) return false;
 	output=candidate; return true;
 }
 bool EngineSettingsDisplayHost::PersistConfirmation(const SettingsAttempt& attempt, std::string& error) {
 	if (!ValidateLive(attempt.target,error) || !VerifyJournal(false,error)) return false;
-	if (kind==Kind::Deferred) {
+	if (!DeviceRestart()) {
 		effects.state=SettingsJournalState::Confirmed;
 		if (!WriteJournal(error) || !ValidateLive(attempt.target,error)) return false;
 		return CommitConfiguration(error);
@@ -400,9 +587,9 @@ bool EngineSettingsDisplayHost::PersistConfirmation(const SettingsAttempt& attem
 	if (!ObserveDevice(actual,observed,error) || actual.moduleEpoch!=currentDevice.moduleEpoch ||
 		actual.presentation.generation!=currentDevice.presentation.generation ||
 		actual.presentation.failureSequence!=currentDevice.presentation.failureSequence || !MatchesDisplay(targetPlan,actual,error)) return false;
-	if (kind==Kind::Renderer) {
-		// The display and its placement are unchanged; the selection still agrees.
-		if (!RendererCurrent(false,error)) return false;
+	if (RendererOwned() && !RendererCurrent(false,error)) return false;
+	if (!DisplayOwned()) {
+		// The display and its placement are unchanged.
 		committedPlacement=placement; effects.state=SettingsJournalState::Confirmed;
 		if (!WriteJournal(error) || !Place(committedPlacement,error) || !ValidateLive(attempt.target,error)) return false;
 		return CommitConfiguration(error);
@@ -413,13 +600,14 @@ bool EngineSettingsDisplayHost::PersistConfirmation(const SettingsAttempt& attem
 		double(committedPlacement.height)!=std::get<double>(attempt.target.at("r_windowHeight"))) return Fail(error,"Actual normal window dimensions differ from the confirmed target");
 	// Geometry outside the catalog is included before the confirmed marker. Its
 	// exact values are checked and applied while automatic geometry writes stay leased.
-	AddPlacement(journal.placement,"target.",committedPlacement);
-	journal.state=SettingsJournalState::Confirmed;
+	AddPlacement(kind==Kind::Display?journal.placement:effects.placement,"target.",committedPlacement);
+	(kind==Kind::Display?journal.state:effects.state)=SettingsJournalState::Confirmed;
 	if (!WriteJournal(error) || !Place(committedPlacement,error) || !ValidateLive(attempt.target,error)) return false;
 	return CommitConfiguration(error);
 }
 bool EngineSettingsDisplayHost::Finish(bool restoring, std::string& error) {
-	if (kind==Kind::Deferred) return FinishJournal(error);
+	// An attempt the device took in place never moved its leased placement.
+	if (!DeviceRestart()) return FinishJournal(error);
 	auto finalState=restoring?placement:committedPlacement;
 	if (restoring) {
 		// The catalog transaction already restored its owned keys and rebased
@@ -438,22 +626,30 @@ bool EngineSettingsDisplayHost::Startup(std::string& error) {
 	if (read==DurableReadResult::Missing) { Clear(); return true; }
 	blocked=true;
 	if (read!=DurableReadResult::Present) return false;
-	// A schema-2 record is a deferred or renderer attempt; schema 1 keeps its
-	// display route.
+	// A schema-2 record is a deferred, renderer or combined attempt; schema 1
+	// keeps its display route.
 	{
 		SettingsJournalRecord record; std::string schemaError;
 		if (DecodeSettingsJournalRecord(bytes,SystemSettingsHost::Schema(),record,schemaError) && record.Schema()==2) {
 			const auto& effect=std::get<SettingsEffectRecoveryJournal>(*record.Value());
-			if (effect.plan.domainMask==SystemSettingRendererResources) return StartupRenderer(bytes,effect,error);
-			return StartupDeferred(bytes,effect,error);
+			// The record's own snapshots class it, as its attempt was classed.
+			switch (SystemSettingsHost::ApplyClassOf(effect.baseline,effect.target)) {
+			case SystemApplyClass::Renderer: return StartupRenderer(bytes,effect,error);
+			case SystemApplyClass::Deferred: return StartupDeferred(bytes,effect,error);
+			case SystemApplyClass::Combined: return StartupCombined(bytes,effect,error);
+			default: return Fail(error,"Unsupported settings effect recovery record");
+			}
 		}
 	}
 	StateValues currentCatalog;
 	if (!settings.Read(currentCatalog,error) || !DecodeSystemSettingsJournal(bytes,currentCatalog,journal,error)) return false;
+	return StartupDisplay(bytes,false,error);
+}
+bool EngineSettingsDisplayHost::StartupDisplay(const std::string& bytes, bool combined, std::string& error) {
 	ownsJournal=true; writtenBytes=bytes;
 	if (journal.placement.size()!=18 || !ReadPlacement(journal.placement,"baseline.",placement) ||
 		!ReadPlacement(journal.placement,"target.",committedPlacement)) return Fail(error,"Invalid settings recovery placement metadata");
-	if (!settings.ValidateSavedTarget(journal.baseline,journal.target,error) || !RecoveryMetadata(journal,placement,committedPlacement,error)) return false;
+	if (!settings.ValidateSavedTarget(journal.baseline,journal.target,error) || !RecoveryMetadata(journal,placement,committedPlacement,combined,error)) return false;
 	startupConfirmed=journal.state==SettingsJournalState::Confirmed;
 	const auto* services=Sys_GetRenderWindowServices();
 	if (!services || !services->PrepareWindowSystem || !services->PrepareWindowSystem()) return Fail(error,"Cannot enumerate displays for settings startup recovery");
@@ -569,6 +765,43 @@ bool EngineSettingsDisplayHost::StartupRenderer(const std::string& bytes, const 
 	kind=Kind::Renderer; effects=record; ownsJournal=true; writtenBytes=bytes;
 	startupConfirmed=approved; catalogStartup=true; blocked=false; return true;
 }
+bool EngineSettingsDisplayHost::StartupCombined(const std::string& bytes, const SettingsEffectRecoveryJournal& record, std::string& error) {
+	// Each domain's policy is what the snapshots say, so replaying the owned
+	// settings before the renderer and the sound system start recovers every
+	// domain: both read their settings as they open.
+	const unsigned mask=record.plan.domainMask;
+	if (SystemSettingsHost::ApplyClassOf(record.baseline,record.target)!=SystemApplyClass::Combined || !CombinedPolicyAgrees(record))
+		return Fail(error,"Unsupported settings effect recovery record");
+	if (!settings.ValidateSavedTarget(record.baseline,record.target,error)) return false;
+	if (mask & SystemSettingDisplayRestart) {
+		// The attempt moved the display: recover it as a display attempt does,
+		// on the saved display with its placement, and commit after it presents.
+		journal={}; journal.state=record.state; journal.attempt=record.attempt;
+		journal.baseline=record.baseline; journal.target=record.target; journal.patch=record.patch;
+		journal.displayRestore=record.displayRestore; journal.displayTarget=record.displayTarget; journal.placement=record.placement;
+		kind=Kind::Combined; effects=record;
+		if (StartupDisplay(bytes,true,error)) return true;
+		kind=Kind::Display; effects={}; return false;
+	}
+	// The display did not move, so its saved pair is structural evidence only
+	// and the engine starts the normal way on whatever display it finds.
+	if ((mask & 19u) && !ValidateDisplayPreserveActualPair(record.displayRestore,record.displayTarget,record.baseline,record.target,error)) return false;
+	StateValues live;
+	if (!settings.Read(live,error)) return false;
+	const bool approved=record.state==SettingsJournalState::Confirmed;
+	const auto& wanted=approved?record.target:record.baseline;
+	startupTarget=live; StateValues replay;
+	for (const auto& [key,value]:record.patch) {
+		if (!SettingsValueEqual(live.at(key),record.baseline.at(key)) && !SettingsValueEqual(live.at(key),value))
+			return Fail(error,"A settings recovery key changed outside the saved attempt");
+		startupTarget[key]=wanted.at(key);
+		if (!SettingsValueEqual(live.at(key),wanted.at(key))) replay[key]=wanted.at(key);
+	}
+	if (!settings.ValidateRollback(record.baseline,live,startupTarget,error)) return false;
+	if ((!replay.empty() && !settings.Write(replay,error)) || !ValidateLive(startupTarget,error)) return false;
+	kind=Kind::Combined; effects=record; ownsJournal=true; writtenBytes=bytes;
+	startupConfirmed=approved; catalogStartup=true; blocked=false; return true;
+}
 bool EngineSettingsDisplayHost::InitializeDisplay(std::string& error) {
 	if (!startup) return true;
 	auto& plan=startupConfirmed?targetPlan:restorePlan; char diagnostic[512]{};
@@ -591,8 +824,8 @@ void EngineSettingsDisplayHost::StartupFrame(double now, bool allowWork) {
 		if (blocked || !allowWork) return;
 		std::string error; const bool approved=startupConfirmed;
 		// Finishing clears the executor, so name it first.
-		const char* const executor=kind==Kind::Renderer?"renderer":"deferred";
-		if (kind==Kind::Renderer) {
+		const char* const executor=kind==Kind::Renderer?"renderer":kind==Kind::Combined?"combined":"deferred";
+		if (RendererOwned()) {
 			const auto api=R_RendererModule_GetStatus().activeApi;
 			std::uint64_t serial=0;
 			// Vulkan has one back end; r_renderer chooses nothing to prove there.

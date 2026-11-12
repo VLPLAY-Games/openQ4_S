@@ -191,7 +191,12 @@ float CelSpecularTerm( float term ) {
 
 vec3 DecodeLocalNormal( vec4 bumpSample ) {
 	if ( uMaterialEnhanced < 0.5 ) {
-		return SafeNormalize( vec3( bumpSample.a, bumpSample.g, bumpSample.b ) * 2.0 - 1.0 );
+		// The stock interaction uses the sample as it is stored, and so do
+		// material_interaction.fs and the Vulkan receivers. A filtered sample
+		// is shorter than a unit vector wherever the bump detail turns, and
+		// that shortfall is part of the stock look: normalized here, every
+		// such edge was lit harder under a shadow map than without one.
+		return vec3( bumpSample.a, bumpSample.g, bumpSample.b ) * 2.0 - 1.0;
 	}
 
 	vec2 localNormalXY = vec2( bumpSample.a, bumpSample.g ) * 2.0 - 1.0;
@@ -217,16 +222,18 @@ float EnhancedSpecularTerm( vec3 halfAngle, vec3 viewDir, vec3 localNormal, vec3
 	return pow( ndoth, specularPower ) * max( uMaterialSpecularBoost, 0.0 ) * fresnel;
 }
 
+// The stock term with its doubling inside, as material_interaction.fs has
+// it: cel banding then clamps and steps the same value on both paths.
 float LegacySpecularTerm( vec3 halfAngle, vec3 localNormal ) {
 	float specular = clamp( dot( halfAngle, localNormal ) * 4.0 - 3.0, 0.0, 1.0 );
-	return specular * specular;
+	return specular * specular * 2.0;
 }
 
 vec3 InteractionSpecular( vec3 halfAngle, vec3 viewDir, vec3 localNormal, vec3 specularSample ) {
 	if ( uMaterialEnhanced >= 0.5 ) {
 		return specularSample * uSpecularColor.rgb * CelSpecularTerm( EnhancedSpecularTerm( halfAngle, viewDir, localNormal, specularSample ) );
 	}
-	return specularSample * ( uSpecularColor.rgb * 2.0 ) * CelSpecularTerm( LegacySpecularTerm( halfAngle, localNormal ) );
+	return specularSample * uSpecularColor.rgb * CelSpecularTerm( LegacySpecularTerm( halfAngle, localNormal ) );
 }
 
 float ApproxErf( float x ) {
@@ -241,15 +248,23 @@ float NormalCdf( float x ) {
 	return 0.5 * ( 1.0 + ApproxErf( x * 0.70710678 ) );
 }
 
+// Two of the four ring taps of the five-tap kernel; the others mirror them.
+const vec2 kShadowFiveTapRingA = vec2( 0.670820, 0.223607 );
+const vec2 kShadowFiveTapRingB = vec2( -0.223607, 0.670820 );
+
 float StableShadowHash( vec3 value ) {
 	return fract( sin( dot( value, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
 }
 
-mat2 ShadowOffsetRotation( vec2 uv, float depth ) {
+// The kernel turns by a hash of the texel within the tile, not within the
+// image, so a soft shadow's grain is the same wherever its tile lives: a
+// cached cell of the atlas, another cell later, or the scratch target.
+// Keyed on the image texel, the grain changed each time the tile moved.
+mat2 ShadowOffsetRotation( vec2 tileTexel, float depth ) {
 	if ( uShadowFilterMode < 0.5 ) {
 		return mat2( 1.0, 0.0, 0.0, 1.0 );
 	}
-	float angle = StableShadowHash( vec3( floor( uv / max( uShadowTexelSize.x, 1.0e-6 ) ), floor( depth * 1024.0 ) ) ) * 6.2831853;
+	float angle = StableShadowHash( vec3( floor( tileTexel ), floor( depth * 1024.0 ) ) ) * 6.2831853;
 	float s = sin( angle );
 	float c = cos( angle );
 	return mat2( c, s, -s, c );
@@ -512,7 +527,14 @@ vec4 SampleShadowCascade( vec4 shadowCoord, vec4 atlasRect, int cascadeIndex ) {
 	uv = clamp( uv, clampMin, clampMax );
 	// Blocker search and PCF use the same stable kernel orientation. Computing
 	// the hash/trigonometry once also keeps PCSS cost bounded per receiver.
-	mat2 rotation = ShadowOffsetRotation( uv, depth );
+	// localUv is the same bit for bit in every placement of the tile, and the
+	// tile's edge in texels is exact, so the rotation is too. The clamp is
+	// the guard band's, in texels.
+	vec2 shadowTexel = max( abs( uShadowTexelSize.xy ), vec2( 1.0e-6 ) );
+	vec2 tileTexels = floor( abs( atlasMax - atlasMin ) / shadowTexel + vec2( 0.5 ) );
+	vec2 guardTexels = guardBand / shadowTexel;
+	vec2 tileTexel = clamp( localUv * tileTexels, guardTexels, max( tileTexels - guardTexels, guardTexels ) );
+	mat2 rotation = ShadowOffsetRotation( tileTexel, depth );
 
 	float filterRadius = EffectiveShadowFilterRadius();
 #ifndef OPENQ4_SHADOW_COMPARE
@@ -532,10 +554,19 @@ vec4 SampleShadowCascade( vec4 shadowCoord, vec4 atlasRect, int cascadeIndex ) {
 	if ( uShadowFilterTaps <= 1.0 ) {
 		return vec4( shadow, localUv.x, localUv.y, depth );
 	}
+	// The first four taps of the nine- and thirteen-tap sets all lie to one
+	// side of the centre. Alone they pull the shadow 0.4 radius sideways and
+	// soften one side of its edge only, so the five-tap kernel uses a ring.
 	vec2 o1 = rotation * vec2( -0.326212, -0.405805 );
 	vec2 o2 = rotation * vec2( -0.840144, -0.073580 );
 	vec2 o3 = rotation * vec2( -0.695914, 0.457137 );
 	vec2 o4 = rotation * vec2( -0.203345, 0.620716 );
+	if ( uShadowFilterTaps <= 5.0 ) {
+		o1 = rotation * kShadowFiveTapRingA;
+		o2 = rotation * kShadowFiveTapRingB;
+		o3 = -o1;
+		o4 = -o2;
+	}
 	shadow += SampleShadowCompare( clamp( uv + o1 * tap, clampMin, clampMax ), depth, cascadeIndex, length( o1 ) * tapBias );
 	shadow += SampleShadowCompare( clamp( uv + o2 * tap, clampMin, clampMax ), depth, cascadeIndex, length( o2 ) * tapBias );
 	shadow += SampleShadowCompare( clamp( uv + o3 * tap, clampMin, clampMax ), depth, cascadeIndex, length( o3 ) * tapBias );
@@ -958,9 +989,15 @@ void main() {
 	vec3 light = vec3( ndotl );
 	light *= texture2DProj( uLightFalloffMap, vLightFalloffTexCoord ).rgb;
 	light *= texture2DProj( uLightProjectionMap, vLightProjectionTexCoord ).rgb;
-	vec4 shadowInfo = SampleShadow();
-	light *= shadowInfo.x;
-	light *= SampleTranslucentShadow();
+	// A fragment the light does not reach (outside the projected image, past
+	// the falloff, turned away) has no shadow to resolve, and the filter is
+	// most of this shader's cost. The debug views still show every fragment.
+	vec4 shadowInfo = vec4( 1.0, 0.0, 0.0, 0.0 );
+	if ( max( light.r, max( light.g, light.b ) ) > 0.0 || ShadowVisualDebugMode() ) {
+		shadowInfo = SampleShadow();
+		light *= shadowInfo.x;
+		light *= SampleTranslucentShadow();
+	}
 
 	vec3 diffuse = texture2D( uDiffuseMap, vDiffuseTexCoord ).rgb * uDiffuseColor.rgb;
 	diffuse = ApplyFlatDiffuseSweep( diffuse, vLightFalloffTexCoord.z );

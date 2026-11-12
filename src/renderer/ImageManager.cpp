@@ -302,15 +302,21 @@ void R_ResolveImageDownsizePolicy( const imageDownsizeInputs_t& inputs, const ch
 R_ImageReductionCvarsChanged
 
 One list, consumed by both the startup priming and the per-frame check so the
-two can never drift apart.
+two can never drift apart. image_usePrecompressedTextures belongs to it: it
+chooses the file a texture is read from (a precompressed DDS or its source
+image), so a change reaches the GPU the same way, through a reload. Until it
+joined the list only a full renderer restart applied it.
 ===============
 */
+extern idCVar image_usePrecompressedTextures;
+
 static bool R_ImageReductionCvarsChanged( bool clear ) {
 	idCVar *const reductionCvars[] = {
 		&image_picmip, &image_picmipFilter, &image_picmipMinSize,
 		&image_downSize, &image_downSizeLimit,
 		&image_downSizeSpecular, &image_downSizeSpecularLimit,
-		&image_downSizeBump, &image_downSizeBumpLimit
+		&image_downSizeBump, &image_downSizeBumpLimit,
+		&image_usePrecompressedTextures
 	};
 
 	bool changed = false;
@@ -345,7 +351,7 @@ static bool R_ImageSamplerCvarsChanged( bool clear ) {
 idImageManager::PrimeCvars
 
 Every cvar is born CVAR_MODIFIED, so without this the first rendered frame of
-every launch would see nine "changed" reduction cvars and reload every image for
+every launch would see ten "changed" reduction cvars and reload every image for
 nothing. Sampling cvars need the same startup priming so they do not pointlessly
 reapply every default sampler. Called once the intrinsic images exist and the
 real values are in.
@@ -1332,6 +1338,71 @@ void idImageManager::ReloadImages( bool all, bool fileBackedOnly ) {
 		}
 		if ( R_ImagePolicyShouldReload( image ) ) image->Reload( all );
 	}
+}
+
+/*
+===============
+ReloadGeneratedCacheImages
+
+A generated image cache entry is checked against its source only by a stamp
+anyone can copy, so nothing it put on the GPU before a pure lock may stay there
+afterwards. Called with the lock already in place: the directory gate then
+refuses every generated/images read, and the forced reload derives each image
+from the pure paks (and rewrites its cache entry).
+
+Expanded loading backgrounds that builds until 9 November 2026 published under
+fs_savepath (guis/assets/generated/loadscreens/, FS_IsGeneratedLoadscreenPath)
+are derived data with no source in any pak, and the lock refuses those files
+too. One a stray reference loaded is purged rather than reloaded; should
+anything bind it again, its load is refused and the image defaults. The
+session's own wide loading screen is an in-memory scratch image
+(_expandedLoadingBackground_<w>x<h>), composed from reads the lock admits, and
+is left alone.
+===============
+*/
+static bool R_IsGeneratedLoadscreenImage( const char *name ) {
+	static const char prefix[] = "guis/assets/generated/loadscreens/";
+	return name != NULL && idStr::Icmpn( name, prefix, static_cast<int>( sizeof( prefix ) - 1 ) ) == 0;
+}
+
+bool idImageManager::ReloadGeneratedCacheImages() {
+	if ( !R_ImagePolicyOperationAllowed() ) {
+		return false;
+	}
+	R_RenderThread_Sync( "image registry" );
+	// the memoized source probes predate the lock
+	R_SetDDSProbeCacheActive( false );
+
+	int reloaded = 0;
+	int purged = 0;
+	int failed = 0;
+	for ( int i = 0; i < images.Num(); i++ ) {
+		idImage *image = images[ i ];
+		if ( image != NULL && image->IsLoaded() && R_IsGeneratedLoadscreenImage( image->GetName() ) ) {
+			image->PurgeImage();
+			if ( image->IsLoaded() ) {
+				common->Warning( "Could not evict loading background %s", image->GetName() );
+				failed++;
+			} else {
+				purged++;
+			}
+			continue;
+		}
+		if ( image == NULL || !image->HoldsGeneratedCacheContent() ) {
+			continue;
+		}
+		image->Reload( true );
+		if ( image->HoldsGeneratedCacheContent() ) {
+			common->Warning( "Could not reload cached image %s from its source", image->GetName() );
+			failed++;
+		} else {
+			reloaded++;
+		}
+	}
+	common->Printf( "Reloaded %d cached image%s from pure content%s%s\n", reloaded, reloaded == 1 ? "" : "s",
+		purged ? va( "; evicted %d loading background%s", purged, purged == 1 ? "" : "s" ) : "",
+		failed ? va( "; %d could not be reloaded", failed ) : "" );
+	return failed == 0;
 }
 
 /*

@@ -179,6 +179,7 @@ void gameDebugLogDamage( const char *source, idEntity *victim, idEntity *inflict
 #include "FreeView.h"
 
 #include "HitMarker.h"
+#include "gamesys/AnimatedCrosshair.h"
 
 #include "ClassicLights.h"
 
@@ -405,6 +406,9 @@ struct rvmGameRender_t {
 	bool postProcessAvailable;
 	bool smaaAvailable;
 	int forwardRenderSamples;
+	// r_multiSamples when the targets were built; forwardRenderSamples is what
+	// the device then gave. A changed request rebuilds the targets.
+	int forwardRenderRequestedSamples;
 	bool hdrSceneTarget;
 	int renderTargetWidth;
 	int renderTargetHeight;

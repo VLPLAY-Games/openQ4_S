@@ -313,11 +313,13 @@ public:
 	virtual bool			GetUsercmdInput( float otherYawDelta, float currentYaw, vrUsercmdInput_t &input );
 	virtual void			DrawMenuPointer( void );
 	virtual void			Vibrate( int hand, float amplitude, int durationMsec );
-	virtual void			ShiftTrackingOrigin( const idVec3 &trackingDelta );
+	virtual bool			ShiftTrackingOrigin( const idVec3 &trackingDelta );
 
 	void					RequestRestart( void ) { restartRequested = true; }
 	void					RequestRecenter( void ) { recenterRequested = true; }
 	void					RequestCalibrateHeight( void ) { calibrateRequested = true; }
+	bool					ConsumeFocusLoss( void ) { const bool lost = focusLost; focusLost = false; return lost; }
+	void					ResetBodyYaw( void );
 	void					PrintStatus( void ) const;
 
 	// OpenXR on Vulkan: the renderer's instance, physical device and device
@@ -367,6 +369,7 @@ private:
 	void					RequestVulkanRendererRestart( void );
 	bool					SelectSwapchainFormat( int rendererVulkanFormat );
 	bool					CreateBaseSpace( void );
+	void					UpdateStageBounds( void );
 	void					ReleaseRendererImages( void );
 
 	// per frame
@@ -420,6 +423,7 @@ private:
 	int						vulkanRestartQueued;	// when it was queued, until the renderer stops; 0 none
 	bool					sessionRunning;
 	bool					sessionFocused;
+	bool					focusLost;			// a focused session lost the controllers (ConsumeFocusLoss)
 	bool					rendererReady;
 	bool					restartRequested;
 	bool					recenterRequested;
@@ -428,8 +432,13 @@ private:
 	bool					startFailureLogged;	// "no runtime" style warnings print once per start
 	bool					runtimeStopped;		// the runtime ended VR: wait for vr_restart
 	recovery_t				recovery;			// consumed only at a frame boundary
+	int						nextInstanceRetryTime;	// no runtime answered: when to ask for one again
 	int						nextSystemRetryTime;
 	int						nextSessionRetryTime;
+	// the runtime moves a reference space (the headset's own recentre, a redrawn
+	// play area) from spaceChangeTime on; the origin follows from that frame
+	bool					spaceChangePending;
+	XrTime					spaceChangeTime;
 	idStr					runtimeName;
 	idStr					systemName;
 	idStr					interactionProfile;
@@ -452,6 +461,7 @@ private:
 	bool					frameOpen;
 	bool					frameShouldRender;
 	XrTime					frameDisplayTime;
+	XrDuration				frameDisplayPeriod;	// the headset's refresh interval, as the runtime last predicted it
 	XrView					views[VR_NUM_EYES];
 	bool					viewsValid;
 	openq4::PresentationFrameDelta frameDelta;
@@ -584,6 +594,7 @@ idVRSystemOpenXR::idVRSystemOpenXR( void ) {
 	vulkanRestartQueued = 0;
 	sessionRunning = false;
 	sessionFocused = false;
+	focusLost = false;
 	rendererReady = false;
 	restartRequested = false;
 	recenterRequested = true;
@@ -591,8 +602,11 @@ idVRSystemOpenXR::idVRSystemOpenXR( void ) {
 	startFailureLogged = false;
 	runtimeStopped = false;
 	recovery = RECOVERY_NONE;
+	nextInstanceRetryTime = 0;
 	nextSystemRetryTime = 0;
 	nextSessionRetryTime = 0;
+	spaceChangePending = false;
+	spaceChangeTime = 0;
 	swapchain_t *chains[3] = { &eyeSwapchains[0], &eyeSwapchains[1], &screenSwapchain };
 	for ( int i = 0; i < 3; i++ ) {
 		chains[i]->handle = XR_NULL_HANDLE;
@@ -615,6 +629,7 @@ idVRSystemOpenXR::idVRSystemOpenXR( void ) {
 	frameOpen = false;
 	frameShouldRender = false;
 	frameDisplayTime = 0;
+	frameDisplayPeriod = 0;
 	memset( views, 0, sizeof( views ) );
 	viewsValid = false;
 	frameDelta.Reset();
@@ -740,6 +755,12 @@ void idVRSystemOpenXR::PrintStatus( void ) const {
 		common->Printf( "  eyes: %dx%d (recommended %dx%d), virtual screen %dx%d, format 0x%llx\n",
 			eyeSwapchains[0].width, eyeSwapchains[0].height, recommendedEyeWidth, recommendedEyeHeight,
 			screenSwapchain.width, screenSwapchain.height, static_cast<unsigned long long>( swapchainFormat ) );
+		if ( frameDisplayPeriod > 0 ) {
+			const double periodMsec = static_cast<double>( frameDisplayPeriod ) * 1.0e-6;
+			common->Printf( "  refresh: %.1f Hz (a frame every %.2f ms)\n", 1000.0 / periodMsec, periodMsec );
+		} else {
+			common->Printf( "  refresh: not reported yet\n" );
+		}
 		common->Printf( "  interaction profile: %s\n", interactionProfile.Length() ? interactionProfile.c_str() : "<none>" );
 		const char *const baseName = baseSpaceType == XR_REFERENCE_SPACE_TYPE_STAGE ? "STAGE"
 			: baseSpaceType == VR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR ? "LOCAL_FLOOR" : "LOCAL";
@@ -814,6 +835,8 @@ bool idVRSystemOpenXR::RecoverIfNeeded( void ) {
 	}
 	const recovery_t requested = recovery;
 	recovery = RECOVERY_NONE;
+	// the headset is gone from under a player who was using it
+	focusLost = focusLost || sessionFocused;
 	DestroySession();
 	if ( requested == RECOVERY_INSTANCE ) {
 		DestroyInstance();
@@ -1196,6 +1219,16 @@ void idVRSystemOpenXR::RequestVulkanRendererRestart( void ) {
 	cmdSystem->BufferCommandText( CMD_EXEC_INSERT, "vid_restart\n" );
 }
 
+bool VR_ConsumeFocusLoss( void ) {
+	return vrOpenXR != NULL && vrOpenXR->ConsumeFocusLoss();
+}
+
+void VR_UsercmdAnglesCleared( void ) {
+	if ( vrOpenXR != NULL ) {
+		vrOpenXR->ResetBodyYaw();
+	}
+}
+
 bool VR_CreateVulkanInstance( void *getInstanceProcAddr, const void *createInfo, void **outInstance, int *outResult ) {
 	return vrOpenXR != NULL && vrOpenXR->CreateVulkanInstance( getInstanceProcAddr, createInfo, outInstance, outResult );
 }
@@ -1477,6 +1510,8 @@ void idVRSystemOpenXR::DestroySession( void ) {
 	sessionState = XR_SESSION_STATE_UNKNOWN;
 	graphicsApi = VR_GRAPHICS_NONE;
 	viewsValid = false;
+	frameDisplayPeriod = 0;
+	spaceChangePending = false;
 	interactionProfile.Clear();
 
 	for ( int i = 0; i < 16; i++ ) {
@@ -1543,16 +1578,10 @@ bool idVRSystemOpenXR::CreateBaseSpace( void ) {
 	baseSpaceType = type;
 	standingPlay = standing;
 	playSpaceFallback = choice.fallback || ( choice.standing && !standing );
-	stageBoundsValid = false;
-	if ( type == XR_REFERENCE_SPACE_TYPE_STAGE ) {
-		XrExtent2Df bounds;
-		bounds.width = bounds.height = 0.0f;
-		if ( xrGetReferenceSpaceBoundsRect( session, XR_REFERENCE_SPACE_TYPE_STAGE, &bounds ) == XR_SUCCESS
-				&& bounds.width > 0.0f && bounds.height > 0.0f ) {
-			stageBounds = bounds;
-			stageBoundsValid = true;
-		}
-	}
+	UpdateStageBounds();
+	// the new space starts from its own recentre; a move the runtime announced
+	// for the old one no longer applies
+	spaceChangePending = false;
 	recenterRequested = true;
 	screenAnchored = false;
 	const char *const baseName = type == XR_REFERENCE_SPACE_TYPE_STAGE ? "STAGE"
@@ -1563,6 +1592,21 @@ bool idVRSystemOpenXR::CreateBaseSpace( void ) {
 			"from where you recentre, as seated play does", VR_LOCAL_FLOOR_EXTENSION_NAME );
 	}
 	return true;
+}
+
+// The play area of standing play on STAGE; the runtime may redraw it mid-session.
+void idVRSystemOpenXR::UpdateStageBounds( void ) {
+	stageBoundsValid = false;
+	if ( session == XR_NULL_HANDLE || baseSpaceType != XR_REFERENCE_SPACE_TYPE_STAGE ) {
+		return;
+	}
+	XrExtent2Df bounds;
+	bounds.width = bounds.height = 0.0f;
+	if ( xrGetReferenceSpaceBoundsRect( session, XR_REFERENCE_SPACE_TYPE_STAGE, &bounds ) == XR_SUCCESS
+			&& bounds.width > 0.0f && bounds.height > 0.0f ) {
+		stageBounds = bounds;
+		stageBoundsValid = true;
+	}
 }
 
 /*
@@ -1860,6 +1904,10 @@ void idVRSystemOpenXR::StartIfRequested( void ) {
 		}
 		runtimeStopped = false;
 		startFailureLogged = false;
+		// the player asked: look for the runtime and the headset now, not when a
+		// retry that an earlier failure scheduled comes round
+		nextInstanceRetryTime = 0;
+		nextSystemRetryTime = 0;
 		nextSessionRetryTime = 0;
 	}
 	// Once the runtime has ended VR, creating an instance could relaunch it
@@ -1868,13 +1916,12 @@ void idVRSystemOpenXR::StartIfRequested( void ) {
 		return;
 	}
 	if ( instance == XR_NULL_HANDLE ) {
-		static int nextAttempt = 0;
-		if ( Sys_Milliseconds() < nextAttempt ) {
+		if ( Sys_Milliseconds() < nextInstanceRetryTime ) {
 			return;
 		}
 		if ( !CreateInstance() ) {
 			// no runtime: try again later rather than every frame
-			nextAttempt = Sys_Milliseconds() + VR_SYSTEM_RETRY_MSEC * 3;
+			nextInstanceRetryTime = Sys_Milliseconds() + VR_SYSTEM_RETRY_MSEC * 3;
 			return;
 		}
 	}
@@ -1938,10 +1985,23 @@ void idVRSystemOpenXR::PollEvents( void ) {
 				common->Printf( "OpenXR: controllers %s\n", interactionProfile.Length() ? interactionProfile.c_str() : "disconnected" );
 				break;
 			}
-			case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
-				// the user recentred in the runtime: follow it
-				recenterRequested = true;
+			case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING: {
+				// The user recentred in the runtime, or it redrew the play area:
+				// follow it. The space only moves for frames displayed from
+				// changeTime on, so a recentre taken before then would measure the
+				// head in the old space and jump when the new one arrived.
+				const XrEventDataReferenceSpaceChangePending *pending = reinterpret_cast<const XrEventDataReferenceSpaceChangePending *>( &event );
+				if ( pending->session == session ) {
+					spaceChangeTime = spaceChangePending ? Max( spaceChangeTime, pending->changeTime ) : pending->changeTime;
+					spaceChangePending = true;
+					if ( vr_debug.GetInteger() > 0 ) {
+						common->Printf( "OpenXR: the runtime moves reference space %d in %.0f ms; the VR origin follows it then\n",
+							static_cast<int>( pending->referenceSpaceType ),
+							frameDisplayTime > 0 ? static_cast<double>( pending->changeTime - frameDisplayTime ) * 1.0e-6 : 0.0 );
+					}
+				}
 				break;
+			}
 			default:
 				break;
 		}
@@ -1963,6 +2023,10 @@ void idVRSystemOpenXR::HandleSessionState( XrSessionState state ) {
 				sessionRunning = true;
 				frameDelta.Reset();
 				common->Printf( "OpenXR: presenting to the headset\n" );
+			} else if ( recovery == RECOVERY_NONE ) {
+				// READY is announced once: a session that would not begin never
+				// presents, so open a new one after the usual pause
+				recovery = RECOVERY_SESSION;
 			}
 			break;
 		}
@@ -1971,9 +2035,12 @@ void idVRSystemOpenXR::HandleSessionState( XrSessionState state ) {
 			break;
 		case XR_SESSION_STATE_VISIBLE:
 		case XR_SESSION_STATE_SYNCHRONIZED:
+			// the runtime's own menu took the controllers, or the headset came off
+			focusLost = focusLost || sessionFocused;
 			sessionFocused = false;
 			break;
 		case XR_SESSION_STATE_STOPPING:
+			focusLost = focusLost || sessionFocused;
 			sessionFocused = false;
 			if ( sessionRunning ) {
 				Check( xrEndSession( session ), "xrEndSession" );
@@ -2039,6 +2106,12 @@ idVRSystemOpenXR::LocateFrame
 */
 void idVRSystemOpenXR::LocateFrame( XrTime time ) {
 	viewsValid = false;
+	if ( spaceChangePending && time >= spaceChangeTime ) {
+		// the first frame located in the space the runtime moved
+		spaceChangePending = false;
+		recenterRequested = true;
+		UpdateStageBounds();
+	}
 	XrViewLocateInfo locateInfo;
 	memset( &locateInfo, 0, sizeof( locateInfo ) );
 	locateInfo.type = XR_TYPE_VIEW_LOCATE_INFO;
@@ -2498,6 +2571,22 @@ bool idVRSystemOpenXR::GetUsercmdInput( float otherYawDelta, float currentYaw, v
 
 /*
 ====================
+idVRSystemOpenXR::ResetBodyYaw
+
+The body's yaw is absolute usercmd yaw, and a new map zeroes the generator's
+angles and spawns the player against a zeroed usercmd. Left as it was, every
+snap turn of the level before turned the next level's start. The next usercmd
+takes the yaw again from the zeroed angles, as when VR first took over input.
+====================
+*/
+void idVRSystemOpenXR::ResetBodyYaw( void ) {
+	Sys_EnterCriticalSection( VR_INPUT_CRITICAL_SECTION );
+	bodyYawValid = false;
+	Sys_LeaveCriticalSection( VR_INPUT_CRITICAL_SECTION );
+}
+
+/*
+====================
 idVRSystemOpenXR::GetFrameState
 ====================
 */
@@ -2681,18 +2770,21 @@ idVRSystemOpenXR::ShiftTrackingOrigin
 
 The recentre pose (a heading and a position in LOCAL space) moves by the
 distance the body walked, horizontally only, and the poses already handed
-out for this frame move with it, so the camera stays on the head.
+out for this frame move with it, so the camera stays on the head. Returns
+whether it moved, which the game needs to know: the eye it draws is a tic
+behind the body, and has to carry the part of a taken step it has not
+covered yet.
 ====================
 */
-void idVRSystemOpenXR::ShiftTrackingOrigin( const idVec3 &trackingDelta ) {
+bool idVRSystemOpenXR::ShiftTrackingOrigin( const idVec3 &trackingDelta ) {
 	const float unitsPerMetre = vr_worldScale.GetFloat();
 	if ( !sessionRunning || unitsPerMetre <= 0.0f || !VR_IsFinite( VR_Vec3( trackingDelta.x, trackingDelta.y, trackingDelta.z ) ) ) {
-		return;
+		return false;
 	}
 	// In multiplayer the local player reports every tic's movement; only a
 	// room-scale walk's, or its coast to a stop, belongs to the tracking space.
 	if ( idAsyncNetwork::IsActive() && ( !roomScaleStickIdle || Sys_Milliseconds() - roomScaleWalkMsec > 400 ) ) {
-		return;
+		return false;
 	}
 	const idVec3 horizontal( trackingDelta.x, trackingDelta.y, 0.0f );
 	const vrVec3_t xr = VR_Scale( VR_EngineToXrDirection( VR_Vec3( horizontal.x, horizontal.y, 0.0f ) ), 1.0f / unitsPerMetre );
@@ -2710,6 +2802,7 @@ void idVRSystemOpenXR::ShiftTrackingOrigin( const idVec3 &trackingDelta ) {
 		frame.aim[i].origin -= horizontal;
 	}
 	Sys_LeaveCriticalSection( VR_INPUT_CRITICAL_SECTION );
+	return true;
 }
 
 /*
@@ -2836,6 +2929,9 @@ void idVRSystemOpenXR::BeginFrame( void ) {
 	frameOpen = true;
 	frameShouldRender = frameState.shouldRender == XR_TRUE;
 	frameDisplayTime = frameState.predictedDisplayTime;
+	if ( frameState.predictedDisplayPeriod > 0 ) {
+		frameDisplayPeriod = frameState.predictedDisplayPeriod;
+	}
 
 	const float frameSeconds = frameDelta.Sample( Sys_GetClockTicks(), Sys_ClockTicksPerSecond() );
 

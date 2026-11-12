@@ -292,6 +292,12 @@ typedef struct viewLight_s {
 	// usable volume.
 	int						shadowMapIncompleteMapMask;
 	int						shadowMapIncompleteStencilMask;
+	// Receiver ownerships a stencil volume would have shadowed in this view
+	// and does not, because the light is going to render shadow maps: the
+	// volume exists and was not linked, or was never built. A back end that
+	// finds nothing to cast in a pass reads it to tell a map that failed
+	// from a light with nothing to shadow.
+	int						shadowMapElidedStencilMask;
 	// A hybrid receiver samples the partial map while stencil supplies the
 	// casters absent from it. This mask is narrower than either completeness
 	// mask: it records only ownership for which at least one required caster
@@ -301,6 +307,15 @@ typedef struct viewLight_s {
 	int						shadowMapPrelightStencilRequiredMask;
 	int						shadowMapPrelightStencilReadyMask;
 	const struct drawSurf_s	*translucentInteractions;	// get shadows from everything
+	// Front end only (Vulkan): the receiver scan of R_ShadowMapLightWillUseShadowMaps
+	// for this view, kept until one of the light's interactions changes state.
+	bool					shadowMapReceiverScanValid;
+	bool					shadowMapReceiverScanAllowsMaps;
+	// The edge of this light's projected atlas tile in this view, set once the
+	// view's lights are final (R_ShadowMapAssignAtlasTiles) so every atlas light
+	// of the view fits. 0 for a point cube light or one that was not assigned;
+	// back ends read it through R_ShadowMapProjectedTileSize.
+	int						shadowMapTileSize;
 } viewLight_t;
 
 
@@ -373,7 +388,10 @@ typedef struct viewDef_s {
 	idVec2				temporalJitterPixels;
 	idVec3				temporalPreviousViewOrigin;
 	idMat3				temporalPreviousViewAxis;
+	// previous camera: xy = projection scale, zw = its jitter-free offsets
+	// aligned to this frame's applied jitter (FinalizeViewProjection)
 	idVec4				temporalPreviousProjectInfo;
+	idVec2				temporalPreviousNeutralProjectionOffset;
 	idVec2				temporalPreviousJitterPixels;
 	// projectionMatrix[8]/[9] before any jitter (R_SetupProjection)
 	idVec2				temporalNeutralProjectionOffset;
@@ -985,6 +1003,7 @@ public:
 	virtual bool BeginSavePreview();
 	virtual int PollSavePreview( const char *fileName );
 	virtual void CancelSavePreview();
+	virtual bool ReloadGeneratedCacheImages();
 	virtual void			SetPortalSkyCaptureViewCallback( renderPortalSkyCaptureViewCallback_t callback );
 	virtual void			UnCrop();
 	virtual void			GetCardCaps( bool &oldCard, bool &nv10or20 );
@@ -1213,6 +1232,10 @@ bool	RB_VR_PresentFrame( void );
 void	R_VR_ShutdownTargets( void );
 // front end (RenderSystem_vr.cpp): destroys the VR targets before an image purge
 void	R_VR_DestroyTargets( void );
+// A backend learned the window's live size or UI viewport while a VR frame
+// holds its own extent in glConfig: FinishVRFrame restores these.
+void	R_VR_PublishWindowSize( int width, int height );
+void	R_VR_PublishUIViewport( int x, int y, int width, int height );
 // The eye the front end is rendering a stereo VR frame for, -1 otherwise.
 int	R_VR_FrontEndEye( void );
 // A frame key for a subview that depends on the eye it is seen from (mirror,
@@ -1533,31 +1556,43 @@ extern idCVar r_shadowMapDistantFilterScale;	// filter-radius scale for parallel
 extern idCVar r_shadowMapPCSSLightRadius;	// projected PCSS-lite blocker search radius
 extern idCVar r_shadowMapPCSSMaxRadius;	// projected PCSS-lite maximum filter radius
 extern idCVar r_shadowMapNormalOffsetScale;	// normal-offset receiver bias in shadow texels
-extern idCVar r_shadowMapCasterCulling;	// caster face culling: 0 = two-sided, 1 = near shell, 2 = topology-aware automatic
+extern idCVar r_shadowMapCasterCulling;	// caster face culling: 0 = two-sided, 1 = near shell, 2 = automatic (sealed hulls near shell, open geometry the stencil facing rule), 3 = the stencil facing rule everywhere, 4 = the earlier automatic
 extern idCVar r_shadowMapPointHighPrecision;	// 1 = store point shadow depth as high-precision float color
 extern idCVar r_shadowMapPointLights;	// 1 = shadow-map point lights (the dominant Q4 light class); 0 = stencil fallback for point lights
 extern idCVar r_shadowMapPointSize;	// point-light cube face resolution, separate from r_shadowMapSize
 extern idCVar r_shadowMapAtlasSize;	// shared projected-light shadow atlas edge size
 extern idCVar r_shadowMapPointDepthCompare;	// 1 = use samplerCubeShadow depth compare for point maps when supported
+extern idCVar r_shadowMapPointDepthOnly;	// 1 = OpenGL point cubes drop the colour cube while nothing samples it
 extern idCVar r_shadowMapStableAlphaHash;	// 1 = seed hashed alpha from stable world coordinates
 extern idCVar r_shadowMapMaxUpdatesPerView;	// shadow-map pass budget per backend view, 0 = unlimited
 extern idCVar r_shadowMapSkipStencilShadows;	// 1 = skip stencil volume generation/linking for lights that will render shadow maps
 
-// mirrors the backend shadow-map admission policy for front-end stencil-volume elision (tr_light.cpp)
-bool R_ShadowMapLightWillUseShadowMaps( const idRenderLightLocal *lightDef );
+// mirrors the backend shadow-map admission policy for front-end stencil-volume elision (tr_light.cpp);
+// applySubviewPolicy false leaves out the one clause that differs between the views of a frame
+bool R_ShadowMapLightWillUseShadowMaps( const idRenderLightLocal *lightDef, const bool applySubviewPolicy = true );
+// remembers, for the Vulkan receiver scan, whether the model an entity's interactions are built from has a surface only stencil can shadow
+void R_ShadowMapNoteEntityModel( idRenderEntityLocal *def, const idRenderModel *model );
+// sizes the projected atlas tiles of a finished view so its lights all fit (tr_light.cpp)
+void R_ShadowMapAssignAtlasTiles( viewDef_t *viewDef );
 // backend-published: shadow-map resources were successfully prepared this video generation (draw_arb2.cpp)
 bool RB_ShadowMapResourcesKnownGood( bool pointLight );
 extern idCVar r_shadowMapStaticCache;		// 1 = reuse resident static-only shadow-map passes
 extern idCVar r_shadowMapStaticHysteresisFrames;	// frames after dynamic casters before static reuse
 extern idCVar r_shadowMapResidentFrames;	// frames a resident static shadow map may remain unused
-extern idCVar r_shadowMapProjectedCacheSize;	// projected shadow-map static cache slots
+extern idCVar r_shadowMapProjectedCacheSize;	// projected static cache size, in full-size maps
 extern idCVar r_shadowMapPointCacheSize;	// point shadow-map static cache slots
+extern idCVar r_shadowMapCacheMovingLights;	// 1 = moving lights go through the static cache too (comparison)
+extern idCVar r_shadowMapStencilFallbackViews;	// views without a failure before a light leaves the stencil fallback
+extern idCVar r_shadowMapPointCacheMegs;	// memory bound on those slots, MiB
+extern idCVar r_shadowMapPointCompose;	// 1 = compose live casters over a cached static cube
+extern idCVar r_shadowMapStaticCutouts;	// 1 = cutout casters with unchanging coverage are cached as static
 extern idCVar r_shadowMapCacheCSM;		// 1 = allow CSM/static cache reuse
 extern idCVar r_shadowMapTranslucentFilterRadius;	// translucent moment filter radius, -1 = inherit opaque radius
 extern idCVar r_shadowMapTranslucentMinVariance;	// minimum variance for translucent moment resolve
 extern idCVar r_shadowMapTranslucentBleedReduction;	// moment light-bleed reduction
 extern idCVar r_shadowMapGpuSyncTimings;	// 1 = glFinish-bracket shadow-map passes for GPU-synchronized diagnostics
 extern idCVar r_shadowMapGpuTimerQueries;	// 1 = use GL timer queries for shadow-map GPU diagnostics when available
+extern idCVar r_heatHazeDepthReject;	// 1 = heat haze does not refract the view weapon or other geometry in front of it
 extern idCVar r_softParticles;			// 1 = depth-fade eligible BSE particle surfaces against the opaque scene depth
 extern idCVar r_softParticleFadeDistance;	// world-unit fade distance for r_softParticles
 extern idCVar r_enhancedMaterials;		// 1 = use enhanced GLSL interaction shading for stock materials when supported
@@ -1857,6 +1892,9 @@ struct renderWindowRequest_s;
 bool R_TryFullVidRestartForImagePolicy(const renderWindowRequest_s* request, char* error, int errorSize);
 bool R_TryFullVidRestart( const renderWindowRequest_s *request, char *error, int errorSize );
 bool R_TryInitializeDisplay( const renderWindowRequest_s *request, char *error, int errorSize );
+// The request on the running device, without a teardown. False before any
+// change when the request needs a new device; see the definition.
+bool R_TryDisplayTransition( const renderWindowRequest_s *request, char *error, int errorSize );
 bool R_IsRecoverableRendererRestart( void );
 bool R_ForceWindowForRendererRestart( void );
 const renderWindowRequest_s *R_GetRecoverableWindowRequest( void );
@@ -2306,6 +2344,8 @@ int		R_FindARBProgram( unsigned int target, const char *program );
 bool	R_IsARBProgramValid( unsigned int target, unsigned int ident );
 vkMaterialProgramFamily_t R_GetARBProgramFamily( unsigned int target, unsigned int ident );
 bool	R_BindARBProgram( unsigned int target, unsigned int ident, const char *usage, bool required );
+// a stock heat-haze fragment program rewritten to test its refracted read against the scene depth
+bool	R_ARBProgramUsesSceneDepthReject( int ident );
 
 // Stable identities for every GLSL family named by the shipped Quake 4
 // materials. Native replacements require an approved source-pair identity,

@@ -207,11 +207,82 @@ idAsyncClient::idAsyncClient
 idAsyncClient::idAsyncClient( void ) {
 	guiNetMenu = NULL;
 	updateState = UPDATE_NONE;
+	resumeReconnectTime = 0;
 	Clear();
 }
 
 bool idAsyncClient::IsActive( void ) const {
 	return active || idAsyncNetwork::multiViewDemo.IsPlaying();
+}
+
+static idCVar net_resumeReconnect( "net_resumeReconnect", "1", CVAR_SYSTEM | CVAR_BOOL | CVAR_ARCHIVE | CVAR_NOCHEAT,
+	"reconnect to the server after the app returns from the background if the connection did not survive" );
+static idCVar net_resumeProbe( "net_resumeProbe", "5000", CVAR_SYSTEM | CVAR_INTEGER | CVAR_NOCHEAT,
+	"after a return from the background, milliseconds without a packet before reconnecting", 1000, 30000 );
+
+/*
+==================
+idAsyncClient::ApplicationResumed
+
+ui-visual-design.md 13.6: after a stay in the background multiplayer
+reconnects or shows a connection-lost state. The server drops a silent client
+after its time-out; waiting out ours meant a frozen game for 40 seconds. A
+stay longer than the time-out reconnects at once. After a shorter one the
+backlog queued while away is dropped, so only a packet the server sends now
+proves the connection; without one in net_resumeProbe ms, reconnect. A failed
+reconnect reports the lost connection as any failed connect does.
+==================
+*/
+void idAsyncClient::ApplicationResumed( int suspendedMs ) {
+	resumeProbeTime = -1;
+	if ( !active || clientState < CS_CONNECTED || !net_resumeReconnect.GetBool() || idAsyncNetwork::server.IsActive()
+			|| idAsyncNetwork::multiViewDemo.IsPlaying() ) {
+		return;
+	}
+	// Whatever queued while away is stale, including a disconnect the server
+	// sent when it dropped the client.
+	ClearPendingPackets();
+	if ( suspendedMs >= idAsyncNetwork::clientServerTimeout.GetInteger() * 1000 ) {
+		ResumeReconnect( va( "away %d s, beyond the time-out", suspendedMs / 1000 ) );
+		return;
+	}
+	resumeProbeTime = clientTime;
+	common->Printf( "Network: back from %d ms in the background; awaiting the server\n", suspendedMs );
+}
+
+void idAsyncClient::ResumeReconnect( const char *reason ) {
+	resumeProbeTime = -1;
+	resumeReconnectTime = Sys_Milliseconds();
+	common->Printf( "Network: reconnecting after the background (%s)\n", reason );
+	cmdSystem->BufferCommandText( CMD_EXEC_APPEND, "reconnect\n" );
+}
+
+// The server that dropped the client can still answer the old channel with a
+// disconnect while the new connection is being set up; that must not end the
+// reconnect behind a message box. Only before the new connection exists, and
+// only briefly after the reconnect began.
+bool idAsyncClient::StaleDisconnectAfterResume( void ) const {
+	return resumeReconnectTime != 0 && clientState < CS_CONNECTED
+		&& Sys_Milliseconds() - resumeReconnectTime < 10000;
+}
+
+// True once a reconnect is on its way: the frame stops there.
+bool idAsyncClient::CheckResume( void ) {
+	if ( resumeProbeTime < 0 ) {
+		return false;
+	}
+	// Strictly later: the first frame back reads the backlog before the session
+	// reports the return, at the same client time.
+	if ( lastPacketTime > resumeProbeTime ) {
+		common->Printf( "Network: the connection survived the background\n" );
+		resumeProbeTime = -1;
+		return false;
+	}
+	if ( clientTime - resumeProbeTime < net_resumeProbe.GetInteger() ) {
+		return false;
+	}
+	ResumeReconnect( "no packet since the return" );
+	return true;
 }
 
 int idAsyncClient::GetLocalClientNum( void ) const {
@@ -246,6 +317,7 @@ void idAsyncClient::Clear( void ) {
 	lastConnectTime = -9999;
 	lastEmptyTime = -9999;
 	lastPacketTime = -9999;
+	resumeProbeTime = -1;
 	lastSnapshotTime = -9999;
 	snapshotGameFrame = 0;
 	snapshotGameTime = 0;
@@ -482,6 +554,17 @@ idAsyncClient::DisconnectFromServer
 void idAsyncClient::DisconnectFromServer( void ) {
 	idBitMsg	msg;
 	byte		msgBuf[MAX_MESSAGE_SIZE];
+
+	// openQ4: the pure lock is taken while still connecting, when the server's
+	// pak list arrives. It was only released from a full connection, so an
+	// attempt that ended first - a full server, a refusal, a cancelled download
+	// or the player backing out - left it on: loose files and every pak the
+	// server had not listed stayed hidden in the menus, in single player and
+	// on the next server. A pure restart is in CS_PURERESTART by the time it
+	// reconnects, and keeps the list it rebuilt.
+	if ( clientState == CS_CHALLENGING || clientState == CS_CONNECTING ) {
+		fileSystem->ClearPureChecksums();
+	}
 
 	if ( clientState >= CS_CONNECTED ) {
 		// if we were actually connected, clear the pure list
@@ -1590,7 +1673,8 @@ void idAsyncClient::ProcessReliableServerMessages( void ) {
 
 	msg.Init( msgBuf, sizeof( msgBuf ) );
 
-	while ( channel.GetReliableMessage( msg ) ) {
+	// openQ4: and none of the reliable messages queued behind that one
+	while ( clientState >= CS_CONNECTED && channel.GetReliableMessage( msg ) ) {
 		id = msg.ReadByte();
 		if ( msg.IsReadOverflowed() ) {
 			common->Warning( "server sent an empty reliable message; disconnecting safely" );
@@ -1927,6 +2011,10 @@ void idAsyncClient::ProcessDisconnectMessage( const netadr_t from, const idBitMs
 		common->Printf( "Disconnect packet from unknown server.\n" );
 		return;
 	}
+	if ( StaleDisconnectAfterResume() ) {
+		common->Printf( "Network: ignoring the dropped connection's disconnect while reconnecting\n" );
+		return;
+	}
 	arenaCampaign.AbortMatch();
 	session->Stop();
 	session->MessageBox( MSG_OK, common->GetLanguageDict()->GetString ( "#str_04320" ), NULL, true );
@@ -2238,6 +2326,15 @@ bool idAsyncClient::ValidatePureServerChecksums( const netadr_t from, const idBi
 	numChecksums = 0;
 	do {
 		i = msg.ReadLong( );
+		// openQ4: a list naming one pak twice passes every check here, asks for
+		// a pure restart, and the restart then cannot match the second copy to
+		// a pak and ends the client with a fatal error. Refuse the list.
+		for ( int j = 0; i != 0 && j < numChecksums; j++ ) {
+			if ( inChecksums[ j ] == i ) {
+				common->Warning( "server sent pak checksum 0x%x twice in its pure list; ignoring the list", i );
+				return false;
+			}
+		}
 		inChecksums[ numChecksums++ ] = i;
 		// just to make sure a broken message doesn't crash us
 		if ( numChecksums >= MAX_PURE_PAKS ) {
@@ -2249,6 +2346,18 @@ bool idAsyncClient::ValidatePureServerChecksums( const netadr_t from, const idBi
 	inGamePakChecksum = msg.ReadLong();
 
 	fsPureReply_t reply = fileSystem->SetPureServerChecksums( inChecksums, inGamePakChecksum, missingChecksums, &missingGamePakChecksum );
+	// Images drawn from the generated image cache, or from an expanded loading
+	// background file an older build left in the save folder, before the lock
+	// must not outlive it. The lock already refuses both, so this reload
+	// derives cached images from the pure paks and purges such backgrounds; if
+	// any cannot be replaced, restart as before. (The session's own wide
+	// loading screen is composed in memory and needs nothing here.)
+	if ( reply == PURE_OK && fileSystem->TakePureImageCacheEviction() ) {
+		if ( renderSystem == NULL || !renderSystem->ReloadGeneratedCacheImages() ) {
+			common->Printf( "Cached images could not be reloaded for the pure server; restarting\n" );
+			reply = PURE_RESTART;
+		}
+	}
 	switch ( reply ) {
 		case PURE_RESTART:
 			// need to restart the filesystem with a different pure configuration
@@ -2525,6 +2634,14 @@ void idAsyncClient::ProcessMessage( const netadr_t from, idBitMsg &msg ) {
 
 	lastPacketTime = clientTime;
 	ProcessReliableServerMessages();
+	// openQ4: a reliable message can end the connection - a disconnect, or
+	// one this client refuses - and that shuts the channel down. The packet's
+	// unreliable part was processed all the same: a ping then answered through
+	// the dead channel's compressor, and a snapshot was read into a game whose
+	// map had just been shut down.
+	if ( clientState < CS_CONNECTED ) {
+		return;
+	}
 	ProcessUnreliableServerMessage( msg );
 }
 
@@ -2753,7 +2870,7 @@ void idAsyncClient::RunFrame( bool allowBlocking ) {
 		return;
 	}
 
-	if ( CheckTimeout() ) {
+	if ( CheckResume() || CheckTimeout() ) {
 		return;
 	}
 

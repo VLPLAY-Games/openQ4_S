@@ -77,11 +77,19 @@ public:
 	int					FindFont( const char *name );
 	void				SetupFonts();
 	bool				ReloadFonts();
+	// The fonts are rasterised for the display's height. After a display change
+	// that did not restart the device, the next use rebuilds them once.
+	static void			DisplayChanged();
 
 	idRegion			*GetTextRegion(const char *text, float textScale, idRectangle rectDraw, float xStart, float yStart);
 
 	void				SetSize(float width, float height);
 	void				SetAspectCorrection( bool enabled );
+	// A settings row lists an action's keys and has the room to name each in
+	// full: while this is set, a keyboard keycap grows as wide as its name
+	// needs (LEFT SHIFT, RIGHT ALT) instead of squeezing it into the compact
+	// width an inline hint keeps.
+	void				SetKeyBindingWideLabels( bool wide ) { keyBindingWideLabels = wide; }
 	float				GetCanvasAspect() const;
 	void				GetVirtualScreenExpansion( float width, float height, float &xExpand, float &yExpand ) const;
 	void				GetCinematic16x9Bars( float width, float height, idRectangle &topBar, idRectangle &bottomBar, idRectangle &leftBar, idRectangle &rightBar, idRectangle &visibleArea ) const;
@@ -92,6 +100,19 @@ public:
 	void				SetCursor(int n);
 
 	void				AdjustCoords(float *x, float *y, float *w, float *h);
+	// openQ4: the stock interface's HUD settings (idLegacyHudLayout). A group
+	// scales about its screen anchor, both in virtual units, as coordinates
+	// leave virtual space: after clipping, so a clip rectangle scales with what
+	// it clips. The opacity multiplies every colour's alpha; additive art,
+	// which ignores alpha, fades by its colour instead. 1 turns either off.
+	void				SetGroupScale( float anchorX, float anchorY, float scale ) { groupX = anchorX; groupY = anchorY; groupScale = scale; }
+	void				GetGroupScale( float &anchorX, float &anchorY, float &scale ) const { anchorX = groupX; anchorY = groupY; scale = groupScale; }
+	// Text with its key escapes (^ikHH, ^iKHH) written out as the keys' names,
+	// for a line that names a key in passing rather than showing its keycap.
+	// Returns whether anything changed.
+	static bool			PlainKeyNames( const char *text, idStr &plain );
+	void				SetDrawOpacity( float opacity ) { drawOpacity = opacity; }
+	float				GetDrawOpacity() const { return drawOpacity; }
 	bool				ClippedCoords(float *x, float *y, float *w, float *h);
 	bool				ClippedCoords(float *x, float *y, float *w, float *h, float *s1, float *t1, float *s2, float *t2);
 
@@ -151,7 +172,10 @@ private:
 	idVec4 hudColour = idVec4(1,1,1,1);
 	bool hudGlyph = false;
 	bool hudDiscard = false;
-	void SetDrawColor(const idVec4& colour);
+	float groupX = 0.0f, groupY = 0.0f, groupScale = 1.0f, drawOpacity = 1.0f;
+	// The transform origin as the group scale places it.
+	idVec3 GroupOrigin() const;
+	void SetDrawColor(const idVec4& colour, const idMaterial* material = nullptr);
 	bool CaptureHud(const idDrawVert* vertices, const idMaterial* material);
 	struct embeddedIcon_t {
 		char				code[4];
@@ -231,6 +255,7 @@ private:
 	bool				overStrikeMode;
 	idVec4				drawTextColor;
 	float				drawTextColorAdjust;
+	bool				keyBindingWideLabels;	// a settings row's keycaps take the width their names need
 
 	idMat3				mat;
 	idVec3				origin;

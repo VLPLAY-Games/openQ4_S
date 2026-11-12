@@ -34,6 +34,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "tr_local.h"
 #include "draw_pbr.h"
 #include "ARBColorZeroFloor.h"
+#include "ARBHeatHazeDepthReject.h"
 #include "CelShading.h"
 #include "Model_local.h"
 #include "ShadowMapClassification.h"
@@ -2158,6 +2159,13 @@ static bool				g_projectedTranslucentShadowPassReady = false;
 static bool				g_pointTranslucentShadowPassReady = false;
 static bool				g_pointShadowMapDepthCompareAvailable = true;
 static int				g_pointShadowMapDepthCompareAvailableGeneration = -1;
+// Depth-only point cubes (RB_PointShadowMapColorCubeNeeded) are given up for
+// the video generation if a target without a colour attachment is incomplete.
+static bool				g_pointShadowMapDepthOnlyAvailable = true;
+static int				g_pointShadowMapDepthOnlyAvailableGeneration = -1;
+// Whether the resident cubes were made with a colour image, and when.
+static bool				g_pointShadowMapCubesHaveColor = true;
+static int				g_pointShadowMapCubesColorGeneration = -1;
 
 typedef enum {
 	SHADOWMAP_SUPPORT_OK = 0,
@@ -2334,6 +2342,8 @@ typedef enum {
 	SHADOWMAP_PASS_RESULT_SCHEDULED_SKIP
 } shadowMapPassResult_t;
 
+// The shared-stream scratch slots. The caches have their own record counts:
+// SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS and SHADOWMAP_POINT_CACHE_MAX_SLOTS.
 static const int SHADOWMAP_CACHE_MAX_SLOTS = 16;
 
 // point cubes carry six faces of color+depth per slot, so they get their own
@@ -2341,6 +2351,7 @@ static const int SHADOWMAP_CACHE_MAX_SLOTS = 16;
 static int RB_ShadowMapPointSizeValue( void ) {
 	return idMath::ClampInt( 128, 2048, r_shadowMapPointSize.GetInteger() );
 }
+static int RB_ShadowMapPointCacheSlotLimit( void );
 static const int SHADOWMAP_LIGHT_HISTORY_SLOTS = 256;
 
 typedef struct {
@@ -2420,8 +2431,8 @@ typedef struct {
 	int							issuedFrame;
 } shadowMapGpuTimerQuery_t;
 
-static projectedShadowMapCacheEntry_t	g_projectedShadowMapCache[SHADOWMAP_CACHE_MAX_SLOTS];
-static pointShadowMapCacheEntry_t		g_pointShadowMapCache[SHADOWMAP_CACHE_MAX_SLOTS];
+static projectedShadowMapCacheEntry_t	g_projectedShadowMapCache[SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS];
+static pointShadowMapCacheEntry_t		g_pointShadowMapCache[SHADOWMAP_POINT_CACHE_MAX_SLOTS];
 static sharedInteractionProjectedScratch_t
 	g_sharedInteractionProjectedScratch[SHADOWMAP_CACHE_MAX_SLOTS];
 static sharedInteractionPointScratch_t
@@ -2764,6 +2775,36 @@ static void RB_PointShadowMapDisableDepthCompareForGeneration( void ) {
 	g_pointShadowMapDepthCompareAvailableGeneration = tr.videoRestartCount;
 }
 
+// A point cube's colour image holds radial depth packed into RGBA, for the
+// receivers that compare by hand: the classic receiver when hardware compare
+// is off (which the compare-delta debug mode also forces), the opt-in modern
+// renderers, which always decode the packed value, the shared interaction
+// stream, whose slots carry both images, and the debug overlay, which draws
+// it. The shipped configuration has none of them: the receiver reads the
+// depth cube through a shadow sampler and nothing reads the colour. The cube
+// is then depth only, four bytes a texel where it was eight (twelve with the
+// fp16 cube), and the caster pass writes no colour.
+static bool RB_PointShadowMapColorCubeNeeded( void ) {
+	if ( !r_shadowMapPointDepthOnly.GetBool() ) {
+		return true;
+	}
+	if ( g_pointShadowMapDepthOnlyAvailableGeneration == tr.videoRestartCount && !g_pointShadowMapDepthOnlyAvailable ) {
+		return true;
+	}
+	return !RB_PointShadowMapDepthCompareEnabled()
+		|| r_shadowMapDebugOverlay.GetBool()
+		|| r_rendererSharedWorldInteraction.GetBool()
+		|| r_rendererModernVisible.GetBool()
+		|| r_rendererModernVisibleDepth.GetBool()
+		|| r_rendererModernDeferred.GetBool()
+		|| r_rendererForwardPlus.GetBool();
+}
+
+static void RB_PointShadowMapDisableDepthOnlyForGeneration( void ) {
+	g_pointShadowMapDepthOnlyAvailable = false;
+	g_pointShadowMapDepthOnlyAvailableGeneration = tr.videoRestartCount;
+}
+
 static float RB_PointShadowMapDepthModeValue( void ) {
 	return RB_PointShadowMapHighPrecisionEnabled() ? 1.0f : 0.0f;
 }
@@ -2864,13 +2905,13 @@ static bool RB_ShadowMapActivePointCacheContentReady( void ) {
 	}
 
 	int slotIndex = -1;
-	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; ++i ) {
+	for ( int i = 0; i < SHADOWMAP_POINT_CACHE_MAX_SLOTS; ++i ) {
 		if ( entry == &g_pointShadowMapCache[i] ) {
 			slotIndex = i;
 			break;
 		}
 	}
-	const int slotLimit = idMath::ClampInt( 0, SHADOWMAP_CACHE_MAX_SLOTS, r_shadowMapPointCacheSize.GetInteger() );
+	const int slotLimit = RB_ShadowMapPointCacheSlotLimit();
 	if ( slotIndex < 0 || slotIndex >= slotLimit
 			|| entry->passKind != static_cast<int>( SHADOWMAP_PASS_GLOBAL )
 			|| entry->lastUpdatedFrame < 0 || entry->lastUpdatedFrame > tr.frameCount
@@ -3073,39 +3114,37 @@ bool RB_ShadowMapResourcesKnownGood( bool pointLight ) {
 // Shadow casters render in light space, where the mirrored-view logic in
 // GL_Cull does not apply. idTech4 winding makes the engine-front (visible)
 // side of a front-sided material the GL_BACK face, so culling GL_FRONT stores
-// the light-facing, near shell. The automatic mode only does that for sealed
-// hulls. Open, non-manifold, or otherwise uncertain geometry is rendered
-// two-sided: either authored winding can then contribute and props cannot
-// silently disappear from the depth map. Storing the far shell is deliberately
-// avoided because mesh thickness turns into contact-shadow detachment.
-//   r_shadowMapCasterCulling 0: always two-sided
-//   r_shadowMapCasterCulling 1: always store the light-facing near shell
-//   r_shadowMapCasterCulling 2: automatic (near shell for perfect hulls whose
-//     bounds do not contain the light and whose transform preserves winding,
-//     two-sided otherwise)
-// The authored material orientation is honored whenever one-sided culling is
-// active. Mode 0 and AUTO's conservative fallbacks intentionally override it.
+// the light-facing near shell and culling GL_BACK the triangles that face
+// away from the light. Which of the two a caster stores is the shared policy
+// of R_ShadowMapCasterFaces (r_shadowMapCasterCulling); this only turns its
+// answer into GL state.
 static int g_shadowMapCasterCullApplied = -1; // 0 = culling disabled, else the GLenum face
+// whether the light whose casters are being drawn has a mirrored projection
+static bool g_shadowMapCasterWindingMirrored = false;
+
+static int RB_ShadowMapCasterFacesCullFace( const shadowMapCasterFaces_t faces ) {
+	switch ( faces ) {
+	case SHADOWMAP_CASTER_FACES_NEAR:
+		return static_cast<int>( GL_FRONT );
+	case SHADOWMAP_CASTER_FACES_FAR:
+		return static_cast<int>( GL_BACK );
+	default:
+		return 0;
+	}
+}
 
 static void RB_ShadowMapApplyCasterCull( const idMaterial *shader,
 		const srfTriangles_t *casterGeo = NULL,
 		const float *modelMatrix = NULL ) {
-	const int mode = idMath::ClampInt( 0, 2, r_shadowMapCasterCulling.GetInteger() );
 	const int materialCull = ( shader != NULL ) ? shader->GetCullType() : CT_FRONT_SIDED;
-	const bool automaticTwoSided = mode == 2
-		&& ( casterGeo == NULL || !casterGeo->perfectHull
-			|| R_ShadowMapCasterTransformNeedsTwoSided( modelMatrix )
-			|| R_ShadowMapLightOriginInsideCasterBounds( backEnd.vLight,
-				modelMatrix, casterGeo->bounds[0].ToFloatPtr(),
-				casterGeo->bounds[1].ToFloatPtr() ) );
-	int desired = 0;
-	if ( mode != 0 && !automaticTwoSided && materialCull != CT_TWO_SIDED ) {
-		GLenum cullFace = GL_FRONT;
-		if ( materialCull == CT_BACK_SIDED ) {
-			cullFace = ( cullFace == GL_FRONT ) ? GL_BACK : GL_FRONT;
-		}
-		desired = static_cast<int>( cullFace );
-	}
+	const int desired = RB_ShadowMapCasterFacesCullFace(
+		R_ShadowMapCasterFaces( R_ShadowMapCasterCullingMode(),
+			backEnd.vLight, g_shadowMapCasterWindingMirrored,
+			casterGeo != NULL,
+			casterGeo != NULL && casterGeo->perfectHull, modelMatrix,
+			casterGeo != NULL ? casterGeo->bounds[0].ToFloatPtr() : NULL,
+			casterGeo != NULL ? casterGeo->bounds[1].ToFloatPtr() : NULL,
+			materialCull ) );
 	if ( desired == g_shadowMapCasterCullApplied ) {
 		return;
 	}
@@ -3118,7 +3157,10 @@ static void RB_ShadowMapApplyCasterCull( const idMaterial *shader,
 	glCullFace( static_cast<GLenum>( desired ) );
 }
 
+// Called once at the start of every caster pass, with the pass's light current.
 static void RB_ShadowMapResetCasterCull( void ) {
+	g_shadowMapCasterWindingMirrored =
+		R_ShadowMapLightMirrorsCasterWinding( backEnd.vLight );
 	g_shadowMapCasterCullApplied = -1;
 	RB_ShadowMapApplyCasterCull( NULL );
 }
@@ -3134,7 +3176,13 @@ static int g_shadowMapSubviewFallbackPasses = 0;
 // would otherwise repeat every frame with an empty fallback; the sticky flag
 // restores volume generation for that light from the next frame on.
 static void RB_ShadowMapMarkStencilFallbackSticky( const viewLight_t *vLight ) {
-	if ( vLight == NULL || vLight->lightDef == NULL || vLight->lightDef->shadowMapStencilFallbackSticky ) {
+	if ( vLight == NULL || vLight->lightDef == NULL ) {
+		return;
+	}
+	// every failure restarts the wait before the light may leave the fallback
+	vLight->lightDef->shadowMapStencilFallbackFrame = backEnd.frameCount;
+	vLight->lightDef->shadowMapStencilFallbackCleanViews = 0;
+	if ( vLight->lightDef->shadowMapStencilFallbackSticky ) {
 		return;
 	}
 	vLight->lightDef->shadowMapStencilFallbackSticky = true;
@@ -3184,6 +3232,13 @@ static void RB_ShadowMapStatsAccumulateCasterPolicy( const viewLight_t *vLight )
 
 static bool RB_ShadowMapGpuTimerQueriesAvailable( void ) {
 	if ( !r_shadowMapGpuTimerQueries.GetBool() ) {
+		return false;
+	}
+	// The results only reach the r_shadowMapReport lines. Issued unconditionally,
+	// every phase of every pass of every light began and ended a query and split
+	// the renderer-metrics timer around it, and a view with more phases than the
+	// 64 slots then polled all 64 unfinished queries for each further phase.
+	if ( r_shadowMapReport.GetInteger() <= 0 && !r_shadowMapDebugOverlay.GetBool() ) {
 		return false;
 	}
 	if ( !( GLEW_ARB_timer_query || GLEW_VERSION_3_3 ) ) {
@@ -3412,13 +3467,11 @@ static int RB_ShadowMapAtlasDivForLight( const viewLight_t *vLight ) {
 
 static bool RB_ShadowMapValidateProjectedStateContract( const viewLight_t *vLight, const shadowMapProjectedLightState_t &state, const char **reason );
 
+// The tile the front end gave this light for the view
+// (R_ShadowMapAssignAtlasTiles), else r_shadowMapSize.
 static int RB_ShadowMapTileSizeForLight( const viewLight_t *vLight ) {
-	const int atlasDiv = RB_ShadowMapAtlasDivForLight( vLight );
-	const int maxTileSize = glConfig.maxTextureSize / atlasDiv;
-	if ( maxTileSize < 128 ) {
-		return 0;
-	}
-	return idMath::ClampInt( 128, maxTileSize, r_shadowMapSize.GetInteger() );
+	return R_ShadowMapProjectedTileSize( vLight, RB_ShadowMapAtlasDivForLight( vLight ),
+		glConfig.maxTextureSize );
 }
 
 bool RB_ShadowMapBuildArb2ParityState( const viewLight_t *vLight, const viewDef_t *viewDef, const int shadowMapSize, shadowMapArb2ParityState_t &state ) {
@@ -3532,7 +3585,7 @@ static int RB_ShadowMapBuildPassSignatureForView( const viewLight_t *vLight, con
 	hash = RB_ShadowMapHashInt( hash, r_shadowMapStableAlphaHash.GetBool() ? 1 : 0 );
 	hash = RB_ShadowMapHashFloat( hash, RB_ShadowMapPolygonFactor() );
 	hash = RB_ShadowMapHashFloat( hash, RB_ShadowMapPolygonOffset() );
-	hash = RB_ShadowMapHashFloat( hash, static_cast<float>( idMath::ClampInt( 0, 2, r_shadowMapCasterCulling.GetInteger() ) ) );
+	hash = RB_ShadowMapHashFloat( hash, static_cast<float>( R_ShadowMapCasterCullingMode() ) );
 	if ( pointLight ) {
 		hash = RB_ShadowMapHashInt( hash, RB_ShadowMapPointSizeValue() );
 		hash = RB_ShadowMapHashInt( hash, RB_PointShadowMapHighPrecisionEnabled() ? 1 : 0 );
@@ -3618,10 +3671,12 @@ static void RB_ShadowMapInvalidateLightCaches( const int lightIndex ) {
 	if ( lightIndex < 0 ) {
 		return;
 	}
-	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
+	for ( int i = 0; i < SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS; i++ ) {
 		if ( g_projectedShadowMapCache[i].valid && g_projectedShadowMapCache[i].lightIndex == lightIndex ) {
 			g_projectedShadowMapCache[i].valid = false;
 		}
+	}
+	for ( int i = 0; i < SHADOWMAP_POINT_CACHE_MAX_SLOTS; i++ ) {
 		if ( g_pointShadowMapCache[i].valid && g_pointShadowMapCache[i].lightIndex == lightIndex ) {
 			g_pointShadowMapCache[i].valid = false;
 		}
@@ -3647,8 +3702,10 @@ bool RB_ShadowMapPrepareCacheView( const viewDef_t *viewDef ) {
 		return false;
 	}
 
-	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
+	for ( int i = 0; i < SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS; i++ ) {
 		g_projectedShadowMapCache[i].valid = false;
+	}
+	for ( int i = 0; i < SHADOWMAP_POINT_CACHE_MAX_SLOTS; i++ ) {
 		g_pointShadowMapCache[i].valid = false;
 	}
 	memset( g_shadowMapLightHistory, 0, sizeof( g_shadowMapLightHistory ) );
@@ -3673,18 +3730,32 @@ bool RB_ShadowMapPrepareCacheView( const viewDef_t *viewDef ) {
 	return true;
 }
 
+// Point cubes compose like projected tiles when their faces can be blitted:
+// the cached cube keeps static depth only, and each view copies it to the
+// scratch cube and draws the live casters over the copy.
+static bool RB_ShadowMapPointComposeAvailable( void ) {
+	return r_shadowMapPointCompose.GetBool() && glBlitFramebuffer != NULL
+		&& glBindFramebuffer != NULL;
+}
+
 static bool RB_ShadowMapStaticCacheable( const viewLight_t *vLight, const shadowMapPassKind_t passKind, const bool pointLight, const bool haveTranslucentCasters ) {
+	// A moving light has a new map every view, so it is drawn directly.
+	if ( R_ShadowMapMovingLightSkipsCache( vLight, backEnd.frameCount ) ) {
+		return false;
+	}
 	if ( !r_shadowMapStaticCache.GetBool() || vLight == NULL || RB_ShadowMapLightIndex( vLight ) < 0 ) {
 		return false;
 	}
-	// Dynamic casters no longer defeat caching for projected lights: they are
-	// excluded from the cache signature and composed over the cached static
-	// tiles per frame, so a walking character costs one blit plus its own
-	// draws instead of a full static-scene re-render. Point lights keep the
-	// old rule until the cube path gains composition (phase 5c).
-	const bool dynamicsDefeatCache = pointLight && vLight->shadowMapDynamicCasterCount > 0;
-	// Perforated surfaces always live in the dynamic chains. Their animated
-	// coverage is composed over cached opaque depth for projected lights.
+	// Dynamic casters do not defeat caching: they are excluded from the cache
+	// signature and composed over the cached static depth per frame, so a
+	// walking character or an alpha-tested grate costs one copy plus its own
+	// draws instead of a full static-scene re-render. A point cube that cannot
+	// be composed keeps the old rule and re-renders every view.
+	const bool dynamicsDefeatCache = pointLight && vLight->shadowMapDynamicCasterCount > 0
+		&& !RB_ShadowMapPointComposeAvailable();
+	// Perforated surfaces whose coverage can animate live in the dynamic
+	// chains and are composed over the cached depth; the others are cached
+	// with it (R_ShadowMapCutoutCoverageAnimates).
 	if ( haveTranslucentCasters || dynamicsDefeatCache
 			|| vLight->shadowMapStaticCasterCount <= 0 ) {
 		const int lightIndex = RB_ShadowMapLightIndex( vLight );
@@ -3704,7 +3775,10 @@ static bool RB_ShadowMapStaticCacheable( const viewLight_t *vLight, const shadow
 	shadowMapLightHistory_t *history = RB_ShadowMapFindLightHistory( RB_ShadowMapLightIndex( vLight ) );
 	if ( history != NULL ) {
 		history->lastTouchedFrame = tr.frameCount;
-		if ( pointLight && tr.frameCount - history->lastDynamicFrame < Max( 0, r_shadowMapStaticHysteresisFrames.GetInteger() ) ) {
+		// Only a cube that bakes its dynamics into the cached content has to
+		// wait for them to leave before it may be cached again.
+		if ( pointLight && !RB_ShadowMapPointComposeAvailable()
+				&& tr.frameCount - history->lastDynamicFrame < Max( 0, r_shadowMapStaticHysteresisFrames.GetInteger() ) ) {
 			g_shadowMapStats.staticHysteresisPasses++;
 			return false;
 		}
@@ -3713,11 +3787,16 @@ static bool RB_ShadowMapStaticCacheable( const viewLight_t *vLight, const shadow
 }
 
 static bool RB_ShadowMapStaticCacheableReadOnly( const viewLight_t *vLight, const shadowMapPassKind_t passKind, const bool pointLight, const bool haveTranslucentCasters ) {
+	// A moving light has a new map every view, so it is drawn directly.
+	if ( R_ShadowMapMovingLightSkipsCache( vLight, backEnd.frameCount ) ) {
+		return false;
+	}
 	if ( !r_shadowMapStaticCache.GetBool() || vLight == NULL || RB_ShadowMapLightIndex( vLight ) < 0 ) {
 		return false;
 	}
+	const bool pointBakesDynamics = pointLight && !RB_ShadowMapPointComposeAvailable();
 	if ( haveTranslucentCasters
-			|| ( pointLight && vLight->shadowMapDynamicCasterCount > 0 )
+			|| ( pointBakesDynamics && vLight->shadowMapDynamicCasterCount > 0 )
 			|| vLight->shadowMapStaticCasterCount <= 0 ) {
 		return false;
 	}
@@ -3725,18 +3804,28 @@ static bool RB_ShadowMapStaticCacheableReadOnly( const viewLight_t *vLight, cons
 		return false;
 	}
 	const shadowMapLightHistory_t *history = RB_ShadowMapFindLightHistoryConst( RB_ShadowMapLightIndex( vLight ) );
-	if ( history != NULL && pointLight && tr.frameCount - history->lastDynamicFrame < Max( 0, r_shadowMapStaticHysteresisFrames.GetInteger() ) ) {
+	if ( history != NULL && pointBakesDynamics && tr.frameCount - history->lastDynamicFrame < Max( 0, r_shadowMapStaticHysteresisFrames.GetInteger() ) ) {
 		return false;
 	}
 	return true;
 }
 
+// Entry records the projected cache may use. r_shadowMapProjectedCacheSize no
+// longer counts them. The cache lives in the atlas, which is allocated whole,
+// so the atlas is its bound and the cvar only turns it on or off here; Vulkan
+// keeps resident tiles in images of their own and counts them against it
+// (R_ShadowMapProjectedCacheTexelBudget).
 static int RB_ShadowMapProjectedCacheSlotLimit( void ) {
-	return idMath::ClampInt( 0, SHADOWMAP_CACHE_MAX_SLOTS, r_shadowMapProjectedCacheSize.GetInteger() );
+	return r_shadowMapProjectedCacheSize.GetInteger() > 0 ? SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS : 0;
 }
 
+// Six faces of depth, four bytes a texel. A cube that also carries packed
+// colour depth costs eight, twelve with the fp16 colour cube.
 static int RB_ShadowMapPointCacheSlotLimit( void ) {
-	return idMath::ClampInt( 0, SHADOWMAP_CACHE_MAX_SLOTS, r_shadowMapPointCacheSize.GetInteger() );
+	const int bytesPerTexel = !RB_PointShadowMapColorCubeNeeded() ? 4
+		: ( RB_PointShadowMapHighPrecisionEnabled() ? 12 : 8 );
+	return R_ShadowMapPointCacheSlotLimit( RB_ShadowMapPointSizeValue(),
+		bytesPerTexel, SHADOWMAP_POINT_CACHE_MAX_SLOTS );
 }
 
 // Approximate resident shadow GPU memory, for the SM cache report line: the
@@ -3762,8 +3851,7 @@ static double RB_ShadowMapResidentBytes( void ) {
 		bytes += RB_ShadowMapImageBytes( g_translucentShadowMomentImages[i] );
 		bytes += RB_ShadowMapImageBytes( g_pointTranslucentShadowMomentImages[i] );
 	}
-	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
-		
+	for ( int i = 0; i < SHADOWMAP_POINT_CACHE_MAX_SLOTS; i++ ) {
 		bytes += RB_ShadowMapImageBytes( g_pointShadowMapCache[i].colorImage );
 		bytes += RB_ShadowMapImageBytes( g_pointShadowMapCache[i].depthImage );
 	}
@@ -3779,7 +3867,7 @@ static void RB_ShadowMapExpireCaches( void ) {
 	const int residentFrames = Max( 1, r_shadowMapResidentFrames.GetInteger() );
 	const int projectedLimit = RB_ShadowMapProjectedCacheSlotLimit();
 	const int pointLimit = RB_ShadowMapPointCacheSlotLimit();
-	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
+	for ( int i = 0; i < SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS; i++ ) {
 		// Cache-size cvars are live. Entries outside a reduced limit must stop
 		// occupying atlas cells immediately or in-range allocation can evict
 		// forever without finding a block that the stale metadata still marks.
@@ -3792,6 +3880,8 @@ static void RB_ShadowMapExpireCaches( void ) {
 			g_projectedShadowMapCache[i].valid = false;
 			g_shadowMapStats.cacheExpired++;
 		}
+	}
+	for ( int i = 0; i < SHADOWMAP_POINT_CACHE_MAX_SLOTS; i++ ) {
 		if ( g_pointShadowMapCache[i].valid
 				&& ( !RB_ShadowMapPointCacheEntryStorageValid(
 						&g_pointShadowMapCache[i] )
@@ -3824,28 +3914,44 @@ static bool RB_ShadowMapProjectedCacheEntryStorageValid(
 		&& g_shadowMapAtlasRenderTexture->GetHeight() > 0;
 }
 
+// The colour image of a cube, when it has one, must still be the storage the
+// render filled.
+static bool RB_ShadowMapPointCacheEntryColorValid(
+		const pointShadowMapCacheEntry_t *entry ) {
+	return entry->colorImage != NULL
+		&& entry->colorStorageGeneration != 0
+		&& entry->colorImage->GetStorageGeneration()
+			== entry->colorStorageGeneration
+		&& entry->colorImage->IsLoaded()
+		&& !entry->colorImage->IsDefaulted()
+		&& entry->colorImage->GetDeviceHandle() != 0
+		&& entry->colorImage->GetOpts().textureType == TT_CUBIC
+		&& entry->colorImage->GetOpts().format
+			== ( entry->highPrecision ? FMT_RGBA16F : FMT_RGBA8 );
+}
+
+// A cube has a colour image exactly when something samples it
+// (RB_PointShadowMapColorCubeNeeded): a depth-only cube cannot serve a
+// receiver that decodes colour, and a cube made with colour is rebuilt
+// without it rather than kept at twice the memory.
 static bool RB_ShadowMapPointCacheEntryStorageValid(
 		const pointShadowMapCacheEntry_t *entry ) {
 	return entry != NULL && entry->valid
 		&& entry->size > 0
-		&& entry->colorImage != NULL && entry->depthImage != NULL
+		&& entry->depthImage != NULL
 		&& entry->renderTexture != NULL
-		&& entry->colorStorageGeneration != 0
+		&& ( entry->colorImage != NULL ) == RB_PointShadowMapColorCubeNeeded()
+		&& ( entry->colorImage == NULL
+			|| RB_ShadowMapPointCacheEntryColorValid( entry ) )
+		&& ( entry->renderTexture->GetNumColorImages() > 0 )
+			== ( entry->colorImage != NULL )
 		&& entry->depthStorageGeneration != 0
-		&& entry->colorImage->GetStorageGeneration()
-			== entry->colorStorageGeneration
 		&& entry->depthImage->GetStorageGeneration()
 			== entry->depthStorageGeneration
-		&& entry->colorImage->IsLoaded()
-		&& !entry->colorImage->IsDefaulted()
-		&& entry->colorImage->GetDeviceHandle() != 0
 		&& entry->depthImage->IsLoaded()
 		&& !entry->depthImage->IsDefaulted()
 		&& entry->depthImage->GetDeviceHandle() != 0
-		&& entry->colorImage->GetOpts().textureType == TT_CUBIC
 		&& entry->depthImage->GetOpts().textureType == TT_CUBIC
-		&& entry->colorImage->GetOpts().format
-			== ( entry->highPrecision ? FMT_RGBA16F : FMT_RGBA8 )
 		&& entry->depthImage->GetOpts().format == FMT_DEPTH
 		&& entry->renderTexture->GetWidth() == entry->size
 		&& entry->renderTexture->GetHeight() == entry->size;
@@ -3920,9 +4026,24 @@ static pointShadowMapCacheEntry_t *RB_ShadowMapFindPointCacheEntry( const int li
 }
 
 // Atlas cell grid bookkeeping: entries occupy span x span cell blocks inside
-// the shared atlas. The grid is small (<= 8x8), so occupancy is re-derived
+// the shared atlas. The grid is small (<= 32x32), so occupancy is re-derived
 // from the valid entries on every allocation.
-static const int SHADOWMAP_ATLAS_MAX_GRID = 8;
+static const int SHADOWMAP_ATLAS_MAX_GRID = 32;
+
+// The cells a block of blockPixels a side spans. A cell is the smallest tile
+// a light is given (RB_ShadowMapEnsureResources), so a full-size light spans
+// four cells and a cascaded one eight.
+static int RB_ShadowMapAtlasSpanForBlock( const int blockPixels ) {
+	if ( g_shadowMapAtlasCellSize <= 0 || blockPixels <= 0 ) {
+		return 0;
+	}
+	return ( blockPixels + g_shadowMapAtlasCellSize - 1 ) / g_shadowMapAtlasCellSize;
+}
+
+static int RB_ShadowMapAtlasSpanForLight( const viewLight_t *vLight ) {
+	return RB_ShadowMapAtlasSpanForBlock(
+		RB_ShadowMapTileSizeForLight( vLight ) * RB_ShadowMapAtlasDivForLight( vLight ) );
+}
 
 static int RB_ShadowMapAtlasSizeValue( void ) {
 	const int maxTextureSize =
@@ -3951,7 +4072,7 @@ static bool RB_ShadowMapAtlasFindFreeBlock( const int span, int &cellX, int &cel
 	}
 	bool occupied[SHADOWMAP_ATLAS_MAX_GRID][SHADOWMAP_ATLAS_MAX_GRID];
 	memset( occupied, 0, sizeof( occupied ) );
-	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
+	for ( int i = 0; i < SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS; i++ ) {
 		const projectedShadowMapCacheEntry_t &entry = g_projectedShadowMapCache[i];
 		if ( !RB_ShadowMapProjectedCacheEntryStorageValid( &entry ) ) {
 			continue;
@@ -3962,8 +4083,10 @@ static bool RB_ShadowMapAtlasFindFreeBlock( const int span, int &cellX, int &cel
 			}
 		}
 	}
-	for ( int y = 0; y + span <= gridDim; y++ ) {
-		for ( int x = 0; x + span <= gridDim; x++ ) {
+	// blocks sit on multiples of their own span, so the cells a small block
+	// leaves free still line up into a larger one
+	for ( int y = 0; y + span <= gridDim; y += span ) {
+		for ( int x = 0; x + span <= gridDim; x += span ) {
 			bool blockFree = true;
 			for ( int by = 0; by < span && blockFree; by++ ) {
 				for ( int bx = 0; bx < span; bx++ ) {
@@ -3983,10 +4106,45 @@ static bool RB_ShadowMapAtlasFindFreeBlock( const int span, int &cellX, int &cel
 	return false;
 }
 
+// The cache lives in the atlas and may fill it: every cell is memory already
+// allocated, so leaving some unused would save nothing.
+static int RB_ShadowMapAtlasCellCount( void ) {
+	const int gridDim = RB_ShadowMapAtlasGridDim();
+	return gridDim * gridDim;
+}
+
+static int RB_ShadowMapProjectedCacheCellsUsed( void ) {
+	int cells = 0;
+	for ( int i = 0; i < SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS; i++ ) {
+		const projectedShadowMapCacheEntry_t &entry = g_projectedShadowMapCache[i];
+		if ( RB_ShadowMapProjectedCacheEntryStorageValid( &entry ) ) {
+			cells += entry.atlasCellSpan * entry.atlasCellSpan;
+		}
+	}
+	return cells;
+}
+
+// The cache is bounded by the atlas cells it fills, not by a count of entries:
+// the tiles of a view differ in size, and a crowded view's small tiles fit
+// many times over in the cells a few full ones take.
 static projectedShadowMapCacheEntry_t *RB_ShadowMapAllocProjectedCacheEntry(
 		const int cellSpan, const bool allowEviction = true ) {
 	const int slotLimit = RB_ShadowMapProjectedCacheSlotLimit();
-	if ( slotLimit <= 0 || g_shadowMapAtlasCellSize <= 0 ) {
+	const int atlasCells = RB_ShadowMapAtlasCellCount();
+	if ( slotLimit <= 0 || g_shadowMapAtlasCellSize <= 0
+			|| cellSpan <= 0 || cellSpan * cellSpan > atlasCells ) {
+		return NULL;
+	}
+	// Nothing is evicted for a block that would not fit even then: the tiles
+	// of lights that left the view stay for their return.
+	int pinnedCells = 0;
+	for ( int i = 0; i < SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS; i++ ) {
+		const projectedShadowMapCacheEntry_t &entry = g_projectedShadowMapCache[i];
+		if ( RB_ShadowMapProjectedCacheEntryStorageValid( &entry ) && entry.lastUsedFrame >= tr.frameCount - 1 ) {
+			pinnedCells += entry.atlasCellSpan * entry.atlasCellSpan;
+		}
+	}
+	if ( pinnedCells + cellSpan * cellSpan > atlasCells ) {
 		return NULL;
 	}
 
@@ -4001,6 +4159,14 @@ static projectedShadowMapCacheEntry_t *RB_ShadowMapAllocProjectedCacheEntry(
 				if ( freeEntry == NULL ) {
 					freeEntry = entry;
 				}
+				continue;
+			}
+			// As for point cubes: a tile sampled this frame or the last belongs
+			// to a light still on screen. Evicting it makes that light miss in
+			// turn and evict the next, so a view with more passes than the cache
+			// holds re-rendered all of them. Leave it; the caller renders into
+			// the scratch target.
+			if ( entry->lastUsedFrame >= tr.frameCount - 1 ) {
 				continue;
 			}
 			if ( oldest == NULL || entry->lastUsedFrame < oldest->lastUsedFrame ) {
@@ -4064,22 +4230,55 @@ static pointShadowMapCacheEntry_t *RB_ShadowMapAllocPointCacheEntry(
 	if ( slotLimit <= 0 ) {
 		return NULL;
 	}
-	pointShadowMapCacheEntry_t *oldest = &g_pointShadowMapCache[0];
+	pointShadowMapCacheEntry_t *oldest = NULL;
 	for ( int i = 0; i < slotLimit; i++ ) {
 		pointShadowMapCacheEntry_t *entry = &g_pointShadowMapCache[i];
 		if ( !entry->valid ) {
 			return entry;
 		}
-		if ( entry->lastUsedFrame < oldest->lastUsedFrame ) {
+		// A cube sampled this frame or the last belongs to a light that is still
+		// on screen. Evicting it only makes that light miss in turn and evict
+		// the next one, so a view with more lights than slots re-rendered every
+		// cube it had cached. Leave those alone: the caller renders into the
+		// scratch cube, and takes a slot once a light leaves the view.
+		if ( entry->lastUsedFrame >= tr.frameCount - 1 ) {
+			continue;
+		}
+		if ( oldest == NULL || entry->lastUsedFrame < oldest->lastUsedFrame ) {
 			oldest = entry;
 		}
 	}
-	if ( !allowEviction ) {
+	if ( !allowEviction || oldest == NULL ) {
 		return NULL;
 	}
 	oldest->valid = false;
 	g_shadowMapStats.cacheEvictions++;
 	return oldest;
+}
+
+// A miss for a light that still owns a cube means the static scene under it
+// changed: a door moved, a caster came to rest. Render the new depth into that
+// cube instead of taking a second slot for the same light and leaving the
+// obsolete one resident until it expires. An entry some view used this frame
+// is left alone.
+static pointShadowMapCacheEntry_t *RB_ShadowMapRecyclePointCacheEntry(
+		const int lightIndex, const shadowMapPassKind_t passKind ) {
+	const int slotLimit = RB_ShadowMapPointCacheSlotLimit();
+	pointShadowMapCacheEntry_t *newest = NULL;
+	for ( int i = 0; i < slotLimit; i++ ) {
+		pointShadowMapCacheEntry_t *entry = &g_pointShadowMapCache[i];
+		if ( entry->valid
+				&& entry->lightIndex == lightIndex
+				&& entry->passKind == static_cast<int>( passKind )
+				&& entry->lastUsedFrame != tr.frameCount
+				&& ( newest == NULL || entry->lastUpdatedFrame > newest->lastUpdatedFrame ) ) {
+			newest = entry;
+		}
+	}
+	if ( newest != NULL ) {
+		newest->valid = false;
+	}
+	return newest;
 }
 
 static void RB_ShadowMapSelectProjectedCacheEntry( projectedShadowMapCacheEntry_t *entry ) {
@@ -4124,11 +4323,22 @@ static void RB_ShadowMapCountCacheSlots( void ) {
 // stores one map per light instead of two, halving update cost and slot
 // pressure for every light without character-class casters nearby - the
 // LOCAL pass renders it, the GLOBAL pass cache-hits it the same frame.
+//
+// A resident map holds static depth only whenever its light composes: the
+// live casters are drawn over a copy each view. A monster (noSelfShadow, so
+// a local caster) walking through such a light therefore leaves both
+// ownerships with the same resident content, and they share one entry too.
+// Only a cube that bakes its dynamics in must keep the two apart.
 static shadowMapPassKind_t RB_ShadowMapCachePassKind( const viewLight_t *vLight, const shadowMapPassKind_t passKind ) {
-	if ( vLight != NULL && vLight->localShadowMapCasters == NULL && vLight->localShadowMapDynamicCasters == NULL && vLight->localTranslucentShadowMapCasters == NULL ) {
+	if ( vLight == NULL || vLight->localShadowMapCasters != NULL || vLight->localTranslucentShadowMapCasters != NULL ) {
+		return passKind;
+	}
+	if ( vLight->localShadowMapDynamicCasters == NULL ) {
 		return SHADOWMAP_PASS_GLOBAL;
 	}
-	return passKind;
+	const bool bakesDynamics = R_ClassifyShadowMapLight( vLight ).pointLight
+		&& !RB_ShadowMapPointComposeAvailable();
+	return bakesDynamics ? passKind : SHADOWMAP_PASS_GLOBAL;
 }
 
 static bool RB_ShadowMapUpdateAdmitted( const int lightIndex ) {
@@ -4228,12 +4438,15 @@ static shadowMapSchedule_t RB_ShadowMapSchedulePass( const viewLight_t *vLight, 
 
 	if ( schedule.cacheable ) {
 		if ( pointLight ) {
-			schedule.pointEntry = RB_ShadowMapAllocPointCacheEntry();
+			schedule.pointEntry = RB_ShadowMapRecyclePointCacheEntry( lightIndex, passKind );
+			if ( schedule.pointEntry == NULL ) {
+				schedule.pointEntry = RB_ShadowMapAllocPointCacheEntry();
+			}
 			RB_ShadowMapSelectPointCacheEntry( schedule.pointEntry );
 		} else {
-			schedule.projectedEntry = RB_ShadowMapRecycleProjectedCacheEntry( lightIndex, passKind, RB_ShadowMapAtlasDivForLight( vLight ) );
+			schedule.projectedEntry = RB_ShadowMapRecycleProjectedCacheEntry( lightIndex, passKind, RB_ShadowMapAtlasSpanForLight( vLight ) );
 			if ( schedule.projectedEntry == NULL ) {
-				schedule.projectedEntry = RB_ShadowMapAllocProjectedCacheEntry( RB_ShadowMapAtlasDivForLight( vLight ) );
+				schedule.projectedEntry = RB_ShadowMapAllocProjectedCacheEntry( RB_ShadowMapAtlasSpanForLight( vLight ) );
 			}
 			RB_ShadowMapSelectProjectedCacheEntry( schedule.projectedEntry );
 		}
@@ -4976,9 +5189,10 @@ void RB_ShutdownShadowMapResources( void ) {
 	RB_ShadowMapDestroyRenderTexture( g_pointShadowMapScratchRenderTexture );
 	RB_ShadowMapDestroyRenderTexture( g_pointTranslucentShadowMapRenderTexture );
 
-	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
-		
+	for ( int i = 0; i < SHADOWMAP_POINT_CACHE_MAX_SLOTS; i++ ) {
 		RB_ShadowMapDestroyRenderTexture( g_pointShadowMapCache[i].renderTexture );
+	}
+	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
 		RB_ShadowMapDestroyRenderTexture(
 			g_sharedInteractionProjectedScratch[i].renderTexture );
 		RB_ShadowMapDestroyRenderTexture(
@@ -6139,12 +6353,15 @@ static bool RB_ShadowMapEnsureResources( const viewLight_t *vLight ) {
 
 	// keep the shared atlas resident whenever the projected path is live: its
 	// cell size tracks r_shadowMapSize, and a cell-size change invalidates
-	// every cached tile placement
+	// every cached tile placement. A cell is the smallest tile a light of a
+	// crowded view is cut down to, so such a light takes one cell where a
+	// light at the full r_shadowMapSize takes a block of sixteen.
 	{
-		const int atlasCellSize = idMath::ClampInt( 128, glConfig.maxTextureSize > 0 ? glConfig.maxTextureSize : 4096, r_shadowMapSize.GetInteger() );
+		const int atlasCellSize = R_ShadowMapAtlasMinTileSize(
+			idMath::ClampInt( 128, glConfig.maxTextureSize > 0 ? glConfig.maxTextureSize : 4096, r_shadowMapSize.GetInteger() ) );
 		const int atlasSize = RB_ShadowMapAtlasSizeValue();
 		if ( atlasCellSize != g_shadowMapAtlasCellSize ) {
-			for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
+			for ( int i = 0; i < SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS; i++ ) {
 				g_projectedShadowMapCache[i].valid = false;
 			}
 			g_shadowMapAtlasCellSize = atlasCellSize;
@@ -6166,7 +6383,7 @@ static bool RB_ShadowMapEnsureResources( const viewLight_t *vLight ) {
 			}
 		} else if ( g_shadowMapAtlasRenderTexture != NULL && ( g_shadowMapAtlasRenderTexture->GetWidth() != atlasSize || g_shadowMapAtlasRenderTexture->GetHeight() != atlasSize ) ) {
 			tr.ResizeRenderTexture( g_shadowMapAtlasRenderTexture, atlasSize, atlasSize );
-			for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
+			for ( int i = 0; i < SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS; i++ ) {
 				g_projectedShadowMapCache[i].valid = false;
 			}
 		}
@@ -6197,8 +6414,22 @@ static bool RB_ShadowMapEnsureResources( const viewLight_t *vLight ) {
 				// shadow targets are expendable: incompleteness falls back to stencil
 				g_shadowMapScratchRenderTexture->SetAllowIncomplete();
 			}
-		} else if ( g_shadowMapScratchRenderTexture->GetWidth() != shadowMapSize || g_shadowMapScratchRenderTexture->GetHeight() != shadowMapSize ) {
-			tr.ResizeRenderTexture( g_shadowMapScratchRenderTexture, shadowMapSize, shadowMapSize );
+		} else {
+			// The lights of a view no longer share one tile size, and resizing
+			// for each of them would reallocate the target several times a
+			// frame. It grows to the largest block asked for and stays: a
+			// smaller block renders into its corner and is sampled through its
+			// rectangle, as an atlas cell is. A changed r_shadowMapSize sizes
+			// it afresh, so a lower setting gives the memory back.
+			static int scratchSizedForSetting = 0;
+			const int setting = r_shadowMapSize.GetInteger();
+			const int width = g_shadowMapScratchRenderTexture->GetWidth();
+			const int height = g_shadowMapScratchRenderTexture->GetHeight();
+			if ( width < shadowMapSize || height < shadowMapSize
+					|| ( scratchSizedForSetting != setting && ( width != shadowMapSize || height != shadowMapSize ) ) ) {
+				tr.ResizeRenderTexture( g_shadowMapScratchRenderTexture, shadowMapSize, shadowMapSize );
+			}
+			scratchSizedForSetting = setting;
 		}
 		g_shadowMapDepthImage = g_shadowMapScratchDepthImage;
 		g_shadowMapRenderTexture = g_shadowMapScratchRenderTexture;
@@ -6233,6 +6464,21 @@ static bool RB_ShadowMapEnsureResources( const viewLight_t *vLight ) {
 	return true;
 }
 
+static void RB_ShadowMapPurgeImage( idImage *image );
+
+// A cube's two images and its target are made together and resized together.
+// When the cube has to change shape (with or without a colour image) all
+// three go, and the next pass makes them again at the current size. Keeping
+// the depth image across that would wrap a target around whatever size it
+// was left at.
+static void RB_PointShadowMapReleaseCube( idImage *&colorImage, idImage *&depthImage, idRenderTexture *&renderTexture ) {
+	RB_ShadowMapDestroyRenderTexture( renderTexture );
+	RB_ShadowMapPurgeImage( colorImage );
+	colorImage = NULL;
+	RB_ShadowMapPurgeImage( depthImage );
+	depthImage = NULL;
+}
+
 static bool RB_PointShadowMapEnsureResources( void ) {
 	if ( !glConfig.cubeMapAvailable ) {
 		return false;
@@ -6247,7 +6493,16 @@ static bool RB_PointShadowMapEnsureResources( void ) {
 	idRenderTexture **renderTexture = g_activePointShadowMapCache != NULL ? &g_activePointShadowMapCache->renderTexture : &g_pointShadowMapScratchRenderTexture;
 	const int cacheSlot = g_activePointShadowMapCache != NULL ? static_cast<int>( g_activePointShadowMapCache - g_pointShadowMapCache ) : -1;
 
-	if ( *colorImage == NULL ) {
+	// The programs above settle whether hardware compare works in this video
+	// generation, so the answer is read after them. A cube made for the other
+	// answer has the wrong attachments and is rebuilt whole.
+	const bool wantColor = RB_PointShadowMapColorCubeNeeded();
+	if ( ( *colorImage != NULL ) != wantColor
+			|| ( *renderTexture != NULL && ( ( *renderTexture )->GetNumColorImages() > 0 ) != wantColor ) ) {
+		RB_PointShadowMapReleaseCube( *colorImage, *depthImage, *renderTexture );
+	}
+	// depth only: nothing samples the packed colour, so it is not stored
+	if ( wantColor && *colorImage == NULL ) {
 		idImageOpts opts;
 		opts.textureType = TT_CUBIC;
 		opts.format = RB_PointShadowMapHighPrecisionEnabled() ? FMT_RGBA16F : FMT_RGBA8;
@@ -6256,7 +6511,7 @@ static bool RB_PointShadowMapEnsureResources( void ) {
 		opts.numLevels = 1;
 		opts.isPersistant = true;
 		*colorImage = globalImages->ScratchImage( cacheSlot >= 0 ? va( "_pointShadowMapColorCache%d", cacheSlot ) : "_pointShadowMapColor", &opts, TF_NEAREST, TR_CLAMP, TD_DEFAULT );
-	} else if ( ( *colorImage )->GetOpts().format != ( RB_PointShadowMapHighPrecisionEnabled() ? FMT_RGBA16F : FMT_RGBA8 ) ) {
+	} else if ( wantColor && ( *colorImage )->GetOpts().format != ( RB_PointShadowMapHighPrecisionEnabled() ? FMT_RGBA16F : FMT_RGBA8 ) ) {
 		idImageOpts opts;
 		opts.textureType = TT_CUBIC;
 		opts.format = RB_PointShadowMapHighPrecisionEnabled() ? FMT_RGBA16F : FMT_RGBA8;
@@ -6279,19 +6534,23 @@ static bool RB_PointShadowMapEnsureResources( void ) {
 	}
 
 	if ( *renderTexture == NULL ) {
-		*renderTexture = tr.CreateRenderTexture( *colorImage, *depthImage );
+		*renderTexture = tr.CreateRenderTexture( wantColor ? *colorImage : NULL, *depthImage );
 		if ( *renderTexture != NULL ) {
 			// shadow targets are expendable: incompleteness falls back to stencil
 			( *renderTexture )->SetAllowIncomplete();
 		}
-	} else if ( ( *renderTexture )->GetWidth() != shadowMapSize || ( *renderTexture )->GetHeight() != shadowMapSize ) {
+	}
+	// a new target as much as an old one: it takes the size of the images it wraps
+	if ( *renderTexture != NULL
+			&& ( ( *renderTexture )->GetWidth() != shadowMapSize || ( *renderTexture )->GetHeight() != shadowMapSize ) ) {
 		tr.ResizeRenderTexture( *renderTexture, shadowMapSize, shadowMapSize );
 	}
 	g_pointShadowMapColorImage = *colorImage;
 	g_pointShadowMapDepthImage = *depthImage;
 	g_pointShadowMapRenderTexture = *renderTexture;
 
-	const bool resourcesOk = g_pointShadowMapColorImage != NULL && g_pointShadowMapDepthImage != NULL && g_pointShadowMapRenderTexture != NULL;
+	const bool resourcesOk = ( !wantColor || g_pointShadowMapColorImage != NULL )
+		&& g_pointShadowMapDepthImage != NULL && g_pointShadowMapRenderTexture != NULL;
 	if ( resourcesOk ) {
 		g_shadowMapPointResourcesOkGeneration = tr.videoRestartCount;
 		// seamless cube filtering removes the face-border discontinuities PCF
@@ -6319,7 +6578,12 @@ static bool RB_ShadowMapEnsureTranslucentResources( const viewLight_t *vLight ) 
 	}
 
 	const int shadowMapAtlasDiv = RB_ShadowMapAtlasDivForLight( vLight );
-	const int shadowMapSize = shadowMapTileSize * shadowMapAtlasDiv;
+	// Moments are sampled through the rectangle of the depth map they were
+	// rendered with, which is the scratch target (translucent casters are
+	// never cached). That target may be larger than this light's block, so
+	// the moment target takes its size and the block the same corner of it.
+	const int shadowMapSize = Max( shadowMapTileSize * shadowMapAtlasDiv,
+		g_shadowMapScratchRenderTexture != NULL ? g_shadowMapScratchRenderTexture->GetWidth() : 0 );
 
 	static const char *imageNames[3] = {
 		"_translucentShadowMapR",
@@ -6477,14 +6741,47 @@ static void RB_ShadowMapPurgeImage( idImage *image ) {
 	}
 }
 
+// Whether point cubes carry colour changes with a cvar or a debug view, never
+// in ordinary play. Every resident cube was made for the old answer: give
+// them back now, so the memory does not wait for each slot to be reused.
+// They are made and rendered again as the lights come up.
+static void RB_PointShadowMapSyncColorCubes( void ) {
+	const bool wantColor = RB_PointShadowMapColorCubeNeeded();
+	if ( g_pointShadowMapCubesColorGeneration == tr.videoRestartCount && g_pointShadowMapCubesHaveColor == wantColor ) {
+		return;
+	}
+	if ( g_pointShadowMapCubesColorGeneration == tr.videoRestartCount ) {
+		RB_PointShadowMapReleaseCube( g_pointShadowMapScratchColorImage,
+			g_pointShadowMapScratchDepthImage, g_pointShadowMapScratchRenderTexture );
+		for ( int i = 0; i < SHADOWMAP_POINT_CACHE_MAX_SLOTS; i++ ) {
+			pointShadowMapCacheEntry_t &entry = g_pointShadowMapCache[i];
+			RB_PointShadowMapReleaseCube( entry.colorImage, entry.depthImage, entry.renderTexture );
+			entry.colorStorageGeneration = 0;
+			entry.depthStorageGeneration = 0;
+			entry.valid = false;
+		}
+		g_activePointShadowMapCache = NULL;
+		g_pointShadowMapColorImage = NULL;
+		g_pointShadowMapDepthImage = NULL;
+		g_pointShadowMapRenderTexture = NULL;
+		g_shadowMapGlobalPassMapped = SHADOWMAP_GLOBAL_MAPPED_NONE;
+	}
+	g_pointShadowMapCubesHaveColor = wantColor;
+	g_pointShadowMapCubesColorGeneration = tr.videoRestartCount;
+}
+
 static bool RB_ShadowMapAnyResidentResources( void ) {
 	if ( g_shadowMapScratchRenderTexture != NULL || g_pointShadowMapScratchRenderTexture != NULL || g_shadowMapAtlasRenderTexture != NULL
 		|| g_translucentShadowMapRenderTexture != NULL || g_pointTranslucentShadowMapRenderTexture != NULL ) {
 		return true;
 	}
+	for ( int i = 0; i < SHADOWMAP_POINT_CACHE_MAX_SLOTS; i++ ) {
+		if ( g_pointShadowMapCache[i].renderTexture != NULL ) {
+			return true;
+		}
+	}
 	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
-		if ( g_pointShadowMapCache[i].renderTexture != NULL
-				|| g_sharedInteractionProjectedScratch[i].renderTexture != NULL
+		if ( g_sharedInteractionProjectedScratch[i].renderTexture != NULL
 				|| g_sharedInteractionPointScratch[i].renderTexture != NULL ) {
 			return true;
 		}
@@ -6504,21 +6801,23 @@ static void RB_ShadowMapPurgeIdleResources( void ) {
 		RB_ShadowMapPurgeImage( g_translucentShadowMomentImages[i] );
 		RB_ShadowMapPurgeImage( g_pointTranslucentShadowMomentImages[i] );
 	}
-	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
-		
+	for ( int i = 0; i < SHADOWMAP_POINT_CACHE_MAX_SLOTS; i++ ) {
 		RB_ShadowMapPurgeImage( g_pointShadowMapCache[i].colorImage );
 		RB_ShadowMapPurgeImage( g_pointShadowMapCache[i].depthImage );
+		g_pointShadowMapCache[i].colorImage = NULL;
+		g_pointShadowMapCache[i].depthImage = NULL;
+		g_pointShadowMapCache[i].valid = false;
+	}
+	for ( int i = 0; i < SHADOWMAP_CACHE_MAX_SLOTS; i++ ) {
 		RB_ShadowMapPurgeImage(
 			g_sharedInteractionProjectedScratch[i].depthImage );
 		RB_ShadowMapPurgeImage(
 			g_sharedInteractionPointScratch[i].colorImage );
 		RB_ShadowMapPurgeImage(
 			g_sharedInteractionPointScratch[i].depthImage );
-		
-		g_pointShadowMapCache[i].colorImage = NULL;
-		g_pointShadowMapCache[i].depthImage = NULL;
+	}
+	for ( int i = 0; i < SHADOWMAP_PROJECTED_CACHE_MAX_SLOTS; i++ ) {
 		g_projectedShadowMapCache[i].valid = false;
-		g_pointShadowMapCache[i].valid = false;
 	}
 	RB_ShutdownShadowMapResources();
 }
@@ -6548,6 +6847,7 @@ static void RB_ShadowMapStatsReset( void ) {
 		g_shadowMapSubviewFallbackPasses = 0;
 	}
 
+	RB_PointShadowMapSyncColorCubes();
 	RB_ShadowMapExpireCaches();
 	RB_ShadowMapCountCacheSlots();
 	g_shadowMapReportThisFrame = false;
@@ -6728,7 +7028,7 @@ static void RB_ShadowMapStatsReport( void ) {
 		g_shadowMapStats.gpuTimerPhasePending[SHADOWMAP_TIMING_RECEIVER_FALLBACK],
 		g_shadowMapStats.gpuTimerPhasePending[SHADOWMAP_TIMING_STENCIL_FALLBACK] );
 	common->Printf(
-		"SM cache: hit=%d miss=%d reuse=%d budgetReuse=%d evict=%d expired=%d hysteresis=%d projected=%d/%d point=%d/%d vramMB=%.1f\n",
+		"SM cache: hit=%d miss=%d reuse=%d budgetReuse=%d evict=%d expired=%d hysteresis=%d projected=%d/%d point=%d/%d projectedCells=%d/%d pointColorCube=%d vramMB=%.1f\n",
 		g_shadowMapStats.cacheHitPasses,
 		g_shadowMapStats.cacheMissPasses,
 		g_shadowMapStats.cacheReusePasses,
@@ -6740,6 +7040,11 @@ static void RB_ShadowMapStatsReport( void ) {
 		g_shadowMapStats.projectedCacheSlotsTotal,
 		g_shadowMapStats.pointCacheSlotsUsed,
 		g_shadowMapStats.pointCacheSlotsTotal,
+		// the projected cache against the atlas that holds it, in cells
+		RB_ShadowMapProjectedCacheCellsUsed(),
+		RB_ShadowMapAtlasCellCount(),
+		// 0 = point cubes are depth only
+		RB_PointShadowMapColorCubeNeeded() ? 1 : 0,
 		RB_ShadowMapResidentBytes() / ( 1024.0 * 1024.0 ) );
 	{
 		// modern consumption of the persistent atlas (5c): how many lights
@@ -8234,6 +8539,19 @@ typedef enum {
 	SHADOWMAP_RENDER_COMPOSE_DYNAMIC
 } shadowMapRenderMode_t;
 
+// Returns the viewport and scissor to the view after a shadow target was
+// bound. A view drawn straight to the window in a tiled capture is offset
+// (RB_BeginDrawingView); without the offset every light after the first
+// mapped one drew its interactions into the wrong tile.
+static void RB_ShadowMapRestoreViewViewport( void ) {
+	const int x = RB_TileOffsetX() + backEnd.viewDef->viewport.x1;
+	const int y = RB_TileOffsetY() + backEnd.viewDef->viewport.y1;
+	const int width = backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1;
+	const int height = backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1;
+	glViewport( x, y, width, height );
+	glScissor( x, y, width, height );
+}
+
 static bool RB_RenderShadowMap( const drawSurf_t *primaryCasters, const drawSurf_t *secondaryCasters, const drawSurf_t *tertiaryCasters, const drawSurf_t *quaternaryCasters,
 	const shadowMapRenderMode_t renderMode = SHADOWMAP_RENDER_FULL, const projectedShadowMapCacheEntry_t *composeFrom = NULL ) {
 	if ( !RB_ShadowMapEnsureResources( backEnd.vLight ) ) {
@@ -8377,12 +8695,7 @@ static bool RB_RenderShadowMap( const drawSurf_t *primaryCasters, const drawSurf
 		R_SetDefaultDrawAndReadBuffers();
 	}
 
-	glViewport( backEnd.viewDef->viewport.x1, backEnd.viewDef->viewport.y1,
-		backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1,
-		backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1 );
-	glScissor( backEnd.viewDef->viewport.x1, backEnd.viewDef->viewport.y1,
-		backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1,
-		backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1 );
+	RB_ShadowMapRestoreViewViewport();
 
 	glMatrixMode( GL_PROJECTION );
 	glLoadMatrixf( backEnd.viewDef->projectionMatrix );
@@ -8422,9 +8735,28 @@ static bool RB_RenderShadowMap( const drawSurf_t *primaryCasters, const drawSurf
 	return allCastersRendered;
 }
 
-static bool RB_RenderPointShadowMap( const drawSurf_t *primaryCasters, const drawSurf_t *secondaryCasters, const drawSurf_t *tertiaryCasters, const drawSurf_t *quaternaryCasters ) {
+// The render modes are RB_RenderShadowMap's. A composed cube starts as a copy
+// of composeFrom, the light's cached static cube, and receives only the live
+// chains; the copy and the cache share one projection because the cache
+// signature, which the hit required, holds the light's origin, far distance
+// and face size.
+static bool RB_RenderPointShadowMap( const drawSurf_t *primaryCasters, const drawSurf_t *secondaryCasters, const drawSurf_t *tertiaryCasters, const drawSurf_t *quaternaryCasters,
+	const shadowMapRenderMode_t renderMode = SHADOWMAP_RENDER_FULL, const pointShadowMapCacheEntry_t *composeFrom = NULL ) {
 	if ( !RB_PointShadowMapEnsureResources() ) {
 		return false;
+	}
+
+	const bool composeMode = renderMode == SHADOWMAP_RENDER_COMPOSE_DYNAMIC;
+	const bool drawStaticChains = renderMode != SHADOWMAP_RENDER_COMPOSE_DYNAMIC;
+	const bool drawDynamicChains = renderMode != SHADOWMAP_RENDER_STATIC_ONLY;
+	if ( composeMode ) {
+		if ( composeFrom == NULL || !RB_ShadowMapPointComposeAvailable()
+				|| !RB_ShadowMapPointCacheEntryStorageValid( composeFrom )
+				|| composeFrom->renderTexture == g_pointShadowMapRenderTexture
+				|| composeFrom->size != g_pointShadowMapRenderTexture->GetWidth()
+				|| composeFrom->size != g_pointShadowMapRenderTexture->GetHeight() ) {
+			return false;
+		}
 	}
 
 	bool allCastersRendered = true;
@@ -8439,16 +8771,21 @@ static bool RB_RenderPointShadowMap( const drawSurf_t *primaryCasters, const dra
 	const float nearClip = idMath::ClampFloat( 0.5f, RB_ShadowMapDepthClampAvailable() ? 16.0f : 4.0f, farClip * 0.01f );
 	float projectionMatrix[16];
 	RB_PointShadowMapBuildProjectionMatrix( nearClip, farClip, projectionMatrix );
-	g_shadowMapStats.shadowMapUpdates++;
-	if ( backEnd.viewDef != NULL && backEnd.viewDef->isSubview ) {
-		g_shadowMapSubviewUpdates++;
-	}
-	g_shadowMapStats.pointFacesRendered += 6;
-	if ( RB_PointShadowMapHighPrecisionEnabled() ) {
-		g_shadowMapStats.pointHighPrecisionPasses++;
-	}
-	if ( RB_PointShadowMapDepthCompareEnabled() ) {
-		g_shadowMapStats.pointDepthComparePasses++;
+	if ( composeMode ) {
+		g_shadowMapStats.composePasses++;
+	} else {
+		// a compose is not an update: the budget counts static renders
+		g_shadowMapStats.shadowMapUpdates++;
+		if ( backEnd.viewDef != NULL && backEnd.viewDef->isSubview ) {
+			g_shadowMapSubviewUpdates++;
+		}
+		g_shadowMapStats.pointFacesRendered += 6;
+		if ( RB_PointShadowMapHighPrecisionEnabled() ) {
+			g_shadowMapStats.pointHighPrecisionPasses++;
+		}
+		if ( RB_PointShadowMapDepthCompareEnabled() ) {
+			g_shadowMapStats.pointDepthComparePasses++;
+		}
 	}
 
 	const float globalLightOrigin[4] = {
@@ -8468,6 +8805,14 @@ static bool RB_RenderPointShadowMap( const drawSurf_t *primaryCasters, const dra
 	// fallback instead of FatalError'ing the whole session
 	g_pointShadowMapRenderTexture->MakeCurrent( 0 );
 	if ( g_pointShadowMapRenderTexture->IsKnownIncomplete() ) {
+		if ( g_pointShadowMapRenderTexture->GetNumColorImages() == 0 ) {
+			// A cube target without a colour attachment should be complete on
+			// every driver that offers hardware compare. Where it is not, keep
+			// the colour cube for this video generation: the next pass rebuilds
+			// the target with one.
+			common->Warning( "Depth-only point shadow cube target is incomplete; keeping the colour cube for this video generation" );
+			RB_PointShadowMapDisableDepthOnlyForGeneration();
+		}
 		if ( backEnd.renderTexture != NULL ) {
 			backEnd.renderTexture->MakeCurrent();
 		} else {
@@ -8523,20 +8868,46 @@ static bool RB_RenderPointShadowMap( const drawSurf_t *primaryCasters, const dra
 	glLoadMatrixf( projectionMatrix );
 	glMatrixMode( GL_MODELVIEW );
 
+	const GLbitfield composeCopyMask = GL_DEPTH_BUFFER_BIT
+		| ( g_pointShadowMapRenderTexture->GetNumColorImages() > 0 ? GL_COLOR_BUFFER_BIT : 0 );
 	for ( int cubeFace = 0; cubeFace < 6; cubeFace++ ) {
 		float lightModelViewMatrix[16];
 		RB_PointShadowMapBuildModelViewMatrix( backEnd.vLight->globalLightOrigin, cubeFace, lightModelViewMatrix );
 
-		g_pointShadowMapRenderTexture->MakeCurrent( cubeFace );
+		if ( composeMode ) {
+			// Attach this face of the cached cube first: binding the scratch
+			// target afterwards leaves it the draw framebuffer.
+			if ( !composeFrom->renderTexture->MakeCurrent( cubeFace ) ) {
+				allCastersRendered = false;
+				break;
+			}
+		}
+		if ( !g_pointShadowMapRenderTexture->MakeCurrent( cubeFace ) ) {
+			allCastersRendered = false;
+			break;
+		}
 		glViewport( 0, 0, shadowMapWidth, shadowMapHeight );
 		glScissor( 0, 0, shadowMapWidth, shadowMapHeight );
-		glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+		if ( composeMode ) {
+			// A blit obeys the scissor box, which covers the whole face here.
+			const GLuint scratchHandle = g_pointShadowMapRenderTexture->GetDeviceHandle();
+			glBindFramebuffer( GL_READ_FRAMEBUFFER, composeFrom->renderTexture->GetDeviceHandle() );
+			glBlitFramebuffer( 0, 0, shadowMapWidth, shadowMapHeight,
+				0, 0, shadowMapWidth, shadowMapHeight, composeCopyMask, GL_NEAREST );
+			glBindFramebuffer( GL_READ_FRAMEBUFFER, scratchHandle );
+		} else {
+			glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+		}
 
 		backEnd.currentSpace = NULL;
-		allCastersRendered &= RB_PointShadowMapDrawCasterChain( primaryCasters, lightModelViewMatrix, cubeFace );
-		allCastersRendered &= RB_PointShadowMapDrawCasterChain( secondaryCasters, lightModelViewMatrix, cubeFace );
-		allCastersRendered &= RB_PointShadowMapDrawCasterChain( tertiaryCasters, lightModelViewMatrix, cubeFace );
-		allCastersRendered &= RB_PointShadowMapDrawCasterChain( quaternaryCasters, lightModelViewMatrix, cubeFace );
+		if ( drawStaticChains ) {
+			allCastersRendered &= RB_PointShadowMapDrawCasterChain( primaryCasters, lightModelViewMatrix, cubeFace );
+			allCastersRendered &= RB_PointShadowMapDrawCasterChain( secondaryCasters, lightModelViewMatrix, cubeFace );
+		}
+		if ( drawDynamicChains ) {
+			allCastersRendered &= RB_PointShadowMapDrawCasterChain( tertiaryCasters, lightModelViewMatrix, cubeFace );
+			allCastersRendered &= RB_PointShadowMapDrawCasterChain( quaternaryCasters, lightModelViewMatrix, cubeFace );
+		}
 	}
 
 	if ( RB_ShadowMapDepthClampAvailable() ) {
@@ -8555,12 +8926,7 @@ static bool RB_RenderPointShadowMap( const drawSurf_t *primaryCasters, const dra
 		R_SetDefaultDrawAndReadBuffers();
 	}
 
-	glViewport( backEnd.viewDef->viewport.x1, backEnd.viewDef->viewport.y1,
-		backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1,
-		backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1 );
-	glScissor( backEnd.viewDef->viewport.x1, backEnd.viewDef->viewport.y1,
-		backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1,
-		backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1 );
+	RB_ShadowMapRestoreViewViewport();
 
 	glMatrixMode( GL_PROJECTION );
 	glLoadMatrixf( backEnd.viewDef->projectionMatrix );
@@ -8738,6 +9104,11 @@ bool RB_ModernShadowMapRender( const viewDef_t *view, modernShadowLightDescripto
 			light->globalShadowMapDynamicCasters, light->localShadowMapDynamicCasters )
 		: RB_RenderShadowMap( light->globalShadowMapCasters, light->localShadowMapCasters,
 			light->globalShadowMapDynamicCasters, light->localShadowMapDynamicCasters );
+	if ( descriptor.pointLight && complete
+			&& ( g_pointShadowMapRenderTexture == NULL || g_pointShadowMapRenderTexture->GetNumColorImages() == 0 ) ) {
+		// the copy below reads packed colour depth; a depth-only cube has none
+		complete = false;
+	}
 	if ( !descriptor.pointLight && complete ) {
 		// Matrix provenance is as important as texture provenance. Never pair
 		// a freshly fitted cascade with the planner's different projection.
@@ -8918,12 +9289,7 @@ static bool RB_RenderTranslucentShadowMap( const drawSurf_t *primaryCasters, con
 		R_SetDefaultDrawAndReadBuffers();
 	}
 
-	glViewport( backEnd.viewDef->viewport.x1, backEnd.viewDef->viewport.y1,
-		backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1,
-		backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1 );
-	glScissor( backEnd.viewDef->viewport.x1, backEnd.viewDef->viewport.y1,
-		backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1,
-		backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1 );
+	RB_ShadowMapRestoreViewViewport();
 
 	glMatrixMode( GL_PROJECTION );
 	glLoadMatrixf( backEnd.viewDef->projectionMatrix );
@@ -9061,12 +9427,7 @@ static bool RB_RenderPointTranslucentShadowMap( const drawSurf_t *primaryCasters
 		R_SetDefaultDrawAndReadBuffers();
 	}
 
-	glViewport( backEnd.viewDef->viewport.x1, backEnd.viewDef->viewport.y1,
-		backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1,
-		backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1 );
-	glScissor( backEnd.viewDef->viewport.x1, backEnd.viewDef->viewport.y1,
-		backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1,
-		backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1 );
+	RB_ShadowMapRestoreViewViewport();
 
 	glMatrixMode( GL_PROJECTION );
 	glLoadMatrixf( backEnd.viewDef->projectionMatrix );
@@ -12100,11 +12461,12 @@ static void RB_ShadowMapDrawReceiverFallbacks( const viewLight_t *vLight, const 
 	}
 
 	// Fallback receivers are shadowed by the light's stencil volumes even on
-	// mapped frames. If the front end elided those volumes, restore them from
-	// the next frame on so these receivers do not stay unshadowed.
-	if ( primaryShadowSurfs == NULL && secondaryShadowSurfs == NULL ) {
-		RB_ShadowMapMarkStencilFallbackSticky( vLight );
-	}
+	// mapped frames, so the light needs those volumes for as long as it draws
+	// one. Every such view renews the hold. Marked only when the volumes were
+	// missing, the light counted each view that had them as clean, left the
+	// fallback after r_shadowMapStencilFallbackViews, drew these receivers
+	// unshadowed for a frame and was marked again, over and over.
+	RB_ShadowMapMarkStencilFallbackSticky( vLight );
 
 	if ( passKind == SHADOWMAP_PASS_LOCAL ) {
 		g_shadowMapStats.receiverFallbackLocalPasses++;
@@ -12245,11 +12607,16 @@ static void RB_ShadowMapRunPass( const viewLight_t *vLight, shadowMapPassKind_t 
 	const bool haveStencilShadowSurfs = primaryShadowSurfs != NULL || secondaryShadowSurfs != NULL;
 
 	if ( !haveOpaqueCasters && !haveStencilShadowSurfs && !haveTranslucentCasters ) {
-		// The front end may have elided stencil volumes this light could still
-		// need (e.g. its only casters are translucent/forceShadows materials the
-		// map path cannot draw). Restore volume generation so the next frame can
-		// take the stencil-only path instead of rendering unshadowed.
-		if ( vLight != NULL && R_ShadowMapLightWillUseShadowMaps( vLight->lightDef ) ) {
+		// Nothing casts in this ownership, in the map or in stencil. That is
+		// a map that failed only if the front end left a stencil volume out
+		// for it: restore volume generation then, so the next frame can take
+		// the stencil-only path instead of rendering unshadowed. A light with
+		// no such volume has nothing to shadow here. Marked all the same, it
+		// built volumes for 240 views, was let go, and was marked again.
+		if ( R_ShadowMapEmptyPassHasStencilVolumes( vLight,
+				passKind == SHADOWMAP_PASS_LOCAL
+					? SHADOWMAP_RECEIVER_MASK_LOCAL
+					: SHADOWMAP_RECEIVER_MASK_GLOBAL ) ) {
 			RB_ShadowMapMarkStencilFallbackSticky( vLight );
 		}
 		if ( passKind == SHADOWMAP_PASS_LOCAL ) {
@@ -12319,19 +12686,27 @@ static void RB_ShadowMapRunPass( const viewLight_t *vLight, shadowMapPassKind_t 
 
 	shadowMapSchedule_t schedule = RB_ShadowMapSchedulePass( vLight, passKind, pointLight, haveTranslucentCasters );
 
-	// cached projected lights with dynamic casters compose: blit the cached
-	// static tiles over scratch and draw only the dynamics on top
-	const bool composeDynamics = !pointLight
-		&& ( tertiaryCasters != NULL || quaternaryCasters != NULL )
-		&& schedule.projectedEntry != NULL;
+	// cached lights with dynamic casters compose: copy the cached static
+	// depth over scratch and draw only the dynamics on top
+	const bool composeDynamics = ( tertiaryCasters != NULL || quaternaryCasters != NULL )
+		&& ( pointLight
+			? ( schedule.pointEntry != NULL && RB_ShadowMapPointComposeAvailable() )
+			: schedule.projectedEntry != NULL );
 
 	if ( schedule.action == SHADOWMAP_SCHEDULE_REUSE ) {
 		if ( composeDynamics ) {
 			shadowMapTimedPhase_t composeTimer;
 			RB_ShadowMapBeginTimedPhase( composeTimer, vLight, passKind, SHADOWMAP_TIMING_MAP_RENDER );
-			RB_ShadowMapSelectProjectedScratchResources();
-			const bool composeOk = RB_RenderShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters,
-				SHADOWMAP_RENDER_COMPOSE_DYNAMIC, schedule.projectedEntry );
+			bool composeOk;
+			if ( pointLight ) {
+				RB_ShadowMapSelectPointScratchResources();
+				composeOk = RB_RenderPointShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters,
+					SHADOWMAP_RENDER_COMPOSE_DYNAMIC, schedule.pointEntry );
+			} else {
+				RB_ShadowMapSelectProjectedScratchResources();
+				composeOk = RB_RenderShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters,
+					SHADOWMAP_RENDER_COMPOSE_DYNAMIC, schedule.projectedEntry );
+			}
 			g_shadowMapStats.cpuRenderMilliseconds += RB_ShadowMapEndTimedPhase( composeTimer );
 			if ( !composeOk ) {
 				if ( passKind == SHADOWMAP_PASS_LOCAL ) {
@@ -12423,23 +12798,32 @@ static void RB_ShadowMapRunPass( const viewLight_t *vLight, shadowMapPassKind_t 
 		return;
 	}
 
-	// when a cacheable projected light has dynamic casters, keep the cached
-	// atlas tiles static-only and layer the dynamics onto scratch afterwards
+	// when a cacheable light has dynamic casters, keep the cached depth
+	// static-only and layer the dynamics onto scratch afterwards
 	const bool composePlanned = composeDynamics && schedule.cacheable;
+	const shadowMapRenderMode_t freshRenderMode =
+		composePlanned ? SHADOWMAP_RENDER_STATIC_ONLY : SHADOWMAP_RENDER_FULL;
 
 	shadowMapTimedPhase_t renderTimer;
 	RB_ShadowMapBeginTimedPhase( renderTimer, vLight, passKind, SHADOWMAP_TIMING_MAP_RENDER );
-	bool renderOk = pointLight ? RB_RenderPointShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters ) : RB_RenderShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters,
-		composePlanned ? SHADOWMAP_RENDER_STATIC_ONLY : SHADOWMAP_RENDER_FULL );
+	bool renderOk = pointLight
+		? RB_RenderPointShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters, freshRenderMode )
+		: RB_RenderShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters, freshRenderMode );
 	const float renderMilliseconds = RB_ShadowMapEndTimedPhase( renderTimer );
 	g_shadowMapStats.cpuRenderMilliseconds += renderMilliseconds;
 	RB_ShadowMapCompleteCacheUpdate( schedule, vLight, passKind, pointLight, renderOk );
 	if ( composePlanned && renderOk ) {
 		shadowMapTimedPhase_t composeTimer;
 		RB_ShadowMapBeginTimedPhase( composeTimer, vLight, passKind, SHADOWMAP_TIMING_MAP_RENDER );
-		RB_ShadowMapSelectProjectedScratchResources();
-		renderOk = RB_RenderShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters,
-			SHADOWMAP_RENDER_COMPOSE_DYNAMIC, schedule.projectedEntry );
+		if ( pointLight ) {
+			RB_ShadowMapSelectPointScratchResources();
+			renderOk = RB_RenderPointShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters,
+				SHADOWMAP_RENDER_COMPOSE_DYNAMIC, schedule.pointEntry );
+		} else {
+			RB_ShadowMapSelectProjectedScratchResources();
+			renderOk = RB_RenderShadowMap( primaryCasters, secondaryCasters, tertiaryCasters, quaternaryCasters,
+				SHADOWMAP_RENDER_COMPOSE_DYNAMIC, schedule.projectedEntry );
+		}
 		g_shadowMapStats.cpuRenderMilliseconds += RB_ShadowMapEndTimedPhase( composeTimer );
 	}
 	if ( renderOk && haveTranslucentCasters && RB_TranslucentShadowMomentsRequested() ) {
@@ -13472,9 +13856,7 @@ static bool RB_SharedWorldInteractionGLMapPassValuesValid(
 			|| ( !pass.allowCacheReuse && !pass.allowCacheUpdate )
 			|| pass.casterSignature
 				!= light.legacyViewLight->shadowMapCasterSignature
-			|| pass.casterCullMode
-				!= idMath::ClampInt( 0, 2,
-					r_shadowMapCasterCulling.GetInteger() )
+			|| pass.casterCullMode != R_ShadowMapCasterCullingMode()
 			|| idMath::Fabs( pass.polygonFactor
 				- RB_ShadowMapPolygonFactor() ) > 0.00001f
 			|| idMath::Fabs( pass.polygonOffset
@@ -13785,7 +14167,7 @@ static bool RB_SharedWorldInteractionGLEnsurePointCacheResource(
 		return false;
 	}
 	const int slotIndex = static_cast<int>( entry - g_pointShadowMapCache );
-	if ( slotIndex < 0 || slotIndex >= SHADOWMAP_CACHE_MAX_SLOTS ) {
+	if ( slotIndex < 0 || slotIndex >= SHADOWMAP_POINT_CACHE_MAX_SLOTS ) {
 		return false;
 	}
 	idImageOpts colorOpts;
@@ -13883,11 +14265,13 @@ static bool RB_SharedWorldInteractionGLScheduleSealedMapPass(
 			schedule.pointEntry = NULL;
 		}
 	} else {
+		const int cellSpan = RB_ShadowMapAtlasSpanForBlock(
+			pass.projected.state.tileSize * pass.projected.state.atlasDiv );
 		schedule.projectedEntry = RB_ShadowMapRecycleProjectedCacheEntry(
-			cacheLightIndex, passKind, pass.projected.state.atlasDiv );
+			cacheLightIndex, passKind, cellSpan );
 		if ( schedule.projectedEntry == NULL ) {
 			schedule.projectedEntry = RB_ShadowMapAllocProjectedCacheEntry(
-				pass.projected.state.atlasDiv, false );
+				cellSpan, false );
 		}
 	}
 	if ( pass.point.valid ? schedule.pointEntry == NULL
@@ -14008,7 +14392,8 @@ static bool RB_SharedWorldInteractionGLProjectedEntryMatches(
 			sizeof( entry->state ) ) == 0
 		&& preparedPass.projectedDepthImage == g_shadowMapAtlasDepthImage
 		&& preparedPass.renderTexture == g_shadowMapAtlasRenderTexture
-		&& entry->atlasCellSpan == pass.projected.state.atlasDiv
+		&& entry->atlasCellSpan == RB_ShadowMapAtlasSpanForBlock(
+			pass.projected.state.tileSize * pass.projected.state.atlasDiv )
 		&& preparedPass.projectedOriginX
 			== entry->atlasCellX * g_shadowMapAtlasCellSize
 		&& preparedPass.projectedOriginY
@@ -14080,19 +14465,13 @@ static bool RB_SharedWorldInteractionGLPointEntryMatches(
 static void RB_SharedWorldInteractionGLApplyMapCasterCull(
 		const classicInteractionDomainShadowMapPass_t &pass,
 		const classicInteractionDomainShadowCaster_t &caster ) {
-	int desired = 0;
-	const bool automaticTwoSided = pass.casterCullMode == 2
-		&& ( !caster.perfectHull
-			|| R_ShadowMapLightOriginInsideCasterBounds(
-				pass.legacyViewLight, caster.modelMatrix,
-				caster.boundsMin, caster.boundsMax ) );
-	if ( pass.casterCullMode != 0 && !automaticTwoSided && caster.cull != RENDERER_CULL_NONE ) {
-		GLenum face = GL_FRONT;
-		if ( caster.cull == RENDERER_CULL_BACK ) {
-			face = face == GL_FRONT ? GL_BACK : GL_FRONT;
-		}
-		desired = static_cast<int>( face );
-	}
+	const int materialCull = caster.cull == RENDERER_CULL_NONE ? CT_TWO_SIDED
+		: ( caster.cull == RENDERER_CULL_BACK ? CT_BACK_SIDED : CT_FRONT_SIDED );
+	const int desired = RB_ShadowMapCasterFacesCullFace(
+		R_ShadowMapCasterFaces( pass.casterCullMode, pass.legacyViewLight,
+			pass.casterWindingMirrored, true, caster.perfectHull,
+			caster.modelMatrix, caster.boundsMin, caster.boundsMax,
+			materialCull ) );
 	if ( desired == 0 ) {
 		glDisable( GL_CULL_FACE );
 	} else {
@@ -16930,6 +17309,7 @@ typedef struct {
 	int				errorPosition;
 	char			failureReason[256];
 	char			normalizedPath[96];
+	bool			sceneDepthReject;	// heat haze rewritten to read texture[oq4arbhaze::TEXTURE_UNIT]
 } progDef_t;
 
 static	const int	MAX_GLPROGS = 200;
@@ -17039,6 +17419,7 @@ static void RB_ResetARBProgramStatus( progDef_t &prog ) {
 	prog.requiredForLighting = RB_IsRequiredLightingARBProgram( prog );
 	prog.errorPosition = -1;
 	prog.failureReason[0] = '\0';
+	prog.sceneDepthReject = false;
 	RB_SetARBProgramPath( prog );
 }
 
@@ -17124,6 +17505,47 @@ static bool RB_ARBProgramNeedsColorZeroFloor( const progDef_t &prog ) {
 		( prog.ident == FPROG_INTERACTION ||
 		  prog.ident == FPROG_SIMPLE_INTERACTION ||
 		  prog.ident == FPROG_TEST );
+}
+
+/*
+==================
+RB_ARBProgramNeedsHeatHazeDepthReject
+
+The stock heat-haze fragment programs, which refract _currentRender. Their
+refracted read must not pick up the first-person weapon or other geometry in
+front of the haze; ARBHeatHazeDepthReject.h has the whole story.
+==================
+*/
+static bool RB_ARBProgramNeedsHeatHazeDepthReject( const progDef_t &prog ) {
+	return prog.target == GL_FRAGMENT_PROGRAM_ARB && idStr::Icmpn( prog.name, "heatHaze", 8 ) == 0;
+}
+
+static const char *RB_ARBHeatHazeDepthRejectResultName( oq4arbhaze::rewriteResult_t result ) {
+	switch ( result ) {
+	case oq4arbhaze::REWRITE_DONE:
+		return "done";
+	case oq4arbhaze::REWRITE_NO_SCREEN_READ:
+		return "no _currentRender read";
+	case oq4arbhaze::REWRITE_UNSUPPORTED:
+		return "unsupported program";
+	case oq4arbhaze::REWRITE_NO_ROOM:
+		return "rewrite buffer too small";
+	default:
+		return "unknown";
+	}
+}
+
+/*
+==================
+R_ARBProgramUsesSceneDepthReject
+
+True when the loaded fragment program ident reads the scene depth on
+texture[oq4arbhaze::TEXTURE_UNIT] and program.local[oq4arbhaze::LOCAL_INDEX].
+==================
+*/
+bool R_ARBProgramUsesSceneDepthReject( int ident ) {
+	const progDef_t *prog = RB_FindARBProgramRecord( GL_FRAGMENT_PROGRAM_ARB, static_cast<GLuint>( ident ) );
+	return prog != NULL && prog->valid && prog->sceneDepthReject;
 }
 
 static const char *RB_ARBColorZeroFloorResultName( oq4arbfloor::rewriteResult_t result ) {
@@ -17435,6 +17857,23 @@ void R_LoadARBProgram( int progIndex ) {
 		}
 	}
 
+	// The heat-haze programs get a scene depth test on their refracted read.
+	// Like the zero floor it is our rewrite, so a driver that refuses it gets
+	// the program as shipped.
+	idList<char> hazeDepthRejectProgram;
+	bool hazeDepthReject = false;
+	if ( RB_ARBProgramNeedsHeatHazeDepthReject( prog ) ) {
+		hazeDepthRejectProgram.SetNum( idLib::SizeToInt( oq4arbhaze::RewriteBufferSize( start ), "R_LoadARBProgram" ) );
+		const oq4arbhaze::rewriteResult_t hazeResult = oq4arbhaze::RewriteWithDepthReject( start,
+			hazeDepthRejectProgram.Ptr(), static_cast<size_t>( hazeDepthRejectProgram.Num() ) );
+		if ( hazeResult == oq4arbhaze::REWRITE_DONE ) {
+			programText = hazeDepthRejectProgram.Ptr();
+			hazeDepthReject = true;
+		} else {
+			common->Printf( ": heat-haze depth test not applied (%s)", RB_ARBHeatHazeDepthRejectResultName( hazeResult ) );
+		}
+	}
+
 	glBindProgramARB( prog.target, prog.ident );
 	glGetError();
 
@@ -17446,11 +17885,18 @@ void R_LoadARBProgram( int progIndex ) {
 	if ( programText != start && ( err == GL_INVALID_OPERATION || ofs != -1 ) ) {
 		const GLubyte *str = glGetString( GL_PROGRAM_ERROR_STRING_ARB );
 		common->Printf( "\n" );
-		common->Warning( "R_LoadARBProgram: the driver rejected the colour zero floor for %s (%s); loading it unchanged, "
-			"so a light behind a surface can darken it on a float scene target",
-			fullPath.c_str(), ( str != NULL ) ? (const char *)str : "unknown" );
+		if ( hazeDepthReject ) {
+			common->Warning( "R_LoadARBProgram: the driver rejected the heat-haze depth test for %s (%s); loading it unchanged, "
+				"so the haze can refract the view weapon",
+				fullPath.c_str(), ( str != NULL ) ? (const char *)str : "unknown" );
+		} else {
+			common->Warning( "R_LoadARBProgram: the driver rejected the colour zero floor for %s (%s); loading it unchanged, "
+				"so a light behind a surface can darken it on a float scene target",
+				fullPath.c_str(), ( str != NULL ) ? (const char *)str : "unknown" );
+		}
 		common->Printf( "%s", fullPath.c_str() );
 		programText = start;
+		hazeDepthReject = false;
 		glProgramStringARB( prog.target, GL_PROGRAM_FORMAT_ASCII_ARB,
 			idLib::SizeToInt( strlen( programText ), "R_LoadARBProgram" ), (unsigned char *)programText );
 		err = glGetError();
@@ -17478,7 +17924,12 @@ void R_LoadARBProgram( int progIndex ) {
 	}
 
 	prog.valid = true;
-	common->Printf( programText != start ? ": colour floored at zero\n" : "\n" );
+	prog.sceneDepthReject = hazeDepthReject;
+	if ( programText == start ) {
+		common->Printf( "\n" );
+	} else {
+		common->Printf( hazeDepthReject ? ": heat-haze depth test added\n" : ": colour floored at zero\n" );
+	}
 }
 
 /*

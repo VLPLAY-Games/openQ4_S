@@ -141,8 +141,9 @@ struct demoLibraryEntry_t {
 	idStr					details;
 };
 
-// A v11 render demo's time at a frame index: each recorded frame is
+// A v11 or v12 render demo's time at a frame index: each recorded frame is
 // USERCMD_PER_DEMO_FRAME tics at the recording's tic rate (Session_demo.cpp).
+// v13 frames carry their own times instead.
 int Session_RenderDemoFramesToMS( int frames, int userCmdHz );
 
 // A level's localized name from its map declaration, or the map path when it
@@ -222,7 +223,7 @@ const char *Session_SkillName( int skill );
 idStr Session_RetainedPlayTime( int seconds );
 idStr Session_RetainedList( const char *first, const char *second );
 
-const int USERCMD_PER_DEMO_FRAME	= 2;
+const int USERCMD_PER_DEMO_FRAME	= 2;		// tics per frame of a render demo before v13
 const int CONNECT_TRANSMIT_TIME		= 1000;
 const int MAX_LOGGED_USERCMDS		= 60*60*60;	// one hour of single player, 15 minutes of four player
 
@@ -262,6 +263,7 @@ public:
 
 	virtual void		Frame();
 	void				HandleAppResume( bool afterMapLoad );
+	void				HandleVRFocusLoss();
 
 	virtual bool		IsMultiplayer();
 	virtual bool		IsLoadingSaveGame() const { return loadingSaveGame; }
@@ -299,7 +301,7 @@ public:
 	// The change between Campaign and a fourth-level child: its difficulty
 	// page, or its levels with `chapters`; `back` climbs to Campaign.
 	void BeginRetainedCampaignSkill( idUserInterface *from, const char *campaign, bool back = false, bool chapters = false );
-	// Single Player's retained Arena sub-page (guis/menu/arena.q4ui): the
+	// Single Player's retained Arena sub-page (guis/menu/arena.rui): the
 	// Arena campaign's browser where it can present (NULL: the stock one
 	// presents), and the page while it is loaded, which the campaign
 	// publishes into.
@@ -347,6 +349,7 @@ public:
 	// Starts parsing PreloadRetainedScreens' documents on the job system's
 	// workers, while the stock menus load.
 	void				PrefetchRetainedScreens();
+	void				PrefetchRetainedNextPages();
 	void				PrepareRetainedLevel( const char *mapPath, bool multiplayer );
 	// As a map change begins, starts parsing the level's retained documents on
 	// the job system's workers: the pages PrepareRetainedLevel loads, and the
@@ -400,7 +403,7 @@ public:
 	void				PresentRetainedSubpage( bool deeper, retainedSubpage_t subpage );
 	void				UpdateRetainedSubpage();
 	bool				RetainedSubpageEvent( const sysEvent_t *event );
-	// The retained Load Game page (guis/menu/loadgame.q4ui): LOAD GAME on the
+	// The retained Load Game page (guis/menu/loadgame.rui): LOAD GAME on the
 	// title and the Marine pause hands off to it as to a stock page.
 	bool				BeginRetainedPage( const char *request );
 	void				UpdateRetainedPage();
@@ -413,7 +416,7 @@ public:
 	void				PublishRetainedLoadRows( idUserInterface *gui );
 	void				PublishRetainedLoadSave( idUserInterface *gui, const char *error );
 	void				HandleRetainedLoadRequest( idUserInterface *gui, const char *request );
-	// The retained Save Game page (guis/menu/savegame.q4ui): SAVE GAME on the
+	// The retained Save Game page (guis/menu/savegame.rui): SAVE GAME on the
 	// Marine pause hands off to it the same way. RetainedPageActive is true
 	// while either page presents.
 	bool				RetainedPageActive() const;
@@ -421,10 +424,10 @@ public:
 	void				PublishRetainedSaveSelection( idUserInterface *gui, bool name );
 	void				HandleRetainedSaveRequest( idUserInterface *gui, const char *request );
 	bool				RetainedSaveGame( idUserInterface *gui, const char *name );
-	// The retained Restart Level page (guis/menu/restartlevel.q4ui), which
+	// The retained Restart Level page (guis/menu/restartlevel.rui), which
 	// RESTART LEVEL on the Marine pause hands off to the same way.
 	void				HandleRetainedRestartRequest( idUserInterface *gui, const char *request );
-	// The retained Demos page (guis/menu/demos.q4ui), which the title's DEMOS
+	// The retained Demos page (guis/menu/demos.rui), which the title's DEMOS
 	// hands off to the same way: the library, filtered, a page at a time.
 	void				PublishRetainedDemosPage( idUserInterface *gui, const char *selectPath, int selectRow, const char *error );
 	void				PublishRetainedDemoRows( idUserInterface *gui );
@@ -434,7 +437,7 @@ public:
 	void				OpenRetainedDemos();
 	// The Arena page's verbs, which run the Arena campaign's own commands.
 	void				HandleRetainedArenaRequest( idUserInterface *gui, const char *request );
-	// The retained Multiplayer page (guis/menu/multiplayer.q4ui), which the
+	// The retained Multiplayer page (guis/menu/multiplayer.rui), which the
 	// title's MULTIPLAYER hands off to: its sections open the stock pages
 	// after its departure, and their Back presents it again (multiplayerOpen);
 	// back from a sub-page it returns onto that sub-page's section.
@@ -455,7 +458,7 @@ public:
 	void				HandleRetainedSettingsPageRequest( idUserInterface *gui, const char *request );
 	void				UpdateRetainedSettingsPage();
 	bool				RetainedSettingsParent() const;
-	// The retained Create Server sub-page (guis/menu/createserver.q4ui), which
+	// The retained Create Server sub-page (guis/menu/createserver.rui), which
 	// CREATE SERVER on the Multiplayer page goes deeper to: the session owns
 	// its settings and publishes them (create.*), and CREATE SERVER starts the
 	// server as the stock page's does.
@@ -466,7 +469,7 @@ public:
 	void				PublishRetainedCreateBans( idUserInterface *gui );
 	void				HandleRetainedCreateServerRequest( idUserInterface *gui, const char *request );
 	bool				StartMenuServer();
-	// The retained Join Game sub-page (guis/menu/joingame.q4ui), which JOIN
+	// The retained Join Game sub-page (guis/menu/joingame.rui), which JOIN
 	// GAME on the Multiplayer page goes deeper to: the session lists the
 	// server scan's servers (join.*) as the scan finds them, and JOIN SERVER
 	// connects to the chosen one.
@@ -493,6 +496,11 @@ public:
 	void				ReturnRetainedControls();
 	void				PublishRetainedControls( idUserInterface *gui );
 	void				HandleRetainedControlsRequest( idUserInterface *gui, const char *request );
+	bool				SaveForSuspension( void );
+	// Single player carried across a renderer restart, which is an engine reload.
+	bool				CanSaveForRendererRestart( void ) const;
+	bool				SaveForRendererRestart( void );
+	void				QueueRendererRestart( void );
 	bool				RetainedControlsKey( const sysEvent_t *event );
 	void				PushRetainedNotice( const char *text, int kind, const char *action, const char *subject, int undo,
 							bool persistent );
@@ -678,7 +686,6 @@ public:
 
 	int					latchedTicNumber;	// set to com_ticNumber each frame
 	int					lastGameTic;		// while latchedTicNumber > lastGameTic, run game frames
-	int					lastDemoTic;
 	bool				syncNextGameFrame;
 	bool				syncNextGameFrameAwaitingAsyncTicLog;
 	bool				cinematicStateValid;
@@ -904,7 +911,9 @@ public:
 	idUserInterface *	guiTest;
 	idUserInterface *	guiTakeNotes;
 	
-	idUserInterface *	guiMsg;
+	idUserInterface *	guiMsg;						// the message box in use: one of the two below
+	idUserInterface *	guiMsgStock;				// guis/msg.gui
+	idUserInterface *	guiMsgRetained;				// the retained pop-up (NULL until a box needs it)
 	idUserInterface *	guiMsgRestore;				// store the calling GUI for restore
 	idStr				msgFireBack[ 2 ];
 	bool				msgRunning;
@@ -1021,7 +1030,6 @@ public:
 	bool				renderDemoSeekMuteOwned;
 	bool				renderDemoSeekRestoreMute;
 	float				renderDemoPlaybackRate;
-	double				renderDemoFrameAccumulator;
 	int					renderDemoStartViewTime;
 	int					renderDemoKnownDurationMS;
 	int					renderDemoSeekTargetMS;
@@ -1040,7 +1048,9 @@ public:
 		RENDER_DEMO_RECORD_SUSPENDED	// between levels
 	};
 	struct renderDemoSegment_t {
+						renderDemoSegment_t() : startFrame( 0 ), startMS( -1 ) {}
 		int				startFrame;		// frames recorded before the segment
+		int				startMS;		// its first frame on the timeline, -1 until known
 		idStr			map;
 		idStr			entityFilter;
 		idStr			reason;			// start, level, load or restart
@@ -1052,12 +1062,29 @@ public:
 	int					renderDemoRecordStartMsec;
 	idList<renderDemoSegment_t> renderDemoRecordSegments;
 	idStr				renderDemoNextSegmentReason;	// set by the map change that ends one
+	// The recording's own clock (v13): every gameplay draw is a frame, stamped
+	// with the time since the previous one. Menus, pauses and level loads leave
+	// no frames, so a frame after one of them is one tic after the frame before.
+	int64				renderDemoRecordTimeUS;			// the last frame's time on the timeline
+	double				renderDemoRecordLastFrameClockUS;	// when it was drawn, real time
+	int					renderDemoRecordLastFrameDraw;	// renderDemoDrawSerial it was drawn on
+	int					renderDemoDrawSerial;			// counts idSessionLocal::Draw calls
 
-	// Playback of a v11 recording. Its timeline counts recorded frames, each
-	// USERCMD_PER_DEMO_FRAME tics at the recording's tic rate, so it runs on
-	// across levels whose game clocks restart.
+	// Playback of a v11 recording. Its timeline is the time of its recorded
+	// frames, so it runs on across levels whose game clocks restart: each v13
+	// frame carries its own duration; earlier frames are USERCMD_PER_DEMO_FRAME
+	// tics at the recording's tic rate.
 	bool				renderDemoFrameClock;
 	int					renderDemoUserCmdHz;
+	// Every render demo is paced on the time of its frames: the frame on screen
+	// is the first whose time is past the playback clock, which runs at the
+	// playback rate in real time.
+	bool				renderDemoTimedFrames;			// v13: frames carry DSC_FRAME_TIME
+	int64				renderDemoFrameTimeUS;			// the frame on screen
+	int64				renderDemoPrevFrameTimeUS;		// the frame before it
+	int					renderDemoPendingFrameDeltaUS;	// read for the frame being read, or -1
+	double				renderDemoPlayClockUS;
+	double				renderDemoPlayRealClockUS;		// last real-time sample, < 0 to re-anchor
 	idDict				renderDemoPlayHeader;
 	idList<renderDemoSegment_t> renderDemoPlaySegments;	// from the trailer, then as met
 	int					renderDemoPlaySegment;		// the segment playing, or -1
@@ -1074,6 +1101,12 @@ public:
 	bool				ProcessRenderDemoSessionRecord( bool &finished );
 	void				CloseRenderDemoLevelLoad();
 	int					RenderDemoFramesToMS( int frames ) const;
+	int					RenderDemoCurrentTimeMS() const;
+	bool				CompleteRenderDemoFrame();
+	void				SyncRenderDemoPlayClock();
+	double				RenderDemoPlaybackElapsedUS();
+	double				RenderDemoCaptureStepUS() const;
+	void				EndRenderDemoRecordFrame();
 	bool				SeekRenderDemoSegment( int direction );
 	idStr				RenderDemoSegmentLabel() const;
 
@@ -1089,6 +1122,7 @@ public:
 	void				HandleIntroMenuCommands( const char *menuCommand );
 	void				HandleRestartMenuCommands( const char *menuCommand );
 	void				HandleMsgCommands( const char *menuCommand );
+	void				SelectMessageBox( bool retained );
 	void				HandleNoteCommands( const char *menuCommand );
 	void				GetSaveGameList( idStrList &fileList, idList<fileTIME_T> &fileTimes );
 	void				TakeNotes( const char * p, bool extended = false );
@@ -1104,7 +1138,7 @@ public:
 	void				SelectRetainedMod( idUserInterface *gui, int row );
 	// After the player dies: the retained restart screen, else the stock one.
 	void				OpenRestartMenu();
-	// The retained Credits page (guis/menu/credits.q4ui), which the title's
+	// The retained Credits page (guis/menu/credits.rui), which the title's
 	// CREDITS hands off to: its lines read from the legacy credits windows.
 	void				PublishRetainedCredits( idUserInterface *page );
 	int					retainedModSelected;

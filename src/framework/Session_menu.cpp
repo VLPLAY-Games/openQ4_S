@@ -54,7 +54,20 @@ static bool Session_AndroidSetupAvailable() {
 	return false;
 }
 
-static void Session_OpenAndroidSetup() {
+// OpenQ4Activity's SETUP_PAGE_* arguments: setup's home, or the touch layout editor.
+enum { ANDROID_SETUP_HOME = 0, ANDROID_SETUP_TOUCH_LAYOUT = 1 };
+
+static void Session_OpenAndroidSetup( int page = 0 ) {
+#if defined( __ANDROID__ ) && !defined( OPENQ4_SIGMATOUCH )
+	// SDL posts to OpenQ4Activity's main-thread handler. The existing Android
+	// lifecycle owns input release, audio suspension and the paused SP return.
+	// Keep the engine and its storage lease alive while setup is in front.
+	if ( !SDL_SendAndroidMessage( 0x8000, page ) ) {
+		common->Warning( "Could not open Android setup: %s", SDL_GetError() );
+	}
+#else
+	(void)page;
+#endif
 }
 
 extern idCVar com_skipLogoVideos;
@@ -72,7 +85,7 @@ idCVar gui_set_game_scroll( "gui_set_game_scroll", "0", CVAR_GUI | CVAR_INTEGER,
 // CVAR_NOCHEAT, because the engine counts any other unarchived CVar as a
 // cheat: joining or hosting a server without cheats resets it to its default,
 // and a player cannot set it during a match, where both pages open.
-idCVar ui_retainedSystem( "ui_retainedSystem", "0", CVAR_GUI | CVAR_BOOL | CVAR_NOCHEAT, "use the in-development retained SYSTEM page, which ui_retained includes only once every stock setting works there" );
+idCVar ui_retainedSystem( "ui_retainedSystem", "0", CVAR_GUI | CVAR_BOOL | CVAR_NOCHEAT, "use the retained SYSTEM page even while ui_retained is 0; ui_retained includes it while every stock setting works there" );
 idCVar ui_retainedMultiplayer( "ui_retainedMultiplayer", "0", CVAR_GUI | CVAR_BOOL | CVAR_NOCHEAT, "use the in-development retained multiplayer menu card, which ui_retained includes only once all its pages are built" );
 // The single gate for the retained (RmlUi) interface, enabled by default. Each
 // screen presents its stock GUI instead when its retained document is missing
@@ -82,6 +95,7 @@ idCVar ui_retainedMultiplayer( "ui_retainedMultiplayer", "0", CVAR_GUI | CVAR_BO
 // so an explicit player preference persists across launches.
 idCVar ui_retained( "ui_retained", "1", CVAR_GUI | CVAR_BOOL | CVAR_ARCHIVE, "use the retained interface by default; 0 selects the stock interface" );
 idCVar ui_hudScale( "ui_hudScale", "1", CVAR_GUI | CVAR_FLOAT | CVAR_ARCHIVE, "retained status bar scale, independent of menus", .5f, 2.0f );
+idCVar ui_browserView( "ui_browserView", "0", CVAR_GUI | CVAR_INTEGER | CVAR_ARCHIVE, "the server browser's list: 0 rows, 1 tiles with each map's levelshot", 0, 1 );
 idCVar ui_hudSafeInset( "ui_hudSafeInset", "0", CVAR_GUI | CVAR_FLOAT | CVAR_ARCHIVE, "retained status bar safe inset in percent of viewport", 0.0f, 10.0f );
 idCVar ui_retainedCaptureLoadFade( "ui_retainedCaptureLoadFade", "0", CVAR_GUI | CVAR_BOOL | CVAR_NOCHEAT, "diagnostic: use the engine screenshot command to capture the middle and end of the retained loading fade" );
 
@@ -94,7 +108,7 @@ static bool Session_RetainedScreensEnabled( void ) {
 }
 
 // The retained SYSTEM page, reached from the legacy menu's SYSTEM button.
-static const char *const RETAINED_SYSTEM_GUI = "guis/menu/settings/system.q4ui";
+static const char *const RETAINED_SYSTEM_GUI = "guis/menu/settings/system.rui";
 // Settings the stock SYSTEM page offers that the retained page has no control
 // for yet. While any remain, the gate leaves the stock SYSTEM page in place
 // and only ui_retainedSystem opts into the retained one. ui_retained_gate.py
@@ -103,14 +117,13 @@ static const char *const RETAINED_SYSTEM_MISSING_SETTINGS[] = {
 	NULL
 };
 // Settings the retained page has a control for that cannot yet do what the
-// stock page did, which keep it out of the gate too: a Performance Preset or
-// Auto-Detect cannot be applied (its image, audio and renderer resource
-// effects have no apply path). The size fields take typed digits since the
-// adapter types committed characters into the focused field.
-// ui_retained_gate.py derives this list from those reasons, so the page joins
-// the gate once both lists are empty.
+// stock page did, which keep it out of the gate too. None remain: a
+// Performance Preset or Auto-Detect applies through the combined executor
+// (SystemApplyClass::Combined), and the size fields take typed digits.
+// ui_retained_gate.py derives this list from the code, so the page stays in
+// the gate while both lists are empty and leaves it when a reason returns.
 static const char *const RETAINED_SYSTEM_INCOMPLETE_SETTINGS[] = {
-	"com_performancePreset", NULL
+	NULL
 };
 
 static bool Session_RetainedSystemEnabled( void ) {
@@ -121,8 +134,10 @@ static bool Session_RetainedSystemEnabled( void ) {
 // The multiplayer menu card (section 14.18), which covers the game's own menu
 // while it is open over a match: Escape, and Welcome while the player has not
 // answered the join offer.
-static const char *const RETAINED_MP_ESCAPE_GUI = "guis/menu/mp_escape.q4ui";
-static const char *const RETAINED_MP_WELCOME_GUI = "guis/menu/mp_welcome.q4ui";
+static const char *const RETAINED_MP_ESCAPE_GUI = "guis/menu/mp_escape.rui";
+// The session's message box (guis/msg.gui) as the retained pop-up.
+static const char *const RETAINED_MSGBOX_GUI = "guis/menu/msgbox.rui";
+static const char *const RETAINED_MP_WELCOME_GUI = "guis/menu/mp_welcome.rui";
 // The version of the game's answer to retainedMultiplayerCover that the card
 // relies on; a game module without it keeps its stock menu.
 static const int RETAINED_MP_PROTOCOL = 4;
@@ -266,10 +281,10 @@ static bool Session_RetainedMultiplayerEnabled( bool welcome ) {
 
 // The match summary card (section 14.14) covers the game's summary at the end
 // of a match as the menu cards cover its menu; all its pages are built.
-static const char *const RETAINED_MP_SUMMARY_GUI = "guis/menu/mp_summary.q4ui";
+static const char *const RETAINED_MP_SUMMARY_GUI = "guis/menu/mp_summary.rui";
 // The single-player Arena's pause card (section 13.7) covers the game's Arena
 // pause menu as the cards cover the multiplayer menu; all its actions are built.
-static const char *const RETAINED_ARENA_PAUSE_GUI = "guis/menu/arena_pause.q4ui";
+static const char *const RETAINED_ARENA_PAUSE_GUI = "guis/menu/arena_pause.rui";
 
 #ifndef ID_DEDICATED
 static bool Session_RetainedSummaryEnabled( void ) {
@@ -324,7 +339,7 @@ static bool Session_RetainedValueRequest( const char *request, const char *const
 // The retained AUDIO page (tools/ui/retained_audio.py): its document, its
 // value verbs in the order HandleRetainedAudioRequest takes them, the device
 // list's rows and the speaker counts its choice names.
-static const char *const RETAINED_AUDIO_GUI = "guis/menu/settings/audio.q4ui";
+static const char *const RETAINED_AUDIO_GUI = "guis/menu/settings/audio.rui";
 static const char *const RETAINED_AUDIO_VERBS[] = {
 	"audioVolume", "audioMusic", "audioDialogue", "audioBackend", "audioDevice", "audioEax", "audioSpeakers", "audioHrtf",
 	"audioSubtitles", "audioSubtitleSize", "audioSubtitleBackground", "audioSubtitleSpeakers"
@@ -336,7 +351,7 @@ static const int RETAINED_AUDIO_SPEAKERS[] = { 0, 2, 6 };
 // the verbs of the rows the stock page computes, in the order
 // HandleRetainedGameRequest takes them, and the languages its list names, in
 // #str_229908's order.
-static const char *const RETAINED_GAME_GUI = "guis/menu/settings/game.q4ui";
+static const char *const RETAINED_GAME_GUI = "guis/menu/settings/game.rui";
 static const char *const RETAINED_GAME_VERBS[] = {
 	"gameGunPosition", "gameForceModel", "gameCrosshair", "gameCorpseTime", "gameLanguage"
 };
@@ -347,7 +362,7 @@ static const char *const RETAINED_GAME_LANGUAGES[] = {
 static const int RETAINED_GAME_LANGUAGE_COUNT = sizeof( RETAINED_GAME_LANGUAGES ) / sizeof( RETAINED_GAME_LANGUAGES[0] );
 // The retained CONTROLS page (tools/ui/retained_controls.py): its document and
 // the bindings of its rows, in its order (the stock page's tabs in turn).
-static const char *const RETAINED_CONTROLS_GUI = "guis/menu/settings/controls.q4ui";
+static const char *const RETAINED_CONTROLS_GUI = "guis/menu/settings/controls.rui";
 static const char *const RETAINED_CONTROLS_BINDINGS[] = {
 	"_forward", "_back", "_moveleft", "_moveright", "_moveUp", "_moveDown", "_left", "_right", "_strafe", "_speed", "_impulse0",
 	"_impulse1", "_impulse2", "_impulse3", "_impulse4", "_impulse5", "_impulse6", "_impulse7", "_impulse8", "_impulse9",
@@ -1957,6 +1972,31 @@ bool idSessionLocal::PublishRetainedPlayerSetup( idUserInterface *gui, bool rebu
 		gui->SetStateString( va("setup.observed_%s",field), value );
 	}
 	gui->SetStateString( "setup.observed_model", retainedSetupValue.c_str() );
+	// OPPONENTS' forced model: its row on this catalog page, or none.
+	const idStr forcedModel = cvarSystem->GetCVarString( "g_forceModel" );
+	const int forcedIndex = forcedModel.Length() ? retainedSetupModels.FindIndex( forcedModel ) : -1;
+	gui->SetStateInt( "setup.force_row", forcedIndex >= retainedSetupFirst && forcedIndex < retainedSetupFirst + int(PlayerSetupModelRows) ?
+		forcedIndex-retainedSetupFirst : -1 );
+	gui->SetStateString( "setup.observed_force", forcedModel.c_str() );
+	// Its parts and name, for OPPONENTS' preview: the forced model as the
+	// player's own is named, or none.
+	idStr forcedBody, forcedHead, forcedSkin, forcedDescription, forcedTeam, forcedHeadSkin;
+	if ( forcedIndex >= 0 && MainMenuExtractPlayerModelInfo( forcedModel.c_str(), forcedBody, forcedHead, forcedSkin, forcedDescription, forcedTeam ) ) {
+		if ( forcedHead.Length() ) {
+			const idDeclEntityDef *head = static_cast<const idDeclEntityDef *>( declManager->FindType( DECL_ENTITYDEF, forcedHead.c_str(), false ) );
+			if ( head != NULL ) {
+				forcedHeadSkin = head->dict.GetString( "skin" );
+			}
+		}
+	} else {
+		forcedBody.Clear(); forcedHead.Clear(); forcedSkin.Clear();
+	}
+	gui->SetStateString( "setup.force_body", forcedBody.c_str() );
+	gui->SetStateString( "setup.force_head", forcedHead.c_str() );
+	gui->SetStateString( "setup.force_skin", forcedSkin.c_str() );
+	gui->SetStateString( "setup.force_head_skin", forcedHeadSkin.c_str() );
+	gui->SetStateString( "setup.force_name", forcedIndex >= 0 && forcedBody.Length() ?
+		Session_RetainedPlayerText( retainedSetupNames[ forcedIndex ].c_str(), 256, 1 ).c_str() : "" );
 	const char *tint = cvarSystem->GetCVarString("ui_hitscanTint");
 	gui->SetStateString( "setup.observed_rail", tint );
 	float hue=0,saturation=0,brightness=0;
@@ -2008,6 +2048,17 @@ void idSessionLocal::HandleRetainedPlayerSetupRequest( idUserInterface *gui, con
 			if ( !MainMenuExtractPlayerModelInfo(wanted.c_str(),model,head,skin,description,team) ||
 				!MainMenuModelAllowedForTeam(team,MainMenuIsTeamGame(),MainMenuResolveModelTeam()) ) { notice("#str_231548"); return; }
 			cvar=retainedSetupCvar.c_str(); break;
+		}
+		case PlayerSetupField::ForceModel: {
+			// The model every other player shows outside team modes: a row of the
+			// catalog page, or none.
+			const int row = int(std::get<double>(request.value));
+			if ( row >= 0 ) {
+				const long long index = static_cast<long long>(retainedSetupFirst) + row;
+				if ( index >= retainedSetupModels.Num() ) { notice("#str_231548"); return; }
+				wanted=retainedSetupModels[int(index)];
+			}
+			cvar="g_forceModel"; break;
 		}
 		case PlayerSetupField::Rail: {
 			static const int hues[7] = {0,30,60,120,180,240,330};
@@ -3070,6 +3121,8 @@ void idSessionLocal::PublishRetainedControls( idUserInterface *gui ) {
 			common->GetLanguageDict()->GetString( "#str_07000" ) );
 	}
 	gui->SetStateInt( "controls.capture", retainedControlsCapture );
+	// TOUCH LAYOUT: the built-in touch controls' editor lives in the Android setup.
+	gui->SetStateBool( "controls.touchLayout", Session_AndroidSetupAvailable() );
 	gui->StateChanged( common->GetPresentationTime() );
 #endif
 }
@@ -3080,13 +3133,22 @@ idSessionLocal::HandleRetainedControlsRequest
 
 The CONTROLS page's verbs on the focused row: controlsBind waits for its new
 key (RetainedControlsKey), controlsClear clears it as the stock field's
-Delete does. BACK returns to the settings screen.
+Delete does. BACK returns to the settings screen. controlsTouchLayout opens
+the Android setup's touch layout editor; the game waits behind it as for any
+return from setup.
 ===============
 */
 void idSessionLocal::HandleRetainedControlsRequest( idUserInterface *gui, const char *request ) {
 #ifndef ID_DEDICATED
 	if ( !idStr::Icmp( request, "controlsBack" ) ) {
 		ReturnRetainedControls();
+		return;
+	}
+	if ( !idStr::Icmp( request, "controlsTouchLayout" ) ) {
+		if ( Session_AndroidSetupAvailable() ) {
+			HandleMainMenuCommands( "play main_menu_selection" );
+			Session_OpenAndroidSetup( ANDROID_SETUP_TOUCH_LAYOUT );
+		}
 		return;
 	}
 	const bool bind = !idStr::Icmp( request, "controlsBind" );
@@ -3123,8 +3185,8 @@ idSessionLocal::RetainedControlsKey
 
 While the CONTROLS page waits for a key it takes the next key pressed, as
 the stock binding field does: Escape, Start or Back cancel, Backspace or
-Delete clear the row, any other key joins its keys (at most two, as the stock
-bindunbindtwo keeps). The key's release and characters are its own. Out of
+Delete clear the row, any other key joins its keys (at most two of each device
+family, idKeyInput::BindForMenu). The key's release and characters are its own. Out of
 a wait, Delete or Backspace on a row clears it.
 ===============
 */
@@ -3158,10 +3220,7 @@ bool idSessionLocal::RetainedControlsKey( const sysEvent_t *event ) {
 	if ( key == K_BACKSPACE || key == K_DEL ) {
 		idKeyInput::UnbindBinding( binding );
 	} else if ( key != K_ESCAPE && key != K_JOY7 && key != K_JOY8 ) {
-		if ( idKeyInput::NumBinds( binding ) >= 2 && !idKeyInput::KeyIsBoundTo( key, binding ) ) {
-			idKeyInput::UnbindBinding( binding );
-		}
-		idKeyInput::SetBinding( key, binding );
+		idKeyInput::BindForMenu( key, binding );
 	}
 	if ( guiMainMenu != NULL ) {
 		guiMainMenu->SetKeyBindingNames();
@@ -3915,7 +3974,7 @@ void idSessionLocal::SetMainMenuGuiVars( bool refreshCatalogs ) {
 		SetModsMenuGuiVars();
 	}
 
-	guiMsg->SetStateString( "visible_hasxp", fileSystem->HasD3XP() ? "1" : "0" );
+	( guiMsgStock != NULL ? guiMsgStock : guiMsg )->SetStateString( "visible_hasxp", fileSystem->HasD3XP() ? "1" : "0" );
 
 #if defined( __linux__ )
 	guiMainMenu->SetStateString( "driver_prompt", "1" );
@@ -4838,10 +4897,7 @@ void idSessionLocal::HandleMainMenuCommands( const char *menuCommand ) {
 			if ( args.Argc() - icmd >= 2 ) {
 				int key = atoi( args.Argv( icmd++ ) );
 				idStr bind = args.Argv( icmd++ );
-				if ( idKeyInput::NumBinds( bind ) >= 2 && !idKeyInput::KeyIsBoundTo( key, bind ) ) {
-					idKeyInput::UnbindBinding( bind );
-				}
-				idKeyInput::SetBinding( key, bind );
+				idKeyInput::BindForMenu( key, bind );
 				guiMainMenu->SetKeyBindingNames();
 			}
 			continue;
@@ -5038,7 +5094,7 @@ void idSessionLocal::HandleMainMenuCommands( const char *menuCommand ) {
 
 			const char *presetCommand = NULL;
 			if ( idStr::Icmp( vcmd, "low" ) == 0 ) {
-				presetCommand = "applyPerformancePreset lowpower\n";
+				presetCommand = "applyPerformancePreset low\n";
 			} else if ( idStr::Icmp( vcmd, "medium" ) == 0 ) {
 				presetCommand = "applyPerformancePreset performance\n";
 			} else  if ( idStr::Icmp( vcmd, "high" ) == 0 ) {
@@ -5447,6 +5503,8 @@ void idSessionLocal::DispatchCommand( idUserInterface *gui, const char *menuComm
 			// The death screen stays: closing it would leave a player with no
 			// level and no way back, and the stock screen took no Escape.
 			else if ( gui == guiRetainedRestartMenu ) {}
+			// A message box answers through its buttons alone.
+			else if ( gui == guiMsg ) {}
 			else if ( gui == guiActive ) ExitMenu();
 		}
 		return;
@@ -5659,6 +5717,17 @@ static int MainMenuSettingsSectionChoiceForScroll( const mainMenuSettingsScrollP
 	return 0;
 }
 
+// A page's content height and scroll step: the DISPLAY page is shorter with
+// one display, whose rows the multi-monitor section leaves out.
+static void MainMenuSettingsScrollGeometry( idUserInterface *gui, const mainMenuSettingsScrollPage_t &page, int &contentHeight, float &stepY ) {
+	contentHeight = page.contentHeight;
+	stepY = page.stepY;
+	if ( idStr::Icmp( page.name, "system" ) == 0 && gui->GetStateInt( "display_count", "0" ) <= 1 ) {
+		contentHeight = 902;
+		stepY = 19.5f;
+	}
+}
+
 static bool ApplyMainMenuSettingsScrollPage( idUserInterface *gui, const mainMenuSettingsScrollPage_t &page, int requestedValue, bool requireVisiblePage ) {
     if (!NativeInput_SessionCurrent()) return false;
 	if ( gui == NULL ) {
@@ -5694,10 +5763,7 @@ static bool ApplyMainMenuSettingsScrollPage( idUserInterface *gui, const mainMen
 
 	int contentHeight = page.contentHeight;
 	float stepY = page.stepY;
-	if ( idStr::Icmp( page.name, "system" ) == 0 && gui->GetStateInt( "display_count", "0" ) <= 1 ) {
-		contentHeight = 902;
-		stepY = 19.5f;
-	}
+	MainMenuSettingsScrollGeometry( gui, page, contentHeight, stepY );
 
 	const int scrollOffset = idMath::Ftoi( stepY * static_cast<float>( scrollValue ) + 0.5f );
 	const int contentY = page.baseY - scrollOffset;
@@ -5820,6 +5886,67 @@ static bool HandleMainMenuSettingsScrollInput( idUserInterface *gui, int key ) {
 	return false;
 }
 
+/*
+===============
+ScrollMainMenuSettingsFocusIntoView
+
+A stock settings page scrolls under a fixed view, and the keyboard and the
+controller step its focus through every row, shown or not. When the focus
+moves to a row outside the view the page scrolls just far enough to show it,
+with a little room so the row's plate is whole. Only a change of focus
+scrolls: the wheel, the bar and the section list stay free to move the page
+away from a row that keeps the focus.
+===============
+*/
+static void ScrollMainMenuSettingsFocusIntoView( idUserInterface *gui ) {
+	static idStr lastFocus;
+	static const float margin = 6.0f;
+	for ( int i = 0; i < static_cast<int>( sizeof( MAINMENU_SETTINGS_SCROLL_PAGES ) / sizeof( MAINMENU_SETTINGS_SCROLL_PAGES[ 0 ] ) ); ++i ) {
+		const mainMenuSettingsScrollPage_t &page = MAINMENU_SETTINGS_SCROLL_PAGES[ i ];
+		if ( page.maxValue <= page.minValue || !MainMenuWindowStateIsNonZero( gui, page.pageVisibleState ) ) {
+			continue;
+		}
+		idStr content = page.contentRectState;
+		const int member = content.Find( "::" );
+		if ( member > 0 ) {
+			content.CapLength( member );
+		}
+		idStr focus;
+		idRectangle rect;
+		float viewHeight = 0.0f;
+		if ( !UI_LegacyFocusWithin( gui, content.c_str(), focus, rect, viewHeight ) || viewHeight <= 0.0f ) {
+			continue;
+		}
+		if ( focus == lastFocus ) {
+			return;
+		}
+		lastFocus = focus;
+		int contentHeight = 0;
+		float stepY = 0.0f;
+		MainMenuSettingsScrollGeometry( gui, page, contentHeight, stepY );
+		if ( stepY <= 0.0f ) {
+			return;
+		}
+		// The content stands at baseY less the scroll's offset in the view.
+		const int current = idMath::ClampInt( page.minValue, page.maxValue, gui->GetStateInt( page.scrollStateName, va( "%d", page.scrollCvar->GetInteger() ) ) );
+		const int highest = static_cast<int>( idMath::Floor( ( rect.y - margin + page.baseY ) / stepY ) );
+		const int lowest = static_cast<int>( idMath::Ceil( ( rect.y + rect.h + margin + page.baseY - viewHeight ) / stepY ) );
+		int next = current;
+		if ( next > highest ) {
+			next = highest;
+		}
+		if ( next < lowest ) {
+			next = lowest;
+		}
+		next = idMath::ClampInt( page.minValue, page.maxValue, next );
+		if ( next != current ) {
+			ApplyMainMenuSettingsScrollPage( gui, page, next, true );
+		}
+		return;
+	}
+	lastFocus.Clear();
+}
+
 static void SyncMainMenuSettingsScrollPages( idUserInterface *gui ) {
 	if ( gui == NULL ) {
 		return;
@@ -5828,6 +5955,7 @@ static void SyncMainMenuSettingsScrollPages( idUserInterface *gui ) {
 	for ( int i = 0; i < static_cast<int>( sizeof( MAINMENU_SETTINGS_SCROLL_PAGES ) / sizeof( MAINMENU_SETTINGS_SCROLL_PAGES[ 0 ] ) ); ++i ) {
 		ApplyMainMenuSettingsScrollPage( gui, MAINMENU_SETTINGS_SCROLL_PAGES[ i ], idMath::INT_MIN, true );
 	}
+	ScrollMainMenuSettingsFocusIntoView( gui );
 }
 
 void idSessionLocal::MenuEvent( const sysEvent_t *event ) {
@@ -5916,6 +6044,10 @@ idSessionLocal::GuiFrameEvents
 =================
 */
 void idSessionLocal::GuiFrameEvents() {
+	// Multiplayer frames never run idSessionLocal::Frame, so a return from the
+	// Android background is handled here too and its audio resumes. The
+	// suspension is consumed once.
+	HandleAppResume( false );
 	// Programmatic events and deactivation actions are independent of input
 	// focus, the console, and which GUI currently receives physical events.
 	PumpApplicationActions();
@@ -5948,6 +6080,7 @@ void idSessionLocal::GuiFrameEvents() {
 	UpdateRetainedMultiplayerPage();
 	UpdateRetainedJoinGame();
 	UpdateRetainedSettingsPage();
+	PrefetchRetainedNextPages();
 	UpdateRetainedNotices();
 	UpdateBrowserTooltip();
 	PrecacheRetainedLevelshots( false );
@@ -5992,6 +6125,40 @@ void idSessionLocal::GuiFrameEvents() {
 
 /*
 =================
+idSessionLocal::SelectMessageBox
+
+The box the next message presents. `retained` asks for the retained pop-up
+(guis/menu/msgbox.rui), which takes the stock box's state under the same
+names and answers with its commands (HandleRetainedSessionRequest); it
+presents where the retained screens do and its document loads and draws.
+Otherwise, and for the boxes it has no part for (the download progress), the
+stock guis/msg.gui presents. Only between boxes: a box that is up keeps its
+screen.
+=================
+*/
+void idSessionLocal::SelectMessageBox( bool retained ) {
+	if ( guiMsgStock == NULL ) {
+		guiMsgStock = guiMsg;
+	}
+#ifndef ID_DEDICATED
+	if ( guiMsgRetained != NULL && UI_RetainedViewFailed( guiMsgRetained ) ) {
+		common->Warning( "retained UI: '%s' stopped drawing; the stock screen presents instead", RETAINED_MSGBOX_GUI );
+		retainedStock.AddUnique( RETAINED_MSGBOX_GUI );
+		guiMsgRetained = NULL;
+	}
+	if ( retained && Session_RetainedScreensEnabled() && guiMsgRetained == NULL ) {
+		guiMsgRetained = FindRetainedGui( RETAINED_MSGBOX_GUI, true, false );
+	}
+	if ( retained && Session_RetainedScreensEnabled() && guiMsgRetained != NULL ) {
+		guiMsg = guiMsgRetained;
+		return;
+	}
+#endif
+	guiMsg = guiMsgStock;
+}
+
+/*
+=================
 idSessionLocal::BoxDialogSanityCheck
 =================
 */
@@ -6026,6 +6193,7 @@ const char* idSessionLocal::MessageBox( msgBoxType_t type, const char *message, 
 	if ( !BoxDialogSanityCheck() ) {
 		return NULL;
 	}
+	SelectMessageBox( true );
 
 	guiMsg->SetStateString( "title", title ? title : "" );
 	guiMsg->SetStateString( "message", message ? message : "" );
@@ -6208,6 +6376,7 @@ void idSessionLocal::DownloadProgressBox( backgroundDownload_t *bgl, const char 
 	if ( !BoxDialogSanityCheck() ) {
 		return;
 	}
+	SelectMessageBox( false );	// the progress bar is the stock box's
 
 	guiMsg->SetStateString( "visible_msgbox", "1" );
 	guiMsg->SetStateString( "visible_waitbox", "0" );
@@ -6500,49 +6669,49 @@ void idSessionLocal::HandleNoteCommands( const char *menuCommand ) {
 */
 
 #ifndef ID_DEDICATED
-static const char *const RETAINED_TITLE_GUI = "guis/menu/title.q4ui";
-static const char *const RETAINED_PAUSE_GUI = "guis/menu/pause.q4ui";
-static const char *const RETAINED_PAUSE_STROGG_GUI = "guis/menu/pause_strogg.q4ui";
-static const char *const RETAINED_LOADING_GUI = "guis/loading/loading.q4ui";
-static const char *const RETAINED_SINGLEPLAYER_GUI = "guis/menu/singleplayer.q4ui";
-static const char *const RETAINED_CAMPAIGNS_GUI = "guis/menu/campaigns.q4ui";
-static const char *const RETAINED_SKILL_GUI = "guis/menu/campaign_skill.q4ui";
-static const char *const RETAINED_CHAPTERS_GUI = "guis/menu/chapters.q4ui";
+static const char *const RETAINED_TITLE_GUI = "guis/menu/title.rui";
+static const char *const RETAINED_PAUSE_GUI = "guis/menu/pause.rui";
+static const char *const RETAINED_PAUSE_STROGG_GUI = "guis/menu/pause_strogg.rui";
+static const char *const RETAINED_LOADING_GUI = "guis/loading/loading.rui";
+static const char *const RETAINED_SINGLEPLAYER_GUI = "guis/menu/singleplayer.rui";
+static const char *const RETAINED_CAMPAIGNS_GUI = "guis/menu/campaigns.rui";
+static const char *const RETAINED_SKILL_GUI = "guis/menu/campaign_skill.rui";
+static const char *const RETAINED_CHAPTERS_GUI = "guis/menu/chapters.rui";
 // The Load Game page, which LOAD GAME on the title and the Marine pause hands
 // off to as to a stock page. Its list holds this many saves at a time and
 // pages through more (ROWS in tools/ui/retained_saves.py); a save without a
 // picture shows the stock page's generic one.
-static const char *const RETAINED_LOADGAME_GUI = "guis/menu/loadgame.q4ui";
-static const char *const RETAINED_SAVEGAME_GUI = "guis/menu/savegame.q4ui";
-static const char *const RETAINED_RESTART_GUI = "guis/menu/restartlevel.q4ui";
+static const char *const RETAINED_LOADGAME_GUI = "guis/menu/loadgame.rui";
+static const char *const RETAINED_SAVEGAME_GUI = "guis/menu/savegame.rui";
+static const char *const RETAINED_RESTART_GUI = "guis/menu/restartlevel.rui";
 // The same three pages in the Strogg family, which the Strogg pause hands off
 // to; they load once a level's player is Strogg.
-static const char *const RETAINED_LOADGAME_STROGG_GUI = "guis/menu/loadgame_strogg.q4ui";
-static const char *const RETAINED_SAVEGAME_STROGG_GUI = "guis/menu/savegame_strogg.q4ui";
-static const char *const RETAINED_RESTART_STROGG_GUI = "guis/menu/restartlevel_strogg.q4ui";
+static const char *const RETAINED_LOADGAME_STROGG_GUI = "guis/menu/loadgame_strogg.rui";
+static const char *const RETAINED_SAVEGAME_STROGG_GUI = "guis/menu/savegame_strogg.rui";
+static const char *const RETAINED_RESTART_STROGG_GUI = "guis/menu/restartlevel_strogg.rui";
 // The Demos page, which the title's DEMOS hands off to as LOAD GAME does to
 // its page. Its list holds this many demos at a time (ROWS in
 // tools/ui/retained_demos.py); demos.filter picks one of the legacy
 // browser's filters, 0 showing them all.
-static const char *const RETAINED_DEMOS_GUI = "guis/menu/demos.q4ui";
+static const char *const RETAINED_DEMOS_GUI = "guis/menu/demos.rui";
 // The restart screen single player shows after the player dies (the stock
 // guis/restart.gui).
-static const char *const RETAINED_RESTARTMENU_GUI = "guis/menu/restartmenu.q4ui";
+static const char *const RETAINED_RESTARTMENU_GUI = "guis/menu/restartmenu.rui";
 // The Credits page, which the title's CREDITS hands off to.
-static const char *const RETAINED_CREDITS_GUI = "guis/menu/credits.q4ui";
+static const char *const RETAINED_CREDITS_GUI = "guis/menu/credits.rui";
 // The Multiplayer page, which the title's MULTIPLAYER hands off to. Its
 // sections open the stock Multiplayer pages (desktop::dest) once it has left
 // as the stock Multiplayer page leaves, 500 ms after the choice.
-static const char *const RETAINED_MPPAGE_GUI = "guis/menu/multiplayer.q4ui";
+static const char *const RETAINED_MPPAGE_GUI = "guis/menu/multiplayer.rui";
 static const int RETAINED_MPPAGE_LEAVE_MSEC = 500;
 // The retained SETTINGS page (tools/ui/retained_settings_page.py); its
 // sections are RETAINED_SETTINGS_SECTIONS.
-static const char *const RETAINED_SETTINGSPAGE_GUI = "guis/menu/settings.q4ui";
+static const char *const RETAINED_SETTINGSPAGE_GUI = "guis/menu/settings.rui";
 static const int RETAINED_SETTINGSPAGE_LEAVE_MSEC = 500;
 // Multiplayer's Create Server sub-page. Its map list holds this many maps at a
 // time (MAP_ROWS in tools/ui/retained_create_server.py), and its game types
 // are the stock choice's, in its order (mp_create_val4's values).
-static const char *const RETAINED_CREATE_SERVER_GUI = "guis/menu/createserver.q4ui";
+static const char *const RETAINED_CREATE_SERVER_GUI = "guis/menu/createserver.rui";
 static const int RETAINED_CREATE_MAP_ROWS = 64;
 static const char *const RETAINED_CREATE_GAMETYPES[] = {
 	"DM", "Tourney", "Team DM", "CTF", "Arena CTF", "DeadZone", "Duel", "Clan Arena", "Freeze Tag", "Red Rover", "One Flag CTF",
@@ -6587,6 +6756,11 @@ static const retainedCreateSetting_t RETAINED_CREATE_SETTINGS[] = {
 	{ "createBuying",		"buying",		"si_isBuyingEnabled",		0, 1,	true },
 	{ "createBots",			"bots",			"bot_minPlayers",			0, 16,	false },
 	{ "createBotSkill",		"botskill",		"bot_skill",				1, 5,	false },
+	// openQ4's match rules, on the advanced dialog's MATCH and RULES tabs.
+	{ "createShuffle",		"shuffle",		"si_shuffle",				0, 1,	true },
+	{ "createOvertime",		"overtime",		"si_overtime",				0, 999,	false },
+	{ "createMercy",		"mercy",		"si_mercyLimit",			0, 999,	false },
+	{ "createRoundLimit",	"roundlimit",	"si_roundLimit",			0, 60,	false },
 };
 static const int RETAINED_CREATE_SETTING_COUNT = static_cast<int>( sizeof( RETAINED_CREATE_SETTINGS ) / sizeof( RETAINED_CREATE_SETTINGS[0] ) );
 // The page's text fields: the verb a field asks with once its text is in its
@@ -6612,7 +6786,7 @@ static const int RETAINED_CREATE_BAN_ROWS = 32;
 // many servers at a time (JOIN_ROWS in tools/ui/retained_join_game.py), and
 // each column heading asks to sort by its column (the sort the page's
 // join.sort names, COLUMNS in the generator).
-static const char *const RETAINED_JOIN_GAME_GUI = "guis/menu/joingame.q4ui";
+static const char *const RETAINED_JOIN_GAME_GUI = "guis/menu/joingame.rui";
 static const int RETAINED_JOIN_ROWS = 64;
 // The details card's lines: the stock tooltip's player list holds 11 of its
 // 12 u items, and the scan describes 7 settings (DETAIL_PLAYERS and
@@ -6637,7 +6811,7 @@ static const retainedJoinSort_t RETAINED_JOIN_SORTS[] = {
 static const int RETAINED_JOIN_SORT_COUNT = static_cast<int>( sizeof( RETAINED_JOIN_SORTS ) / sizeof( RETAINED_JOIN_SORTS[0] ) );
 // Single Player's Arena sub-page, the Arena campaign's browser, and the
 // campaign command each of its verbs runs (idArenaCampaign::HandleGuiCommand).
-static const char *const RETAINED_ARENA_GUI = "guis/menu/arena.q4ui";
+static const char *const RETAINED_ARENA_GUI = "guis/menu/arena.rui";
 static const char *const RETAINED_ARENA_VERBS[][2] = {
 	{ "arenaTier0", "arenaSelectTier 0" },
 	{ "arenaTier1", "arenaSelectTier 1" },
@@ -7572,6 +7746,14 @@ void idSessionLocal::ShowSaveRestoreFailure( const char *saveName ) {
 
 void idSessionLocal::HandleRetainedSessionRequest( idUserInterface *gui, const char *request ) {
 #ifndef ID_DEDICATED
+	// The retained message box's buttons answer as the stock box's commands.
+	if ( request != NULL && gui != NULL && gui == guiMsgRetained ) {
+		if ( gui == guiActive && gui == guiMsg ) {
+			HandleMsgCommands( !idStr::Icmp( request, "msgLeft" ) ? "left" : !idStr::Icmp( request, "msgRight" ) ? "right" :
+				!idStr::Icmp( request, "msgMid" ) ? "mid" : "" );
+		}
+		return;
+	}
 	// The retained AUDIO and GAME OPTIONS pages' verbs, while they present.
 	if ( request != NULL && gui != NULL && gui == guiRetainedAudio ) {
 		if ( gui == guiActive ) {
@@ -9522,6 +9704,11 @@ void idSessionLocal::PublishRetainedJoinGame( idUserInterface *gui ) {
 		gui->SetStateBool( va( "join.row%d.lock", row ), server != NULL && server->serverInfo.GetBool( "si_usePass" ) );
 		gui->SetStateBool( va( "join.row%d.ded", row ), server != NULL && server->serverInfo.GetInt( "net_serverDedicated" ) != 0 );
 		gui->SetStateBool( va( "join.row%d.rep", row ), server != NULL && server->serverInfo.GetBool( "si_repeater" ) );
+		// The row's levelshot, which the list's tiles show (ui_browserView 1);
+		// the rows look none up.
+		const char *rowMap = server != NULL ? server->serverInfo.GetString( "si_map" ) : "";
+		gui->SetStateString( va( "join.row%d.shot", row ), server == NULL || ui_browserView.GetInteger() != 1 ? "" :
+			idServerScan::ValidMapPath( rowMap ) ? RetainedPauseShot( rowMap ).c_str() : "gfx/guis/loadscreens/generic" );
 		gui->SetStateString( va( "join.row%d.name", row ), name.c_str() );
 		gui->SetStateString( va( "join.row%d.ping", row ), ping.c_str() );
 		// The browser hears no packet loss, so the ping alone sets the bars.
@@ -9594,7 +9781,11 @@ void idSessionLocal::UpdateRetainedJoinGame() {
 	if ( guiRetainedJoin == NULL || guiActive != guiRetainedJoin ) {
 		return;
 	}
-	if ( idAsyncNetwork::client.serverList.GetRevision() != retainedJoinRevision ) {
+	// The list's view changed: the tiles' levelshots are published with the rows.
+	static int viewPublished = -1;
+	const bool viewChanged = ui_browserView.GetInteger() != viewPublished;
+	viewPublished = ui_browserView.GetInteger();
+	if ( viewChanged || idAsyncNetwork::client.serverList.GetRevision() != retainedJoinRevision ) {
 		PublishRetainedJoinGame( guiRetainedJoin );
 	} else if ( guiRetainedJoin->State().GetInt( "join.detail", "-1" ) != retainedJoinDetailRow ) {
 		PublishRetainedJoinDetail( guiRetainedJoin );
@@ -10394,16 +10585,72 @@ idUserInterface *idSessionLocal::SelectRetainedLoadingGui( idUserInterface *lega
 void idSessionLocal::PrefetchRetainedScreens() {
 #ifndef ID_DEDICATED
 	// PreloadRetainedScreens' documents, in its order, the title first. The
-	// pages a gate or a missing page will refuse are parsed for nothing.
+	// pages a gate or a missing page will refuse are parsed for nothing. The
+	// pages that load when first opened parse later, while the page that
+	// leads to them shows (PrefetchRetainedNextPages).
 	if ( !Session_RetainedScreensEnabled() ) {
 		return;
 	}
 	const char *const documents[] = {
 		RETAINED_TITLE_GUI, RETAINED_LOADGAME_GUI, RETAINED_CREDITS_GUI, RETAINED_DEMOS_GUI, RETAINED_ARENA_GUI,
-		RETAINED_MPPAGE_GUI, RETAINED_SETTINGSPAGE_GUI, Session_RetainedCreateServerEnabled() ? RETAINED_CREATE_SERVER_GUI : NULL,
+		RETAINED_MPPAGE_GUI, Session_RetainedCreateServerEnabled() ? RETAINED_CREATE_SERVER_GUI : NULL,
 		Session_RetainedJoinGameEnabled() ? RETAINED_JOIN_GAME_GUI : NULL
 	};
 	UI_RetainedPrefetchDocuments( documents, static_cast<int>( sizeof( documents ) / sizeof( documents[0] ) ) );
+#endif
+}
+
+/*
+===============
+idSessionLocal::PrefetchRetainedNextPages
+
+The pages that load when first opened, parsed on the job workers while the
+page that leads to them shows. Most of a load is the document's parse and
+validation (about 180 of CONTROLS' 270 ms), so the page chosen then waits
+for its view alone: the title leads to the Single Player and SETTINGS
+pages, Single Player to Campaign, Campaign to its difficulty and CHAPTERS
+pages, the pauses to SETTINGS, and SETTINGS to CONTROLS, GAME OPTIONS,
+DISPLAY and AUDIO. Nothing parses for a page that is loaded, that the stock
+screen stands in for, or whose parse is already under way, and a parse no
+page takes goes with the next level's unload (UI_RetainedPrefetchClear).
+===============
+*/
+void idSessionLocal::PrefetchRetainedNextPages() {
+#ifndef ID_DEDICATED
+	static const char *const leads[][5] = {
+		{ RETAINED_TITLE_GUI, RETAINED_SINGLEPLAYER_GUI, RETAINED_SETTINGSPAGE_GUI, NULL, NULL },
+		{ RETAINED_PAUSE_GUI, RETAINED_SETTINGSPAGE_GUI, NULL, NULL, NULL },
+		{ RETAINED_PAUSE_STROGG_GUI, RETAINED_SETTINGSPAGE_GUI, NULL, NULL, NULL },
+		{ RETAINED_SINGLEPLAYER_GUI, RETAINED_CAMPAIGNS_GUI, NULL, NULL, NULL },
+		{ RETAINED_CAMPAIGNS_GUI, RETAINED_SKILL_GUI, RETAINED_CHAPTERS_GUI, NULL, NULL },
+		{ RETAINED_SETTINGSPAGE_GUI, RETAINED_CONTROLS_GUI, RETAINED_GAME_GUI, RETAINED_SYSTEM_GUI, RETAINED_AUDIO_GUI }
+	};
+	// The page on screen: a retained home stands over the legacy menu.
+	static const idUserInterface *seen = NULL;
+	const idUserInterface *shown = guiRetainedHome != NULL && guiActive == guiMainMenu ? guiRetainedHome : guiActive;
+	if ( shown == seen ) {
+		return;
+	}
+	seen = shown;
+	if ( shown == NULL || !Session_RetainedScreensEnabled() ) {
+		return;
+	}
+	for ( int i = 0; i < static_cast<int>( sizeof( leads ) / sizeof( leads[0] ) ); ++i ) {
+		if ( idStr::Icmp( shown->Name(), leads[ i ][ 0 ] ) != 0 ) {
+			continue;
+		}
+		const char *pages[4] = { NULL, NULL, NULL, NULL };
+		for ( int next = 0; next < 4; ++next ) {
+			const char *page = leads[ i ][ next + 1 ];
+			if ( page == NULL || retainedStock.FindIndex( page ) >= 0 || uiManager->FindGui( page, false, false, false ) != NULL ||
+					( page == RETAINED_SYSTEM_GUI && !RetainedSystemAvailable() ) ) {
+				continue;
+			}
+			pages[ next ] = page;
+		}
+		UI_RetainedPrefetchDocuments( pages, 4 );
+		return;
+	}
 #endif
 }
 

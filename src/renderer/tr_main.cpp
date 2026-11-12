@@ -1155,6 +1155,16 @@ static void R_SetupViewFrustum( void ) {
 		tr.viewDef->frustum[2] = -ymin * forward + zNear * vertical;
 		tr.viewDef->frustum[3] = ymax * forward - zNear * vertical;
 
+		// Unit normals, as the stock branch's sine and cosine give: built from the
+		// near-plane extents these come out zNear * sqrt( 1 + tan^2 ) long, four
+		// to five times too long for a VR eye, and R_RadiusCullLocalBox compares
+		// plane distances against a world radius. Unnormalized, it threw away
+		// boxes reaching well into the eye: a whole outdoor area's world model
+		// (terrain and buildings) in one eye of airdefense1.
+		for ( i = 0; i < 4; i++ ) {
+			tr.viewDef->frustum[i].Normal().Normalize();
+		}
+
 		// plane four is the front clipping plane
 		tr.viewDef->frustum[4] = /* vec3_origin - */ forward;
 	} else {
@@ -1481,6 +1491,9 @@ void R_RenderView( viewDef_t *parms ) {
 
 	// any viewLight that didn't have visible surfaces can have it's shadows removed
 	R_RemoveUnecessaryViewLights();
+	// the lights that remain share the projected shadow atlas: size their tiles
+	// so they all fit, before anything reads a tile size
+	R_ShadowMapAssignAtlasTiles( tr.viewDef );
 	if ( reportViewBuildTimes ) {
 		const int now = Sys_Milliseconds();
 		viewBuildPruneMsec = now - viewBuildLastMark;

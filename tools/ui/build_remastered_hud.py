@@ -18,7 +18,7 @@ from pathlib import Path
 
 import build_retained_screens as ui
 from remastered_hud_base import (AND, NOT, S, HudDocument, anchor, beyond_minimal, gameplay_root, join_events, layout_state,
-                                 op, status_scale)
+                                 op, sel, status_scale, u)
 from remastered_hud_groups import (boss_bar, dev_readouts, hit_indicator, interactive_brackets, missile_chevron, notices,
                                    pickup_lines, powerups, transmission, weapon_strip)
 from remastered_hud_lint import lint
@@ -27,7 +27,8 @@ from remastered_hud_status import air_gauge, full, status_bar
 from remastered_hud_objectives import objectives_document
 from remastered_hud_scoreboard import scoreboard_document
 from remastered_hud_vehicle import airdef_document, ride_gauge, vehicle_document
-from remastered_hud_awakening import gev_document, mcc_document, ship_panel, speeder_document, turret_document
+from remastered_hud_awakening import (chaingun_turret_document, gev_document, mcc_document, ship_panel, speeder_document,
+                                      turret_document)
 from remastered_hud_medchange import medchange_document
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,6 +67,11 @@ def classic_air_document(*, strogg: bool) -> dict:
         "left": ui.length(50, "%"), "top": ui.length(100, "%"),
         "margin-left": ui.length(-480), "margin-top": ui.length(-720),
         "width": ui.length(960), "height": ui.length(720)}, [gauge])
+    # The stock interface's Remastered layout centres the stock status bar
+    # (oq4_hudRemastered, idLegacyHudLayout): the gauge follows its health gauge.
+    doc.boolean("oq4_hudRemastered")
+    doc.bind("air-classic-canvas.status", "air-classic-canvas", "margin-left",
+             op("+", -480, sel(S("oq4_hudRemastered"), u(85.5 if strogg else 88), 0)))
     return doc.build(full("air-classic-root", [canvas]), {"canvas": {"height": 720, "minWidth": 960},
         "extensions": {"openq4": {"joinEvents": joins, "reference": "ui-visual-design.md 14.3"}}})
 
@@ -113,7 +119,13 @@ def on_foot_document(*, strogg: bool, awakening: bool) -> dict:
     ])
     # The stock windows that hold an event's lasting effect (hud.gui and its family).
     ride = ("p_tram::visible", "enterTram") if strogg else ("p_flatbed::visible", "enterFlatbed")
-    ship_joins = [("shipstatus::visible", "aa_showShipStatusOn")] if awakening else []
+    # The dropship panel's damage and markers, which openQ4's definition of the
+    # expansion's HUD keeps in its windows (tools/ui/build_awakening_legacy_hud.py);
+    # the panel's own visibility comes last, since each of those also shows it.
+    ship_joins = [*[(f"ship_core_{n + 1:02d}::visible", f"ship_health_{n:02d}_on") for n in range(1, 6)],
+                  *[(f"ship_target_{n:02d}::visible", f"ship_target_{n:02d}_on") for n in range(1, 6)],
+                  ("shipstatus::visible", "aa_showShipStatusOn"),
+                  ("!shipstatus::visible", "aa_showShipStatusOff")] if awakening else []
     joins = join_events(doc, [("desktop::hidden", "hideHud"), ("p_radio::visible", "radioChatterUp"),
                               ("BossBar::visible", "showBossBar"), ("p_boss_shield_bar_left::visible", "showBossShieldBar"),
                               ("brackets::visible", "showBrackets"), ("missile_indicator::visible", "missileThreatUp"), ride, *ship_joins])
@@ -124,23 +136,24 @@ def on_foot_document(*, strogg: bool, awakening: bool) -> dict:
 
 
 DOCUMENTS = {
-    "air_marine.q4ui": lambda: classic_air_document(strogg=False),
-    "air_strogg.q4ui": lambda: classic_air_document(strogg=True),
-    "remastered_marine.q4ui": lambda: on_foot_document(strogg=False, awakening=False),
-    "remastered_strogg.q4ui": lambda: on_foot_document(strogg=True, awakening=False),
-    "remastered_marine_awakening.q4ui": lambda: on_foot_document(strogg=False, awakening=True),
-    "remastered_strogg_awakening.q4ui": lambda: on_foot_document(strogg=True, awakening=True),
-    "remastered_mp.q4ui": mp_document,
-    "remastered_vehicle.q4ui": vehicle_document,
-    "remastered_airdef.q4ui": airdef_document,
-    "remastered_turret.q4ui": turret_document,
-    "remastered_mcc.q4ui": mcc_document,
-    "remastered_speeder.q4ui": speeder_document,
-    "remastered_gev.q4ui": gev_document,
-    "remastered_medchange.q4ui": medchange_document,
-    "remastered_objectives.q4ui": lambda: objectives_document(strogg=False),
-    "remastered_objectives_strogg.q4ui": lambda: objectives_document(strogg=True),
-    "remastered_scoreboard.q4ui": scoreboard_document,
+    "air_marine.rui": lambda: classic_air_document(strogg=False),
+    "air_strogg.rui": lambda: classic_air_document(strogg=True),
+    "remastered_marine.rui": lambda: on_foot_document(strogg=False, awakening=False),
+    "remastered_strogg.rui": lambda: on_foot_document(strogg=True, awakening=False),
+    "remastered_marine_awakening.rui": lambda: on_foot_document(strogg=False, awakening=True),
+    "remastered_strogg_awakening.rui": lambda: on_foot_document(strogg=True, awakening=True),
+    "remastered_mp.rui": mp_document,
+    "remastered_vehicle.rui": vehicle_document,
+    "remastered_airdef.rui": airdef_document,
+    "remastered_turret.rui": turret_document,
+    "remastered_mcc.rui": mcc_document,
+    "remastered_chaingun_turret.rui": chaingun_turret_document,
+    "remastered_speeder.rui": speeder_document,
+    "remastered_gev.rui": gev_document,
+    "remastered_medchange.rui": medchange_document,
+    "remastered_objectives.rui": lambda: objectives_document(strogg=False),
+    "remastered_objectives_strogg.rui": lambda: objectives_document(strogg=True),
+    "remastered_scoreboard.rui": scoreboard_document,
 }
 
 

@@ -466,8 +466,18 @@ public:
 	// openQ4 VR: where the body stood at the last reported tic (room scale)
 	idVec3					vrRoomScaleOrigin;
 	bool					vrRoomScaleOriginValid;
+	// openQ4 VR: the horizontal world step the tracking space took with a
+	// reported tic's room-scale walk, and that tic's game time
+	// (ReportVRRoomScaleWalk). An eye interpolated towards that tic's sample
+	// carries what it has not covered yet, and the comfort vignette leaves the
+	// step's speed out. Draw-only: never sent.
+	idVec3					vrRoomScaleStep;
+	int						vrRoomScaleStepTime;
 	// openQ4 VR: the body crouched by the button, until it stands again
 	mutable bool			vrButtonCrouch;
+	// openQ4 VR: the Arena's presentation camera built the last render view
+	// (entrance, intro, spawn-in, tableau): an authored shot, shown flat
+	bool					vrPresentationCamera;
 	bool					presentationCanInterpolate;
 	idVec3					presentationPrevViewOrigin;
 	idMat3					presentationPrevViewAxis;
@@ -533,6 +543,8 @@ public:
 	void					Restore( idRestoreGame *savefile );					// unarchives object from save game file
 
 	static const char*		GetSpawnClassname ( void );
+	static void				PrecacheSpawnDecls( void );
+	static void				PrecacheMultiplayerSpawn( void );
 
 	virtual void			Hide( void );
 	virtual void			Show( void );
@@ -639,10 +651,14 @@ public:
 	// How far the tracking origin sits above the body's eye: a crouch the
 	// tracked head made must not lower the view again.
 	float					VRCrouchLift( const vrFrameState_t &frame ) const;
+	// How far a weapon's zoom narrows each eye now, eased with the zoom.
+	float					VRZoomScale( void );
 	// A pulse in the local player's weapon hand, other hand, or both.
 	void					VRVibrate( bool weaponHand, bool otherHand, float amplitude, int durationMsec ) const;
 	// Room scale: report a new tic's predicted progress to the tracking space.
 	void					ReportVRRoomScaleWalk( void );
+	idVec3					VRRoomScaleLag( float fraction ) const;
+	bool					VRRoomScaleStepping( void ) const;
 	void					UpdateEyeHeight( bool snap );
  	void					OffsetThirdPersonView( float angle, float range, float height, bool clip );
 	void					OffsetThirdPersonVehicleView( bool clip );
@@ -1089,6 +1105,9 @@ private:
 	float					dynamicProtectionScale;	// value to scale damage by due to dynamic protection
 	int						lastDamageDef;
 	idVec3					lastDamageDir;
+	// openQ4: when the HUD's damage direction indicator last started. The HUD
+	// follows the view only while it shows; unsaved presentation state.
+	int						hudHitDirTime;
 	int						lastDamageLocation;
 
 	int						predictedFrame;
@@ -1130,7 +1149,10 @@ private:
  	
 	int						aimClientNum;			// player num in aim
 
-	idPlayer*				lastImpulsePlayer;		// the last player who gave me an impulse, may be null
+	// openQ4: an entity pointer, so it reads as NULL once that player has left.
+	// It was a raw pointer kept for a second after a knock, and a death in that
+	// second credited the kill through it: freed memory if they had disconnected.
+	idEntityPtr<idPlayer>	lastImpulsePlayer;		// the last player who gave me an impulse, may be null
 	
 	int						arena;					// current arena for tourney gameplay
 

@@ -9024,6 +9024,15 @@ void rvBotManager::OnClientDisconnect( int clientNum ) {
 	nextReplySourceTime[clientNum] = 0;
 	ClearOrder( clientNum );
 
+	// openQ4: a grudge is kept as a client slot. Left alone, it passed to
+	// whoever joined into the slot next, who was hunted and taunted for a
+	// kill they never made.
+	for ( int i = 0; i < MAX_CLIENTS; i++ ) {
+		if ( bots[i].revengeTarget == clientNum ) {
+			bots[i].revengeTarget = -1;
+		}
+	}
+
 	bots[clientNum].Shutdown();
 }
 
@@ -9779,7 +9788,12 @@ void rvBotManager::Think( void ) {
 
 	const double thinkStart = idLib::sys->GetClockTicks();
 
-	RefreshWorldCache();
+	// openQ4: only bots read this cache, and it was rebuilt every frame on
+	// servers that have none: a walk over every spawned entity, and a weapon
+	// definition lookup for each player firing.
+	if ( NumBots() > 0 ) {
+		RefreshWorldCache();
+	}
 
 	// The engine hands the game a const view of its own user command array for
 	// this frame; a bot's slot is ours to fill in, exactly where a remote

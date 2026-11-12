@@ -934,8 +934,12 @@ bool idInventory::DetermineAmmoAvailability( idPlayer* owner, const char *ammoNa
 	}
 
 	// Make sure the clip info is updated.
-	if ( owner->weapon ) {
-		clip[ owner->GetCurrentWeapon( ) ] = owner->weapon->AmmoInClip( );
+	// openQ4: there is no current weapon while a pickup is forcing a switch -
+	// GiveWeaponMod sets it to -1 for the weapon in hand - and this then wrote
+	// clip[-1], the last slot of the ammo table before it.
+	const int clipWeapon = owner->GetCurrentWeapon( );
+	if ( owner->weapon && clipWeapon >= 0 && clipWeapon < MAX_WEAPONS ) {
+		clip[ clipWeapon ] = owner->weapon->AmmoInClip( );
 	}
 
 	 if ( !idStr::Icmpn( ammoName, "start_ammo_", 11 ) ) {
@@ -1383,9 +1387,12 @@ idPlayer::idPlayer() {
 	InitStatusBar();
 	memset( &usercmd, 0, sizeof( usercmd ) );
 	vrButtonCrouch = false;
+	vrPresentationCamera = false;
 
 	vrRoomScaleOrigin.Zero();
 	vrRoomScaleOriginValid = false;
+	vrRoomScaleStep.Zero();
+	vrRoomScaleStepTime = -1;
 
 	alreadyDidTeamAnnouncerSound = false;
 
@@ -1559,6 +1566,7 @@ idPlayer::idPlayer() {
 
 	lastDamageDef			= 0;
 	lastDamageDir			= vec3_zero;
+	hudHitDirTime			= 0;
 	lastDamageLocation		= 0;
 
 	predictedFrame			= 0;
@@ -2471,20 +2479,7 @@ void idPlayer::Spawn( void ) {
 	noFallDelta = spawnArgs.GetFloat("no_fall_delta", "7");
 
 	// precache decls
-	declManager->FindType( DECL_ENTITYDEF, "damage_fatalfall", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_hardfall", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_softfall", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_noair", false, false );
-// openQ4 BEGIN
-	declManager->FindType( DECL_ENTITYDEF, "damage_openq4_drown", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_openq4_lava", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_openq4_slime", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "liquid_openq4", false, false );
-// openQ4 END
-	declManager->FindType( DECL_ENTITYDEF, "damage_suicide", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_telefrag", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "dmg_shellshock", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "dmg_shellshock_nohl", false, false );
+	PrecacheSpawnDecls();
 
 	gibSkin = declManager->FindSkin( spawnArgs.GetString( "skin_gibskin" ) );
 
@@ -3196,20 +3191,7 @@ void idPlayer::Restore( idRestoreGame *savefile ) {
  	showWeaponViewModel = GetUserInfo()->GetBool( "ui_showGun" );
 
 	// precache decls
-	declManager->FindType( DECL_ENTITYDEF, "damage_fatalfall", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_hardfall", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_softfall", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_noair", false, false );
-// openQ4 BEGIN
-	declManager->FindType( DECL_ENTITYDEF, "damage_openq4_drown", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_openq4_lava", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_openq4_slime", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "liquid_openq4", false, false );
-// openQ4 END
-	declManager->FindType( DECL_ENTITYDEF, "damage_suicide", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "damage_telefrag", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "dmg_shellshock", false, false );
-	declManager->FindType( DECL_ENTITYDEF, "dmg_shellshock_nohl", false, false );
+	PrecacheSpawnDecls();
 // RAVEN END
 	ResetWeaponWheel( true );
 	ResetQuickChat();
@@ -4209,10 +4191,16 @@ void idPlayer::UpdateHudStats( idUserInterface *_hud ) {
 	assert ( _hud );
 	_hud->SetStateInt( "player_air", GetAirReadoutPercent() );
 
+	// openQ4: compare what the HUD shows. Against the raw value, a gibbed
+	// player (health below -100) re-sent updateHealth and a bogus delta every
+	// frame until the respawn.
+	// A Remastered layout reads 0 for the dead, as the retained HUD does;
+	// Classic keeps the stock readout, negative down to -100.
+	const int shownHealth = _hud->GetStateBool( "oq4_hudRemastered" ) ? Max( 0, health ) : ( health < -100 ? -100 : health );
 	temp = _hud->State().GetInt ( "player_health", "-1" );
-	if ( temp != health ) {		
-		_hud->SetStateInt   ( "player_healthDelta", temp == -1 ? 0 : (temp - health) );
-		_hud->SetStateInt	( "player_health", health < -100 ? -100 : health );
+	if ( temp != shownHealth ) {		
+		_hud->SetStateInt   ( "player_healthDelta", temp == -1 ? 0 : (temp - shownHealth) );
+		_hud->SetStateInt	( "player_health", shownHealth );
 		_hud->SetStateFloat	( "player_healthpct", idMath::ClampFloat ( 0.0f, 1.0f, (float)health / (float)inventory.maxHealth ) );
 		_hud->HandleNamedEvent ( "updateHealth" );
 	}
@@ -4242,10 +4230,15 @@ void idPlayer::UpdateHudStats( idUserInterface *_hud ) {
 	_hud->SetStateString( "player_god", va( "%i", (godmode && g_showGodDamage.GetBool()) ) );
 	_hud->SetStateString( "player_god_damage", va( "%i", godmodeDamage ) );
 
-	// Update the hit direction
-	idVec3 localDir;
-	viewAxis.ProjectVector( lastDamageDir, localDir );
-	_hud->SetStateFloat( "hitdir", localDir.ToAngles()[YAW] + 180.0f );
+	// Update the hit direction. openQ4: only while the indicator shows (it
+	// fades within 600 ms of the hit). Written every frame, the angle changed
+	// with every turn of the view, so the HUD's state never rested and both
+	// HUDs re-evaluated on every frame the player looked around.
+	if ( hudHitDirTime != 0 && gameLocal.time >= hudHitDirTime && gameLocal.time - hudHitDirTime < 1000 ) {
+		idVec3 localDir;
+		viewAxis.ProjectVector( lastDamageDir, localDir );
+		_hud->SetStateFloat( "hitdir", localDir.ToAngles()[YAW] + 180.0f );
+	}
 
 	//_hud->HandleNamedEvent( "updateArmorHealthAir" );
 
@@ -4400,9 +4393,13 @@ void idPlayer::UpdateHudPowerUps( idUserInterface *_hud ) {
 	
 	int i, index;
 
-	// openQ4: what the last update showed (the stock script below clears it).
+	// openQ4: what the last update showed.
 	const bool carried = _hud->GetStateInt( "powerup_flag_visible" ) != 0;
-	_hud->HandleNamedEvent( "clearPowerups" );
+	// The stock clearPowerups event is not sent: every slot and the flag are
+	// written below, shown or hidden. Sent every frame, it ran the script's six
+	// writes, flipped each live slot to 0 and back to 1 (so the HUD's state
+	// never rested and the Remastered document re-evaluated every frame a
+	// powerup was held), and dropped the GUI's evaluated-state cache.
 
 	bool flag = false;
 	for ( i = 0, index = 0; i < POWERUP_MAX; i++ ) {
@@ -4848,7 +4845,14 @@ void idPlayer::DrawHUD( idUserInterface *_hud ) {
 
 				vehicleController.UpdateCursorGUI( cursor );
 				cursor->Redraw( gameLocal.time );
+				if ( rvAnimatedCrosshair::ConsumeToggle() ) {
+					g_crosshairColor.SetModified();
+				}
 				Player_RefreshCrosshairGUI( cursor, weapon, true );
+				// openQ4: the gun of the seat, drawn live in place of its picture
+				rvVehicle *crosshairVehicle = vehicleController.GetVehicle();
+				rvVehiclePosition *crosshairSeat = crosshairVehicle != NULL ? crosshairVehicle->GetPosition( vehicleController.GetPosition() ) : NULL;
+				rvAnimatedCrosshair::Draw( cursor, NULL, crosshairSeat != NULL ? crosshairSeat->GetActiveWeapon() : NULL );
 			}
 		}
 		_hud = GetHud();
@@ -4900,7 +4904,16 @@ void idPlayer::DrawHUD( idUserInterface *_hud ) {
 				cvarSystem->SetCVarInteger( "g_crosshairSize", crossSize );
 				cursor->SetStateInt( "g_crosshairSize", crossSize );
 				cursor->Redraw( gameLocal.time );
+				// openQ4: switching the animated crosshair hands the combat picture
+				// over, or back, through the same refresh as a color change
+				if ( rvAnimatedCrosshair::ConsumeToggle() ) {
+					g_crosshairColor.SetModified();
+				}
 				Player_RefreshCrosshairGUI( cursor, weapon, false );
+
+				// openQ4: the weapon's design drawn live in place of the cursor's
+				// picture; it takes the hit marker's pulse with it
+				rvAnimatedCrosshair::Draw( cursor, weapon, NULL );
 
 				// openQ4: over the crosshair, and under the crosshair's own
 				// gating - no marker in a gui, a vehicle, or while dead
@@ -5962,6 +5975,10 @@ idPlayer::ClearPowerup
 ==============
 */
 void idPlayer::ClearPowerup( int i ) {
+	// openQ4: EVENT_POWERUP passes a short straight off the wire here.
+	if ( i < 0 || i >= POWERUP_MAX ) {
+		return;
+	}
 	if ( gameLocal.isServer ) {
 		idBitMsg	msg;
 		byte		msgBuf[MAX_EVENT_PARAM_SIZE];
@@ -8724,6 +8741,13 @@ void idPlayer::UpdateDeltaViewAngles( const idAngles &angles ) {
 	for( int i = 0; i < 3; i++ ) {
 		delta[ i ] = angles[ i ] - SHORT2ANGLE( usercmd.angles[ i ] );
 	}
+	// openQ4 VR: a tracked aim's pitch is the controller's (or the head's) own.
+	// An offset on it would send every shot off the line the laser draws, and
+	// nothing the player does with a hand could take it out again.
+	if ( ( usercmd.buttons & BUTTON_VRAIM ) != 0 ) {
+		delta.pitch = 0.0f;
+		delta.roll = 0.0f;
+	}
 	SetDeltaViewAngles( delta );
 }
 
@@ -8781,6 +8805,14 @@ void idPlayer::UpdateViewAngles( void ) {
 		return;
 	}
 
+	// openQ4 VR: no pitch offset rides on a tracked aim (UpdateDeltaViewAngles).
+	// A spawn, a loaded save, a teleport or a pusher may have left one before
+	// this command carried the flag.
+	const bool vrAim = ( usercmd.buttons & BUTTON_VRAIM ) != 0;
+	if ( vrAim ) {
+		deltaViewAngles.pitch = 0.0f;
+		deltaViewAngles.roll = 0.0f;
+	}
 	for ( i = 0; i < 3; i++ ) {
 		cmdAngles[i] = SHORT2ANGLE( usercmd.angles[i] );
 		if ( influenceActive == INFLUENCE_LEVEL3 ) {
@@ -8789,7 +8821,8 @@ void idPlayer::UpdateViewAngles( void ) {
 			viewAngles[i] = idMath::AngleNormalize180( SHORT2ANGLE( usercmd.angles[i] ) + deltaViewAngles[i] );
 		}
 	}
-	if ( !centerView.IsDone( gameLocal.time ) ) {
+	// centring the view levels a mouse's pitch; a hand's is wherever the hand is
+	if ( !vrAim && !centerView.IsDone( gameLocal.time ) ) {
 		viewAngles.pitch = centerView.GetCurrentValue( gameLocal.time );
 	}
 
@@ -12628,9 +12661,11 @@ bool idPlayer::GetVRView( vrFrameState_t &frame, float &trackingYaw ) const {
 	if ( vrSystem == NULL || !vrSystem->IsActive() || gameLocal.GetLocalPlayer() != this ) {
 		return false;
 	}
-	// cameras, spectating, third person and vehicles play flat on the virtual screen
+	// cameras, spectating, third person and vehicles play flat on the virtual
+	// screen, and so do the Arena's authored shots: the eyes would show the
+	// locked player's own view instead, turning with the weapon hand
 	if ( gameLocal.GetCamera() != NULL || privateCameraView != NULL || spectating
-			|| pm_thirdPerson.GetBool() || IsInVehicle() ) {
+			|| pm_thirdPerson.GetBool() || IsInVehicle() || vrPresentationCamera ) {
 		return false;
 	}
 	vrSystem->GetFrameState( frame );
@@ -12763,6 +12798,7 @@ void idPlayer::ReportVRRoomScaleWalk( void ) {
 	}
 	if ( spectating || noclip || health <= 0 || !GetVRView( frame, trackingYaw ) || !frame.roomScale ) {
 		vrRoomScaleOriginValid = false;
+		vrRoomScaleStepTime = -1;
 		return;
 	}
 	const idVec3 origin = physicsObj.GetOrigin();
@@ -12772,11 +12808,71 @@ void idPlayer::ReportVRRoomScaleWalk( void ) {
 		if ( moved.LengthSqr() > 0.0f && moved.LengthSqr() < 32.0f * 32.0f ) {
 			idVec3 movedTracking = moved * VR_TrackingAxis( trackingYaw ).Transpose();
 			movedTracking.z = 0.0f;
-			vrSystem->ShiftTrackingOrigin( movedTracking );
+			if ( vrSystem->ShiftTrackingOrigin( movedTracking ) ) {
+				// a real step: the eye drawn towards this tic's sample still has
+				// part of it to cover, and the vignette leaves its speed out
+				vrRoomScaleStep = moved;
+				vrRoomScaleStepTime = gameLocal.time;
+			}
 		}
 	}
 	vrRoomScaleOrigin = origin;
 	vrRoomScaleOriginValid = true;
+}
+
+/*
+===============
+idPlayer::VRRoomScaleLag
+
+openQ4 VR: how far an eye drawn between two presentation samples lags the
+tracked head after the tracking space took a room-scale step whole. The step
+belongs to the tic of the current sample; the eye still has the rest of it
+to cover, a fraction of one tic's walk. Without it a walk about the room
+shimmered by up to a tic's step, at every tic.
+===============
+*/
+idVec3 idPlayer::VRRoomScaleLag( float fraction ) const {
+	if ( vrRoomScaleStepTime < 0 || vrRoomScaleStepTime != presentationViewTime || fraction >= 1.0f ) {
+		return vec3_origin;
+	}
+	return vrRoomScaleStep * ( 1.0f - Max( fraction, 0.0f ) );
+}
+
+/*
+===============
+idPlayer::VRRoomScaleStepping
+
+openQ4 VR: the latest predicted tic moved the body by a room-scale step the
+tracking space took: a step the player made about the room, through the
+usercmd, not motion the body does not feel.
+===============
+*/
+bool idPlayer::VRRoomScaleStepping( void ) const {
+	return vrRoomScaleStepTime >= 0 && vrRoomScaleStepTime == presentationViewTime;
+}
+
+/*
+===============
+idPlayer::VRZoomScale
+
+openQ4 VR: how far a weapon's zoom narrows each eye's frustum now
+(VR_ZoomTangentScale): 1 unzoomed, eased with the flat screen's field of
+view while the zoom moves. While it moves CalcFov returns the moving value
+whether or not it honours the zoom, so that is measured against the unzoomed
+view; measured against itself, the eyes held still for the zoom's whole
+ease and then jumped to full magnification, and jumped back on release.
+===============
+*/
+float idPlayer::VRZoomScale( void ) {
+	const float current = CalcFov( true );
+	float normal = CalcFov( false );
+	if ( !fxFov && !influenceFov && !zoomFov.IsDone( gameLocal.time ) ) {
+		normal = DefaultFov();
+		if ( vehicleController.IsDriving() && vehicleController.GetVehicle() != NULL ) {
+			normal += vehicleController.GetVehicle()->GetFovOffset();
+		}
+	}
+	return VR_ZoomTangentScale( current, normal );
 }
 
 /*
@@ -13016,6 +13112,8 @@ void idPlayer::GetPresentationViewPos( idVec3 &origin, idMat3 &axis ) const {
 		const float fraction = GetPresentationViewBlendFraction();
 		origin.Lerp( presentationPrevViewOrigin, presentationCurViewOrigin, fraction );
 		axis = gameLocal.InterpolatePresentationAxis( presentationPrevViewAxis, presentationCurViewAxis, fraction );
+		// openQ4 VR: a room-scale step already moved the tracked head by all of it
+		origin += VRRoomScaleLag( fraction );
 	}
 	ApplyPresentationLookToView( origin, axis );
 }
@@ -13472,8 +13570,10 @@ void idPlayer::CalculateRenderView( void ) {
 
 	// Arena campaign entrances and results use a local presentation camera while
 	// leaving the match participants in the world for the tableau.
+	vrPresentationCamera = false;
 	if ( gameLocal.isMultiplayer && gameLocal.mpGame.BuildArenaCampaignPresentationView( this, renderView ) ) {
 		// The presentation view has already supplied its origin, axis, and FOV.
+		vrPresentationCamera = true;
 	} else if ( !noclip && (gameLocal.GetCamera() || privateCameraView) ) {
 		// get origin, axis, and fov
 		if ( privateCameraView ) {
@@ -15408,11 +15508,32 @@ bool idPlayer::ServerReceiveEvent( int event, int time, const idBitMsg &msg ) {
 			return true;
 		}
 		case EVENT_EMOTE: {
+			// openQ4: an emote is one byte. The sender's parameters used to be
+			// forwarded as they came, up to MAX_EVENT_PARAM_SIZE bytes of them and
+			// as many times a frame as the event queue allows, each as a reliable
+			// message to every client in the instance - enough to overflow the
+			// other players' reliable queues and have the server drop them.
+			// Validate, throttle and forward a message built here instead.
+			const int newEmote = msg.ReadByte();
+			if ( msg.IsReadOverflowed() || newEmote < PE_NONE || newEmote > PE_TAUNT ) {
+				return true;
+			}
+			if ( !gameLocal.CheckClientReliableFlood( entityNumber, RELIABLE_FLOOD_EMOTE, RELIABLE_FLOOD_EMOTE_DELAY ) ) {
+				return true;
+			}
+
+			idBitMsg	forwardMsg;
+			byte		forwardBuf[8];
+
+			forwardMsg.Init( forwardBuf, sizeof( forwardBuf ) );
+			forwardMsg.BeginWriting();
+			forwardMsg.WriteByte( newEmote );
+
 			// forward the emote on to all clients except the one that sent it to us
-			ServerSendInstanceEvent( EVENT_EMOTE, &msg, false, entityNumber );
+			ServerSendInstanceEvent( EVENT_EMOTE, &forwardMsg, false, entityNumber );
 
 			// Set the emote locally
-			SetEmote( (playerEmote_t)msg.ReadByte() );
+			SetEmote( (playerEmote_t)newEmote );
 			
 			return true;
 		}
@@ -16220,6 +16341,7 @@ void idPlayer::ClientDamageEffects ( const idDict& damageDef, const idVec3& dir,
 		// Let the hud know about the hit
 		if ( hud ) {
 			hud->SetStateFloat ( "hitdir", localDir.ToAngles()[YAW] + 180.0f );
+			hudHitDirTime = gameLocal.time;
 // openQ4 BEGIN
 			// The Classic HUD caps its indicator at 0.40 under reduced flashing.
 			hud->SetStateBool ( "reducedFlashing", cvarSystem->GetCVarBool( "ui_reducedFlashing" ) );
@@ -16507,6 +16629,121 @@ const char* idPlayer::GetSpawnClassname ( void ) {
 	
 	return world->spawnArgs.GetString( "player", "player_marine" );
 }
+
+// openQ4 BEGIN
+/*
+=====================
+idPlayer::PrecacheSpawnDecls
+
+The damage and liquid defs a spawned player can need at any moment.
+=====================
+*/
+void idPlayer::PrecacheSpawnDecls( void ) {
+	static const char * const spawnDefs[] = {
+		"damage_fatalfall",
+		"damage_hardfall",
+		"damage_softfall",
+		"damage_noair",
+		"damage_openq4_drown",
+		"damage_openq4_lava",
+		"damage_openq4_slime",
+		"liquid_openq4",
+		"damage_suicide",
+		"damage_telefrag",
+		"dmg_shellshock",
+		"dmg_shellshock_nohl",
+	};
+
+	for ( int i = 0; i < (int)( sizeof( spawnDefs ) / sizeof( spawnDefs[ 0 ] ) ); i++ ) {
+		declManager->FindType( DECL_ENTITYDEF, spawnDefs[ i ], false, false );
+	}
+}
+
+/*
+=====================
+idPlayer::PrecacheMultiplayerSpawn
+
+A multiplayer player spawns when its client enters the game, after the level
+load has ended, so everything the first spawn touched for the first time was
+parsed and loaded mid-frame: about ninety decls and their images on mp/q4dm1,
+from the player model and crosshairs to the damage defs. Touch that set from
+inside the load instead.
+=====================
+*/
+void idPlayer::PrecacheMultiplayerSpawn( void ) {
+	const idDeclEntityDef *playerDef = gameLocal.FindEntityDef( GetSpawnClassname(), false );
+	if ( playerDef == NULL ) {
+		return;
+	}
+
+	// The retained multiplayer menus parse this def with media caching off,
+	// in which case finding it again caches nothing.
+	gameLocal.CacheDictionaryMedia( &playerDef->dict );
+
+	// The def_default_model keys name playerModel decls, which the def_ media
+	// rule looks up as entityDefs and so misses. Cache the models this game
+	// type can fall back to or force, plus the local player's own choice, the
+	// same set UpdateModelSetup picks from. Cache each model's media directly,
+	// because a model the player setup menu already parsed would not cache it
+	// again. Other players' choices arrive with their userinfo.
+	const bool teamGame = gameLocal.IsTeamGame();
+	const char *modelNames[] = {
+		teamGame ? playerDef->dict.GetString( "def_default_model_marine" ) : playerDef->dict.GetString( "def_default_model" ),
+		teamGame ? playerDef->dict.GetString( "def_default_model_strogg" ) : "",
+		teamGame ? Player_ForcedModelCVarString( g_forceMarineModel ) : Player_ForcedModelCVarString( g_forceModel ),
+		teamGame ? Player_ForcedModelCVarString( g_forceStroggModel ) : "",
+		teamGame ? cvarSystem->GetCVarString( "ui_model_marine" ) : cvarSystem->GetCVarString( "ui_model" ),
+		teamGame ? cvarSystem->GetCVarString( "ui_model_strogg" ) : "",
+	};
+	for ( int i = 0; i < (int)( sizeof( modelNames ) / sizeof( modelNames[ 0 ] ) ); i++ ) {
+		if ( modelNames[ i ] == NULL || modelNames[ i ][ 0 ] == '\0' ) {
+			continue;
+		}
+		const rvDeclPlayerModel *model = static_cast<const rvDeclPlayerModel *>( declManager->FindType( DECL_PLAYER_MODEL, modelNames[ i ], false ) );
+		if ( model == NULL ) {
+			continue;
+		}
+		idDict media;
+		media.Set( "model", model->model.c_str() );
+		media.Set( "def_head", model->head.c_str() );
+		media.Set( "def_head_ui", model->uiHead.c_str() );
+		media.Set( "skin", model->skin.c_str() );
+		media.SetDefaults( &model->sounds );
+		gameLocal.CacheDictionaryMedia( &media );
+	}
+
+	// The weapons SetupWeaponEntity caches on spawn, the warmup arsenal's included.
+	for ( int w = 0; w < MAX_WEAPONS; w++ ) {
+		const char *weaponName = playerDef->dict.GetString( va( "def_weapon%d", w ) );
+		if ( weaponName[ 0 ] != '\0' ) {
+			rvWeapon::CacheWeapon( weaponName );
+		}
+	}
+
+	// In multiplayer the cursor and cinematic HUD are shared templates, like
+	// the hud and mphud in MPGuis, so loading them now leaves the spawn a lookup.
+	static const char * const guiKeys[] = { "cursor", "cinematicHud" };
+	for ( int i = 0; i < (int)( sizeof( guiKeys ) / sizeof( guiKeys[ 0 ] ) ); i++ ) {
+		const char *guiName = playerDef->dict.GetString( guiKeys[ i ] );
+		if ( guiName[ 0 ] != '\0' ) {
+			uiManager->FindGui( guiName, true, false, true );
+		}
+	}
+
+	// Not a media key, so CacheDictionaryMedia skips it.
+	const char *afName = playerDef->dict.GetString( "articulatedFigure" );
+	if ( afName[ 0 ] != '\0' ) {
+		declManager->FindType( DECL_AF, afName, false );
+	}
+
+	declManager->FindType( DECL_ENTITYDEF, "player_viewweapon", false, false );
+	declManager->FindType( DECL_ENTITYDEF, "player_animatedentity", false, false );
+	declManager->FindType( DECL_ENTITYDEF, "ammo_types", false, false );
+	declManager->FindType( DECL_ENTITYDEF, "ItemCostConstants", false );
+	declManager->FindSound( "player_sounds_hitArmor" );
+	PrecacheSpawnDecls();
+}
+// openQ4 END
 
 /*
 ===============

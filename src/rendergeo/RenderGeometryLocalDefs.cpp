@@ -43,6 +43,7 @@ idRenderEntityLocal::idRenderEntityLocal() {
 	demoRemoteRenderView	= NULL;
 	dynamicModel			= NULL;
 	dynamicModelFrameCount	= 0;
+	dynamicModelRegenFrame	= 0;
 	cachedDynamicModel		= NULL;
 	dynamicCollisionModel	= NULL;
 	cachedDynamicCollisionModel = NULL;
@@ -59,6 +60,13 @@ idRenderEntityLocal::idRenderEntityLocal() {
 	firstInteraction		= NULL;
 	lastInteraction			= NULL;
 	needsPortalSky			= false;
+	stencilReceiverGeneration	= -1;
+	stencilReceiverNeeded		= false;
+	stencilReceiverInstance		= NULL;
+	stencilReceiverInstanceFrame = 0;
+	stencilReceiverModel		= NULL;
+	stencilReceiverSkin			= NULL;
+	stencilReceiverShader		= NULL;
 }
 
 void idRenderEntityLocal::FreeRenderEntity() {
@@ -94,7 +102,10 @@ idRenderLightLocal::idRenderLightLocal() {
 	memset( frustumWindings, 0, sizeof( frustumWindings ) );
 
 	lightHasMoved			= false;
+	lastMovedFrameNum = 0;
 	shadowMapStencilFallbackSticky = false;
+	shadowMapStencilFallbackFrame = 0;
+	shadowMapStencilFallbackCleanViews = 0;
 	world					= NULL;
 	index					= 0;
 	areaNum					= 0;

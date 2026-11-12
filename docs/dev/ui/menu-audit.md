@@ -121,3 +121,61 @@ Highest impact first.
   focused control can act. The bars still list no contextual action: the
   west and north buttons of Join Game and the Save and Load pages refresh
   and sort with no prompt, and the title's and pauses' bars keep SELECT.
+
+## Stock interface round, 10 November 2026
+
+A paired review of the stock (`ui_retained 0`) and retained menus: every
+front-end page of each at 1280x720, the rebuilt stock pages at 4:3 and 21:9
+and in German and Hungarian. The method, measurements and the differences
+kept on purpose are in the [stock interface menus](legacy-menu-layout.md)
+record.
+
+| Severity | Interface | Finding | Fix |
+| --- | --- | --- | --- |
+| High | Stock | The Single Player, Campaign, Arena and Demos pages did not follow the stock page frame the other pages and the retained ones share: home-position bands, centered headlines, bordered cards and boxes, BACK at the bottom-leading corner without its marker. | Each stands in the page frame: docked bands, the title (and the path over it) in the top band's slot, stock plates, the summary in the content column and BACK in the bottom band's raised section. The Arena page takes the retained page's arrangement. |
+| Medium | Stock | FRIENDS LIST on the Multiplayer page opened a page nothing fills, and DEMOS stood on the title where the retained interface has it under Multiplayer. | The Multiplayer page reads JOIN GAME, CREATE SERVER, DEMOS and PLAYER SETUP; the title keeps four sections. |
+| Medium | Stock | Every Demos filter looked chosen: the GUI compared the filter's name, and GUI expressions compare numbers. | The session publishes `demo_filterIndex`; one tag carries the rail. |
+| Medium | Stock | The arrow keys did nothing in the menus; Tab moved the focus without showing it. | The arrow keys step a menu's focus as the D-pad does and light the item reached; a control that uses a key keeps it. |
+| Medium | Retained | Join Game showed a full, bright scan bar while no scan ran: under the page's transform a clipping box with no width has no clip mask, so the fill drew whole over its track. | The fill leaves the page until there is progress; the idle track matches the stock one. |
+| Low | Stock | Choice rows showed their quotes: MSAA read `'Off'` and the sound device began with a quote. | Quoted choices show without their quotes, as retail read them. |
+| Low | Stock | The four pages' backdrop faded to black at the edges of a wide view. | They stand on the retained pages' backdrop, the same at every width. |
+| Low | Stock | Arena's progress line and path, and the Demos filters, were cut in longer languages once laid out. | Sized for the longest of the twelve languages. |
+
+A [follow-up](legacy-menu-layout.md#follow-up-10-november-2026) the same
+day gave the retained DISPLAY page's Interface heading its upper case and
+the HUD tab's Crosshair Size and Crosshair Color rows labels without the
+stock colon, and let the retained gate admit a setting only the retained
+interface honors.
+
+A [second round](key-bind-glyphs.md) that day took the settings tree:
+
+| Severity | Interface | Was | Now |
+| --- | --- | --- | --- |
+| High | Stock | The arrow keys never left a key row on CONTROLS, nor a number field on DISPLAY. | Both step on. |
+| High | Stock | Focus stepped onto settings rows outside the view; on the scroll bar it stayed. | The page scrolls to the focused row; the bar is no step. |
+| Medium | Stock | Focus stepped in file order: V-Sync after Ambient brightness. | Columns from the leading edge, each in reading order. |
+| Medium | Both | Binding a keyboard key to an action with two keys cleared its controller buttons too. | An action keeps two keys of each family. |
+| Medium | Retained | CONTROLS named keys as text, a controller button by its key code (`JOY3`). | Keycaps, the mouse and the controller's own glyphs. |
+| Medium | Retained | Right from a settings page's trailing column, or Left to a hidden row, reached a tab. | The columns' outer edges hold the focus; a hidden row gives way to the one in its place. |
+| Low | Stock | CONTROLS joined its key glyphs with "or" and squeezed long key names; Jump's fourth glyph was cut. | A space between glyphs; a keycap as wide as its name. |
+| Low | Both | Some English setting labels were in sentence case beside Title Case rows. | Title Case. |
+
+Left open there: the stock DISPLAY page's Section list does not name the
+page's headings. DISPLAY in the retained interface opened the stock page
+until later that day, when presets began to apply on the retained one.
+
+A [third round](menu-page-loads.md) on 11 November measured every retained
+menu and walked the pages the second had not:
+
+| Severity | Interface | Was | Now |
+| --- | --- | --- | --- |
+| Medium | Retained | The settings pages and the Single Player chain were parsed when first opened: CONTROLS held the frame 268 ms, GAME OPTIONS 184 ms. | The page that shows starts the next pages' parses on the job workers: 87 and 54 ms. |
+| Low | Retained | SETTINGS was parsed at startup, dropped unused, and parsed again when first opened (38 ms). | Parsed once, while the title or a pause shows (11 ms). |
+| Low | Retained | Right or Left from a plate of the pause or the title reached a plinth link (EXIT). | The plates hold the focus at their sides. |
+| Low | Both | More English labels in sentence case (Create Server's advanced options, Model rotation). | Title Case. |
+| Low | Retained | A settings column's heading and CONTROLS' hint began at the column's edge, over the leading end of the backing under the strip. | They start at the rows' label inset. |
+
+Left open: the stock pause's order, the stock Settings screen's
+arrangement and the campaign levels, which stay as the stock composition
+([deliberate differences](legacy-menu-layout.md#deliberate-differences)), and
+the items under [found, not fixed](legacy-menu-layout.md#found-not-fixed).

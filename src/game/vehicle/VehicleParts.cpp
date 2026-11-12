@@ -1002,11 +1002,36 @@ void rvVehicleWeapon::UpdateCursorGUI ( idUserInterface* gui ) const {
 			material->SetSort( SS_GUI );
 		}			
 		
-		gui->SetStateString ( "crossColor", g_crosshairColor.GetString() );
+		gui->SetStateString ( "crossColor", rvAnimatedCrosshair::CursorColor( spawnArgs.GetString ( "mtr_crosshair" ) ) );
 		gui->SetStateInt ( "crossOffsetX", spawnArgs.GetInt ( "crosshairOffsetX", "0" ) );
 		gui->SetStateInt ( "crossOffsetY", spawnArgs.GetInt ( "crosshairOffsetY", "0" ) ); 			
  		gui->StateChanged ( gameLocal.time );
 	//}
+}
+
+/*
+=====================
+rvVehicleWeapon::GetCrosshairSignals
+
+openQ4: presentation only, read on drawn frames by the animated crosshair.
+A gun that fires a magazine and then recharges reports the recharge as a
+reload it can measure.
+=====================
+*/
+void rvVehicleWeapon::GetCrosshairSignals( crosshairSignals_t &signals ) const {
+	signals.design = spawnArgs.GetString( "mtr_crosshair" );
+	signals.weaponKey = 0x10000 + (int)( ( (size_t)this >> 4 ) & 0xffff );
+	signals.raised = true;
+	signals.nextAttackTime = nextFireTime;
+	if ( currentAmmo >= 0 && ammoPerCharge > 0 ) {
+		signals.clip = currentAmmo;
+		signals.clipSize = ammoPerCharge;
+		if ( currentAmmo == 0 && chargeTime > 0 ) {
+			signals.reloading = true;
+			signals.reloadProgress = GetCurrentCharge();
+		}
+	}
+	signals.lock = targetEnt.IsValid() ? 1.0f : 0.0f;
 }
 
 /*
@@ -1508,6 +1533,81 @@ rvVehicleTurret::rvVehicleTurret ( void ) {
 	vrLastAim.Zero ( );
 	vrAimTaken = false;
 	vrAimFromHead = false;
+	moveSound = NULL;
+	moveMinVolume = 0.0f;
+	moveMaxVolume = 0.0f;
+	moveSoundOn = false;
+	moveSoundFading = false;
+	moveSoundLastTurn = 0;
+}
+
+/*
+=====================
+rvVehicleTurret::ReadMoveSound
+=====================
+*/
+void rvVehicleTurret::ReadMoveSound ( void ) {
+	moveSound = NULL;
+	if ( spawnArgs.GetBool( "playMoveSound" ) && *spawnArgs.GetString( "snd_move", "" ) ) {
+		moveSound = declManager->FindSound( spawnArgs.GetString( "snd_move" ), false );
+	}
+	moveMinVolume = spawnArgs.GetFloat( "moveMinVolume", "0" );
+	moveMaxVolume = Max( moveMinVolume, spawnArgs.GetFloat( "moveMaxVolume", "0" ) );
+	moveSoundOn = false;
+	moveSoundFading = false;
+	moveSoundLastTurn = 0;
+}
+
+/*
+=====================
+rvVehicleTurret::UpdateMoveSound
+
+openQ4: "degrees" is how far the turret turned this frame. The loop runs
+louder the nearer the turret is to its turn rate, fades once the turret
+has been still for a moment and stops after the fade.
+=====================
+*/
+void rvVehicleTurret::UpdateMoveSound ( float degrees ) {
+	if ( !moveSound || !parent.GetEntity() ) {
+		return;
+	}
+	const float frameTurn = turnRate * MS2SEC( gameLocal.GetMSec() );
+	const float speed = frameTurn > 0.0f ? idMath::ClampFloat( 0.0f, 1.0f, degrees / frameTurn ) : 0.0f;
+	idSoundEmitter* emitter = soundSystem->EmitterForIndex( SOUNDWORLD_GAME, parent->GetSoundEmitter() );
+	if ( speed > 0.02f && IsActive() ) {
+		if ( !moveSoundOn ) {
+			parent->StartSoundShader( moveSound, soundChannel, 0, false, NULL );
+			moveSoundOn = true;
+		}
+		moveSoundFading = false;
+		moveSoundLastTurn = gameLocal.time;
+		if ( emitter ) {
+			emitter->FadeSound( soundChannel, moveMinVolume + ( moveMaxVolume - moveMinVolume ) * speed, 0.08f );
+		}
+	} else if ( moveSoundOn ) {
+		const int still = gameLocal.time - moveSoundLastTurn;
+		if ( still >= TURRET_MOVESOUND_FADE ) {
+			StopMoveSound();
+		} else if ( still > 50 && !moveSoundFading ) {
+			if ( emitter ) {
+				emitter->FadeSound( soundChannel, -40.0f, MS2SEC( TURRET_MOVESOUND_FADE - 50 ) );
+			}
+			moveSoundFading = true;
+		}
+	}
+}
+
+/*
+=====================
+rvVehicleTurret::StopMoveSound
+=====================
+*/
+void rvVehicleTurret::StopMoveSound ( void ) {
+	if ( moveSoundOn && parent.GetEntity() ) {
+		parent->StopSound( soundChannel, false );
+	}
+	moveSoundOn = false;
+	moveSoundFading = false;
 }
 
 /*
@@ -1536,6 +1636,7 @@ void rvVehicleTurret::Spawn ( void ) {
 	currentAngles.Zero ( );
 
 	ReadMovementLock ( );
+	ReadMoveSound ( );
 
 	//the parent is *not* stuck on spawn.
 	parentStuck = false;
@@ -1577,6 +1678,9 @@ void rvVehicleTurret::Activate ( bool active ) {
 	if ( !IsActive() && soundPart >= 0 ) {
 		static_cast<rvVehicleSound*>(position->GetPart(soundPart))->Stop ( );
 	}
+	if ( !IsActive() ) {
+		StopMoveSound ( );
+	}
 
 	// openQ4: The Awakening's "resetOnExit" vehicles (its space cannons) swing
 	// their turrets back to rest when the gunner leaves, as its game code did
@@ -1597,7 +1701,9 @@ void rvVehicleTurret::RunPostPhysics ( void ) {
 	idMat3		mat[3];
 	idAngles	oldAngles;
 
-	if ( IsActive ( ) && ( !allowDisableMovement || !parent.GetEntity() || parent->IsMovementEnabled ( ) ) ) {	
+	// a jammed turret (The Awakening's movement lock) follows no gunner
+	const bool follows = IsActive ( ) && ( !allowDisableMovement || !parent.GetEntity() || parent->IsMovementEnabled ( ) );
+	if ( follows ) {	
 		for ( i = 0; i < 3; i++ ) {
 			inputAngles[i] = SHORT2ANGLE( position->mInputCmd.angles[i] );
 			lastInputAngles[i] = SHORT2ANGLE( position->mOldInputCmd.angles[i] );
@@ -1619,8 +1725,9 @@ void rvVehicleTurret::RunPostPhysics ( void ) {
 	// drop the rest and the turret drift off the aim for good; there the
 	// rotation is kept and caught up at the turn rate instead, after the turret
 	// first turns to the aim on taking the seat, or when the aim passes between
-	// head and controller.
-	const idPlayer* vrDriver = IsActive ( ) ? OpenQ4_VRDriver( position ) : NULL;
+	// head and controller. A jammed turret follows neither, and takes the aim
+	// again once it is freed.
+	const idPlayer* vrDriver = follows ? OpenQ4_VRDriver( position ) : NULL;
 	idAngles vrSeatAim;
 	idAngles vrWorldAim;
 	const bool vrHead = vrDriver != NULL && vrDriver->GetVRVehicleAim( vrSeatAim, vrWorldAim );
@@ -1673,6 +1780,14 @@ void rvVehicleTurret::RunPostPhysics ( void ) {
 	}	
 	if ( vrDriver != NULL ) {
 		vrLastAim = vrSeatAim;
+	}
+
+	// openQ4: the def's servo loop ("playMoveSound")
+	if ( moveSound ) {
+		float turned = idMath::Fabs( idMath::AngleDelta( oldAngles[YAW], currentAngles[YAW] ) );
+		turned = Max( turned, idMath::Fabs( idMath::AngleDelta( oldAngles[PITCH], currentAngles[PITCH] ) ) );
+		turned = Max( turned, idMath::Fabs( idMath::AngleDelta( oldAngles[ROLL], currentAngles[ROLL] ) ) );
+		UpdateMoveSound ( turned );
 	}
 
 	// Update the turret moving sound
@@ -1840,9 +1955,10 @@ void rvVehicleTurret::Restore ( idRestoreGame* savefile ) {
 	savefile->ReadInt ( moveTime );
 	savefile->ReadFloat ( turnRate );
 
-	savefile->ReadInt ( soundPart );	
+	savefile->ReadInt ( soundPart );
 
 	ReadMovementLock ( );
+	ReadMoveSound ( );
 
 	vrPendingInput.Zero ( );
 	vrLastAim.Zero ( );

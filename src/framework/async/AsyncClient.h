@@ -113,6 +113,10 @@ public:
 
 	bool				IsActive( void ) const;
 	int					GetClientStateValue( void ) const { return (int)clientState; }
+	// Android: the app returned from suspendedMs in the background. A stay
+	// longer than the time-out reconnects at once; after a shorter one the
+	// connection must deliver a fresh packet within net_resumeProbe ms.
+	void				ApplicationResumed( int suspendedMs );
 	int					GetLocalClientNum( void ) const;
 	const netadr_t&		GetServerAddress( void ) const { return serverAddress; }
 	int					GetPrediction( void ) const;
@@ -182,6 +186,8 @@ private:
 	int					lastConnectTime;			// last time a connect message was sent
 	int					lastEmptyTime;				// last time an empty message was sent
 	int					lastPacketTime;				// last time a packet was received from the server
+	int					resumeProbeTime;			// clientTime a resume began awaiting its first packet, or -1
+	int					resumeReconnectTime;		// Sys_Milliseconds of a resume's reconnect; survives Clear()
 	int					lastSnapshotTime;			// last time a snapshot was received
 
 	int					snapshotSequence;			// sequence number of the last received snapshot
@@ -248,6 +254,9 @@ private:
 	int					UpdateTime( int clamp );
 	void				ReadLocalizedServerString( const idBitMsg &msg, char* out, int maxLen );
 	bool				CheckTimeout( void );
+	bool				CheckResume( void );
+	void				ResumeReconnect( const char *reason );
+	bool				StaleDisconnectAfterResume( void ) const;
 	void				ProcessDownloadInfoMessage( const netadr_t from, const idBitMsg &msg );
 	int					GetDownloadRequest( const int checksums[ MAX_PURE_PAKS ], int count, int gamePakChecksum );
 	void				ClearRemoteConsoleRequest( void );

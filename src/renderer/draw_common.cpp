@@ -45,6 +45,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "RendererMetrics.h"
 #include "ScenePackets.h"
 #include "MotionBlurCore.h"
+#include "ARBHeatHazeDepthReject.h"
 
 #ifndef GL_FRAMEBUFFER_SRGB
 #define GL_FRAMEBUFFER_SRGB 0x8DB9
@@ -896,6 +897,17 @@ static idImage *rbSceneColorImage = NULL;
 static idImage *rbSceneDepthStencilImage = NULL;
 static idRenderTexture *rbSceneRenderTexture = NULL;
 static int rbSceneRenderTextureSamples = -1;
+// window-view multisampling (see RB_WindowView_Begin)
+static idImage *rbWindowViewColorImage = NULL;
+static idImage *rbWindowViewDepthImage = NULL;
+static idRenderTexture *rbWindowViewRenderTexture = NULL;
+static idImage *rbWindowViewResolveImage = NULL;
+static idRenderTexture *rbWindowViewResolveRenderTexture = NULL;
+static int rbWindowViewWidth = 0;
+static int rbWindowViewHeight = 0;
+static int rbWindowViewSamples = 0;
+static bool rbWindowViewWarned = false;
+static unsigned int rbWindowViewMirroredFramebuffer = 0;
 static int rbSceneRenderTargetPreserveFarDepthFrame = -1;
 static const viewDef_t *rbSceneRenderTargetPreserveFarDepthView = NULL;
 static int rbSceneRenderTargetPortalSkyFrame = -1;
@@ -1105,8 +1117,12 @@ static void RB_ClearSceneScaleState( rbSceneScaleState_t &state ) {
 	// Capacity-preserving reset: SetNum(0,false) keeps the list storage and the
 	// no-arg Clear() memsets the hash in place, so a per-view state that is now
 	// retained (see RB_STD_DrawView) no longer frees and reallocates every view.
+	// SetGranularity resizes an allocated list to its rounded-up count, which is
+	// zero here, so it may only run while the granularity still needs setting.
+	if ( state.rectRestores.GetGranularity() != 256 ) {
+		state.rectRestores.SetGranularity( 256 );
+	}
 	state.rectRestores.SetNum( 0, false );
-	state.rectRestores.SetGranularity( 256 );
 	state.rectRestoreHash.Clear();
 }
 
@@ -1920,10 +1936,11 @@ static bool RB_EnsureSceneRenderTexture( const viewDef_t *sceneTargetView ) {
 		scaledWidth, scaledHeight );
 	const int targetWidth = scaledScene ? scaledWidth : Max( glConfig.vidWidth, sceneTargetView->viewport.x2 + 1 );
 	const int targetHeight = scaledScene ? scaledHeight : Max( glConfig.vidHeight, sceneTargetView->viewport.y2 + 1 );
-	// Follow the created context, which can differ from the archived preference
-	// after a strict device request or driver fallback. Unknown samples do not
-	// authorize allocating a multisampled target.
-	const int requestedSamples = Max( 0, R_DefaultFramebufferSamples() );
+	// Follow the created context where the window carries MSAA: it can differ
+	// from the archived preference after a strict device request or driver
+	// fallback, and unknown samples do not authorize allocating a multisampled
+	// target. A single-sample window leaves the count to the setting.
+	const int requestedSamples = Max( 0, R_ViewFramebufferSamples() );
 	// Any non-native scene target already requires a resolve. Keep it
 	// single-sample instead of stacking an MSAA FP16 FBO on top of the scale
 	// transition; temporal AA owns antialiasing when enabled.
@@ -3482,7 +3499,10 @@ static int RB_CompareMovingEntityHistory( const void *a, const void *b ) {
 // view weapon included), one entry per entity, sorted for the lookups above.
 static void RB_CollectMovingEntityHistory( drawSurf_t **drawSurfs, int numDrawSurfs,
 		idList<rbMotionBlurEntityHistory_t> &history ) {
-	history.Clear();
+	// openQ4: empty the list but keep its storage. Clear() freed it, so each
+	// frame regrew the list 16 entries at a time from nothing, and the Clear()
+	// after each Swap below then freed the previous frame's buffer as well.
+	history.SetNum( 0, false );
 	for ( int i = 0; i < numDrawSurfs; i++ ) {
 		const drawSurf_t *surf = drawSurfs[i];
 		if ( surf == NULL || surf->space == NULL || surf->space->entityDef == NULL
@@ -3511,7 +3531,7 @@ static void RB_CollectMovingEntityHistory( drawSurf_t **drawSurfs, int numDrawSu
 static void RB_UpdateMotionBlurEntityHistory( drawSurf_t **drawSurfs, int numDrawSurfs ) {
 	RB_CollectMovingEntityHistory( drawSurfs, numDrawSurfs, rbMotionBlurNextEntityHistory );
 	rbMotionBlurEntityHistory.Swap( rbMotionBlurNextEntityHistory );
-	rbMotionBlurNextEntityHistory.Clear();
+	rbMotionBlurNextEntityHistory.SetNum( 0, false );
 }
 
 static bool RB_EnsureMotionVectorRenderTexture( int viewportWidth, int viewportHeight ) {
@@ -4948,8 +4968,11 @@ static bool RB_EnsureTemporalResolveProgram( void ) {
 		"\tfloat viewZ = ViewZFromDepth( depth );\n"
 		"\tvec3 viewPosition = vec3( -viewZ * ( ndc.x + CurrentReconstructInfo.z ) * CurrentReconstructInfo.x,\n"
 		"\t\t-viewZ * ( ndc.y + CurrentReconstructInfo.w ) * CurrentReconstructInfo.y, viewZ );\n"
-		"\tvec3 worldPosition = CurrentViewOrigin.xyz + CurrentViewToWorldDirection( viewPosition );\n"
-		"\tvec3 delta = worldPosition - PreviousViewOrigin.xyz;\n"
+		// Relative to the previous origin without passing through absolute
+		// world coordinates: their rounding is a constant sub-pixel history
+		// offset per pixel, which a still camera would integrate into blur.
+		"\tvec3 delta = CurrentViewToWorldDirection( viewPosition )\n"
+		"\t\t+ ( CurrentViewOrigin.xyz - PreviousViewOrigin.xyz );\n"
 		"\treturn ProjectPreviousView( vec3( -dot( delta, PreviousViewAxis1.xyz ),\n"
 		"\t\tdot( delta, PreviousViewAxis2.xyz ), -dot( delta, PreviousViewAxis0.xyz ) ) );\n"
 		"}\n"
@@ -5120,8 +5143,18 @@ static bool RB_EnsureTemporalResolveProgram( void ) {
 		"void main() {\n"
 		"\tvec2 outputUV = gl_TexCoord[0].st;\n"
 		"\tvec2 sceneUV = clamp( outputUV - CurrentJitter * MotionParams.w, vec2( 0.0 ), vec2( 1.0 ) );\n"
-		"\tvec4 current = texture2D( Scene, sceneUV );\n"
 		"\tfloat centerDepth = texture2D( DepthBuffer, sceneUV ).r;\n"
+		// What lies behind the jittered view (a portal sky) was drawn without
+		// jitter. Where nothing of this view covers the pixel - cleared depth
+		// at both positions and no reactive surface over it - the recentered
+		// position would move that backdrop by the jitter, so sample it in place.
+		// Without a depth image nothing is known to be backdrop.
+		"\tif ( MotionParams.w > 0.5 && MotionParams.z > 0.5 && centerDepth >= 0.99999\n"
+		"\t\t\t&& texture2D( DepthBuffer, outputUV ).r >= 0.99999\n"
+		"\t\t\t&& ( MotionParams.x < 0.5 || texture2D( VelocityBuffer, sceneUV ).b <= 0.0 ) ) {\n"
+		"\t\tsceneUV = outputUV;\n"
+		"\t}\n"
+		"\tvec4 current = texture2D( Scene, sceneUV );\n"
 		"\tif ( ScreenEffects0.x > 0.5 ) {\n"
 		"\t\tvec3 centerPosition = centerDepth < 0.99999 ? CurrentViewPosition( sceneUV, centerDepth ) : vec3( 0.0, 0.0, -ScreenEffects0.z );\n"
 		"\t\tvec3 centerNormal = centerDepth < 0.99999 ? DepthNormal( sceneUV, centerPosition ) : vec3( 0.0, 0.0, 1.0 );\n"
@@ -5156,8 +5189,13 @@ static bool RB_EnsureTemporalResolveProgram( void ) {
 		"\t}\n"
 		"\tvec3 mean = moment1 / 9.0;\n"
 		"\tvec3 sigma = sqrt( max( moment2 / 9.0 - mean * mean, vec3( 0.0 ) ) );\n"
-		"\tvec3 neighborhoodMin = max( mean - sigma * 1.25, sampleMin );\n"
-		"\tvec3 neighborhoodMax = min( mean + sigma * 1.25, sampleMax );\n"
+		// One low-resolution frame under-samples what the history has built up
+		// per output pixel, so the box widens with the upscale factor (it stays
+		// inside the sample range): a tight box pulled every accumulated edge
+		// toward wherever this frame's aliased edge happened to fall.
+		"\tfloat clipSigma = 1.25 * clamp( OutputSize.x * InvSceneSize.x, 1.0, 3.0 );\n"
+		"\tvec3 neighborhoodMin = max( mean - sigma * clipSigma, sampleMin );\n"
+		"\tvec3 neighborhoodMax = min( mean + sigma * clipSigma, sampleMax );\n"
 		// Dilate only toward a moving object: a still occluder's edge must not
 		// pin the moving background beside it.
 		"\tvec4 closestVelocity = MotionParams.x > 0.5 ? texture2D( VelocityBuffer, closestUV ) : vec4( 0.0 );\n"
@@ -5166,7 +5204,10 @@ static bool RB_EnsureTemporalResolveProgram( void ) {
 		"\tfloat reactiveMask = max( closestVelocity.b, centerVelocity.b );\n"
 		"\tbool objectValid = objectVelocity.a > 0.5;\n"
 		"\tbool cameraValid = MotionParams.y > 0.5 && MotionParams.z > 0.5;\n"
-		"\tvec2 previousUV = cameraValid ? CameraPreviousUV( sceneUV, depthMin ) : outputUV;\n"
+		// PreviousProjectInfo carries the previous camera aligned to this
+		// frame's jitter, so the reprojection of a scene texel is that texel
+		// plus its motion; the history itself lives on the unjittered output.
+		"\tvec2 previousUV = cameraValid ? outputUV + ( CameraPreviousUV( sceneUV, depthMin ) - sceneUV ) : outputUV;\n"
 		"\tif ( objectValid ) previousUV = outputUV - objectVelocity.xy * InvSceneSize;\n"
 		"\tbool inside = previousUV.x >= 0.0 && previousUV.y >= 0.0 && previousUV.x <= 1.0 && previousUV.y <= 1.0;\n"
 		"\tbool historyUsable = TemporalParams.z > 0.5 && inside && ( objectValid || cameraValid );\n"
@@ -5184,9 +5225,23 @@ static bool RB_EnsureTemporalResolveProgram( void ) {
 		// A full mask (no previous clip position, a newly visible surface, a
 		// subview) owns no history at all, whatever the reactive scale.
 		"\tif ( !historyUsable || reactiveMask >= 0.999 ) reactive = 1.0;\n"
+		// Where history is rejected the current frame shows through. Its raw
+		// samples sit at this frame's jittered positions, which reads as the
+		// surface shaking; take the recentered frame for that share instead.
+		"\tif ( MotionParams.w < 0.5 && reactive > 0.0 && ScreenEffects0.x < 0.5 ) {\n"
+		"\t\tvec3 steady = texture2D( Scene, clamp( outputUV - CurrentJitter, vec2( 0.0 ), vec2( 1.0 ) ) ).rgb;\n"
+		"\t\tcurrent.rgb = mix( current.rgb, steady, reactive );\n"
+		"\t}\n"
 		// Fast motion keeps less history: it cannot be anti-aliased anyway,
 		// and every reprojection resamples it.
 		"\tfloat feedback = TemporalParams.x * ( 1.0 - 0.3 * smoothstep( 16.0, 96.0, speed ) );\n"
+		// A pixel at rest keeps integrating: it takes half the usual share of
+		// each new frame, and less again when upscaling, where one frame holds
+		// only a fraction of the output samples. That shrinks the ripple each
+		// jittered sample leaves on a still edge; nothing at rest can ghost,
+		// and any motion returns to the base feedback.
+		"\tfloat sceneShare = min( 1.0, 1.0 / ( OutputSize.x * InvSceneSize.x ) );\n"
+		"\tfeedback += ( 1.0 - feedback ) * feedback * ( 1.0 - 0.5 * sceneShare ) * ( 1.0 - smoothstep( 0.05, 0.5, speed ) );\n"
 		"\tfloat historyWeight = historyUsable ? feedback * ( 1.0 - reactive ) : 0.0;\n"
 		// Luminance-weighted blend: one bright jittered sample cannot flicker.
 		"\tfloat currentWeight = ( 1.0 - historyWeight ) / ( 1.0 + Luma( current.rgb ) );\n"
@@ -5991,10 +6046,10 @@ static void RB_UpdateTemporalEntityHistory( const viewDef_t *viewDef,
 		RB_CollectMovingEntityHistory( viewDef->drawSurfs, viewDef->numDrawSurfs,
 			rbTemporalNextEntityHistory );
 	} else {
-		rbTemporalNextEntityHistory.Clear();
+		rbTemporalNextEntityHistory.SetNum( 0, false );
 	}
 	rbTemporalEntityHistory.Swap( rbTemporalNextEntityHistory );
-	rbTemporalNextEntityHistory.Clear();
+	rbTemporalNextEntityHistory.SetNum( 0, false );
 	rbTemporalEntityHistoryGeneration = generation;
 	rbTemporalEntityHistoryViewIdentity = viewDef != NULL
 		? viewDef->temporalViewIdentity : 0;
@@ -6055,10 +6110,8 @@ static bool RB_DrawTemporalResolvePass( const resolveTemporalPresentationCommand
 	const GLfloat depthProjection[2] = {
 		viewDef->projectionMatrix[10], viewDef->projectionMatrix[14]
 	};
-	const GLfloat jitter[2] = {
-		viewDef->temporalJitterPixels.x / static_cast<GLfloat>( Max( 1, outputWidth ) ),
-		viewDef->temporalJitterPixels.y / static_cast<GLfloat>( Max( 1, outputHeight ) )
-	};
+	GLfloat jitter[2];
+	R_TemporalPresentation_AppliedJitterUV( viewDef, jitter );
 	const GLfloat temporalParams[4] = {
 		idMath::ClampFloat( 0.0f, 0.98f, command.feedback ),
 		idMath::ClampFloat( 0.0f, 2.0f, command.reactiveScale ),
@@ -6141,9 +6194,16 @@ static bool RB_ResolveTemporalPresentationRecorded( const resolveTemporalPresent
 	const int outputHeight = command.presentation.outputHeight;
 	idImage *sceneImage = RB_TemporalColorImage( command.sceneColorTarget );
 	const bool captureFrame = command.captureFrame || tr.takingScreenshot;
+	// Output pixels the jittered scene sits away from its unjittered place,
+	// taken from the projection itself: temporalJitterPixels is in units of
+	// the view's own viewport, which is the scene extent when the game renders
+	// a scaled scene.
 	idVec2 spatialJitter( 0.0f, 0.0f );
 	if ( command.viewDef != NULL ) {
-		spatialJitter = command.viewDef->temporalJitterPixels;
+		float appliedJitter[2];
+		R_TemporalPresentation_AppliedJitterUV( command.viewDef, appliedJitter );
+		spatialJitter.Set( appliedJitter[0] * static_cast<float>( Max( 1, outputWidth ) ),
+			appliedJitter[1] * static_cast<float>( Max( 1, outputHeight ) ) );
 	}
 	if ( command.viewDef == NULL || sceneWidth <= 0 || sceneHeight <= 0
 			|| outputWidth <= 0 || outputHeight <= 0
@@ -6303,10 +6363,15 @@ static bool RB_ResolveTemporalPresentationRecorded( const resolveTemporalPresent
 			0.0f, 0.0f, 1.0f, 1.0f );
 	}
 
+	// An upscaled scene is sampled where each output pixel lies in the
+	// jittered frame, so successive frames register on the output grid and
+	// accumulate detail. At native resolution the raw jittered samples are the
+	// sub-pixel samples the history integrates.
+	const bool registerScene = sceneWidth != outputWidth || sceneHeight != outputHeight;
 	if ( !RB_DrawTemporalResolvePass( command, sceneImage, depthImage,
 			historyReadImage, velocityValid ? rbMotionVectorImage : NULL,
 			command.historyWriteTarget, &motionPolicy,
-			useHistory, velocityValid, false, false, 0 ) ) {
+			useHistory, velocityValid, registerScene, false, 0 ) ) {
 		RB_RejectTemporalHistoryWrite( command );
 		record.outcome = TEMPORAL_RESOLVE_FALLBACK;
 		record.reason = "resolve pass failed";
@@ -6326,7 +6391,7 @@ static bool RB_ResolveTemporalPresentationRecorded( const resolveTemporalPresent
 	if ( debugMode > 0 && RB_DrawTemporalResolvePass( command, sceneImage, depthImage,
 			historyReadImage, velocityValid ? rbMotionVectorImage : NULL,
 			NULL, &motionPolicy,
-			useHistory, velocityValid, false, preserveFarDepth, debugMode ) ) {
+			useHistory, velocityValid, registerScene, preserveFarDepth, debugMode ) ) {
 		return true;
 	}
 	return RB_PresentTemporalSpatialFallback( historyWriteImage,
@@ -7727,6 +7792,54 @@ static void RB_EnsureCurrentDepthSampledPlain( idImage *depthImage ) {
 	lastGeneration = generation;
 }
 
+/*
+==================
+RB_PrepareHeatHazeSceneDepth
+
+The rewritten heat-haze programs (ARBHeatHazeDepthReject.h) read the scene
+depth on texture[oq4arbhaze::TEXTURE_UNIT]. Capture it if this view has not
+yet, while no stage state is bound; RB_BindHeatHazeSceneDepth binds it.
+==================
+*/
+static void RB_PrepareHeatHazeSceneDepth( void ) {
+	if ( !r_heatHazeDepthReject.GetBool() || backEnd.currentDepthCopied
+		|| globalImages == NULL || globalImages->currentDepthImage == NULL || backEnd.viewDef == NULL ) {
+		return;
+	}
+	const int viewportWidth = backEnd.viewDef->viewport.x2 - backEnd.viewDef->viewport.x1 + 1;
+	const int viewportHeight = backEnd.viewDef->viewport.y2 - backEnd.viewDef->viewport.y1 + 1;
+	RB_CaptureCurrentDepthImage( viewportWidth, viewportHeight );
+}
+
+/*
+==================
+RB_BindHeatHazeSceneDepth
+
+A white texture in place of the depth turns the test off: a depth of 1.0 is
+never nearer than the haze, so every refracted read keeps its offset.
+==================
+*/
+static void RB_BindHeatHazeSceneDepth( void ) {
+	const int viewportWidth = backEnd.viewDef->viewport.x2 - backEnd.viewDef->viewport.x1 + 1;
+	const int viewportHeight = backEnd.viewDef->viewport.y2 - backEnd.viewDef->viewport.y1 + 1;
+	idImage *depthImage = globalImages->currentDepthImage;
+	const bool useDepth = r_heatHazeDepthReject.GetBool() && backEnd.currentDepthCopied
+		&& depthImage != NULL && depthImage->GetOpts().width > 0 && depthImage->GetOpts().height > 0
+		&& viewportWidth > 0 && viewportHeight > 0;
+
+	float parm[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
+	GL_SelectTexture( oq4arbhaze::TEXTURE_UNIT );
+	if ( useDepth ) {
+		depthImage->Bind();
+		RB_EnsureCurrentDepthSampledPlain( depthImage );
+		parm[0] = static_cast<float>( viewportWidth ) / static_cast<float>( depthImage->GetOpts().width );
+		parm[1] = static_cast<float>( viewportHeight ) / static_cast<float>( depthImage->GetOpts().height );
+	} else {
+		globalImages->whiteImage->Bind();
+	}
+	glProgramLocalParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, oq4arbhaze::LOCAL_INDEX, parm );
+}
+
 static bool RB_TryDrawSoftParticleStage( const drawSurf_t *surf, const shaderStage_t *pStage, const float *regs, const srfTriangles_t *tri, idDrawVert *ac, int stage, const float color[4] ) {
 	if ( !RB_SoftParticleStageEligible( surf, pStage ) ) {
 		return false;
@@ -8120,6 +8233,14 @@ void RB_ShutdownScenePostProcess( void ) {
 
 	RB_DestroyPostProcessRenderTexture( rbSceneRenderTexture );
 	rbSceneRenderTextureSamples = -1;
+	RB_DestroyPostProcessRenderTexture( rbWindowViewRenderTexture );
+	RB_DestroyPostProcessRenderTexture( rbWindowViewResolveRenderTexture );
+	rbWindowViewResolveImage = NULL;
+	rbWindowViewColorImage = NULL;
+	rbWindowViewDepthImage = NULL;
+	rbWindowViewWidth = rbWindowViewHeight = rbWindowViewSamples = 0;
+	rbWindowViewWarned = false;
+	rbWindowViewMirroredFramebuffer = 0;
 	rbSceneColorImage = NULL;
 	rbSceneDepthStencilImage = NULL;
 	rbSceneRenderTargetPreserveDepthImage = NULL;
@@ -11643,6 +11764,12 @@ void RB_STD_T_RenderShaderPasses( const drawSurf_t *surf ) {
 				}
 			}
 
+			const bool hazeDepthReject = fragmentProgramEnabled
+				&& R_ARBProgramUsesSceneDepthReject( newStage->fragmentProgram );
+			if ( hazeDepthReject ) {
+				RB_PrepareHeatHazeSceneDepth();
+			}
+
 			if ( fragmentProgramEnabled ) {
 				for ( int i = 0 ; i < newStage->numFragmentProgramImages ; i++ ) {
 					if ( newStage->fragmentProgramImages[i] ) {
@@ -11651,9 +11778,17 @@ void RB_STD_T_RenderShaderPasses( const drawSurf_t *surf ) {
 					}
 				}
 			}
+			if ( hazeDepthReject ) {
+				RB_BindHeatHazeSceneDepth();
+			}
 
 			// draw it
 			RB_DrawElementsWithCounters( tri );
+
+			if ( hazeDepthReject ) {
+				GL_SelectTexture( oq4arbhaze::TEXTURE_UNIT );
+				globalImages->BindNull();
+			}
 
 			if ( fragmentProgramEnabled ) {
 				for ( int i = 1 ; i < newStage->numFragmentProgramImages ; i++ ) {
@@ -16346,6 +16481,312 @@ static void RB_DrawPortalSkyBackdrop( idImage *backdrop ) {
 }
 
 /*
+====================
+Window-view multisampling
+
+Where the window carries MSAA (r_glWindowMultisample 1, OpenGL ES), every 3D
+view drawn straight to it is antialiased: GUI renderDef windows, and remote
+cameras, mirrors and other capture-backed subviews before they are copied into
+their textures. A single-sample window gives those views nothing, and an
+r_multiSamples change would otherwise need a new window.
+
+Such a view therefore draws into a window-sized multisampled target that
+stands in for the window (R_SetDefaultRenderTarget, as a VR eye does), so the
+back end keeps drawing "to the window" and none of its target logic changes.
+The view's rectangle is first seeded with the window's pixels, because a 3D
+view clears only depth and draws over what the GUI put there. Afterwards the
+rectangle is resolved back into the window. Any refusal leaves the view
+single-sample.
+
+Views that already draw into a render texture (the game's scene target, the
+renderer's own, a capture's) are not touched: they carry their own samples.
+====================
+*/
+static idCVar r_glWindowViewMultisample( "r_glWindowViewMultisample", "1", CVAR_RENDERER | CVAR_INTEGER,
+	"multisample 3D views drawn straight to a single-sample OpenGL window (GUI renderDef windows, remote cameras, mirrors) at r_multiSamples, as a multisampled window does; 2 = also print each such view",
+	0, 2, idCmdSystem::ArgCompletion_Integer<0,2> );
+
+struct rbWindowViewState_t {
+	bool	active;
+	bool	captured;	// a subview: copied into a texture after it is drawn
+	int		x, y, width, height;
+	GLint	windowBuffer;
+};
+
+static bool RB_WindowView_Refuse( const char *reason ) {
+	if ( !rbWindowViewWarned ) {
+		rbWindowViewWarned = true;
+		common->Warning( "OpenGL: window view multisampling unavailable (%s); drawing the view single-sample", reason );
+	}
+	return false;
+}
+
+static bool RB_WindowView_EnsureTarget( int width, int height, int samples ) {
+	if ( rbWindowViewRenderTexture != NULL && rbWindowViewWidth == width
+			&& rbWindowViewHeight == height && rbWindowViewSamples == samples ) {
+		return true;
+	}
+	rbWindowViewWidth = 0;
+	rbWindowViewHeight = 0;
+	rbWindowViewSamples = 0;
+
+	idImageOpts colorOpts;
+	colorOpts.textureType = TT_2D;
+	colorOpts.format = FMT_RGBA8;
+	colorOpts.width = width;
+	colorOpts.height = height;
+	colorOpts.numLevels = 1;
+	colorOpts.numMSAASamples = samples;
+	colorOpts.isPersistant = true;
+	rbWindowViewColorImage = globalImages->ScratchImage( "_glWindowViewColor", &colorOpts, TF_LINEAR, TR_CLAMP, TD_DEFAULT );
+
+	idImageOpts depthOpts;
+	depthOpts.textureType = TT_2D;
+	depthOpts.format = FMT_DEPTH_STENCIL;
+	depthOpts.width = width;
+	depthOpts.height = height;
+	depthOpts.numLevels = 1;
+	depthOpts.numMSAASamples = samples;
+	depthOpts.isPersistant = true;
+	rbWindowViewDepthImage = globalImages->ScratchImage( "_glWindowViewDepth", &depthOpts, TF_NEAREST, TR_CLAMP, TD_DEPTH );
+
+	if ( rbWindowViewColorImage == NULL || rbWindowViewDepthImage == NULL ) {
+		return RB_WindowView_Refuse( "allocation failed" );
+	}
+	if ( rbWindowViewColorImage->GetOpts().numMSAASamples <= 1 ) {
+		return RB_WindowView_Refuse( "no multisampled colour target" );
+	}
+	if ( rbWindowViewRenderTexture != NULL ) {
+		tr.DestroyRenderTexture( rbWindowViewRenderTexture );
+		rbWindowViewRenderTexture = NULL;
+	}
+	rbWindowViewRenderTexture = tr.CreateRenderTexture( rbWindowViewColorImage, rbWindowViewDepthImage );
+	rbWindowViewMirroredFramebuffer = 0;
+	if ( rbWindowViewRenderTexture == NULL || !rbWindowViewRenderTexture->EnsureDeviceHandle()
+			|| rbWindowViewRenderTexture->IsKnownIncomplete() ) {
+		return RB_WindowView_Refuse( "incomplete framebuffer" );
+	}
+	rbWindowViewRenderTexture->SetDebugLabel( "OpenGL window view (multisampled)" );
+
+	// A subview is resolved through a single-sample target of the same format
+	// (see RB_WindowView_End).
+	idImageOpts resolveOpts;
+	resolveOpts.textureType = TT_2D;
+	resolveOpts.format = FMT_RGBA8;
+	resolveOpts.width = width;
+	resolveOpts.height = height;
+	resolveOpts.numLevels = 1;
+	resolveOpts.numMSAASamples = 0;
+	resolveOpts.isPersistant = true;
+	rbWindowViewResolveImage = globalImages->ScratchImage( "_glWindowViewResolve", &resolveOpts, TF_LINEAR, TR_CLAMP, TD_DEFAULT );
+	if ( rbWindowViewResolveRenderTexture != NULL ) {
+		tr.DestroyRenderTexture( rbWindowViewResolveRenderTexture );
+		rbWindowViewResolveRenderTexture = NULL;
+	}
+	if ( rbWindowViewResolveImage != NULL ) {
+		rbWindowViewResolveRenderTexture = tr.CreateRenderTexture( rbWindowViewResolveImage, NULL );
+	}
+	if ( rbWindowViewResolveRenderTexture == NULL || !rbWindowViewResolveRenderTexture->EnsureDeviceHandle()
+			|| rbWindowViewResolveRenderTexture->IsKnownIncomplete() ) {
+		return RB_WindowView_Refuse( "incomplete resolve framebuffer" );
+	}
+	rbWindowViewResolveRenderTexture->SetDebugLabel( "OpenGL window view resolve" );
+	rbWindowViewWidth = width;
+	rbWindowViewHeight = height;
+	rbWindowViewSamples = samples;
+	return true;
+}
+
+static void RB_WindowView_PrintSamplePositions( const char *label, int samples, bool programmable );
+
+/*
+====================
+RB_WindowView_MirrorSamplePositions
+
+A window's rows are stored top-down, so its multisample pattern sits mirrored
+relative to a framebuffer object's, and edge coverage differs by a few levels
+on edge pixels. Where sample positions are programmable the stand-in takes the
+window's pattern: its own, mirrored. The bound draw framebuffer must be the
+stand-in. Without the extension the view keeps the object's pattern.
+====================
+*/
+static void RB_WindowView_MirrorSamplePositions( unsigned int framebuffer, int samples ) {
+	if ( rbWindowViewMirroredFramebuffer == framebuffer ) {
+		return;
+	}
+	rbWindowViewMirroredFramebuffer = framebuffer;
+	if ( !GLEW_ARB_sample_locations || glFramebufferSampleLocationsfvARB == NULL
+			|| glGetMultisamplefv == NULL || glFramebufferParameteri == NULL
+			|| samples <= 1 || samples > 16 ) {
+		return;
+	}
+	if ( r_glWindowViewMultisample.GetInteger() == 2 ) {
+		RB_WindowView_PrintSamplePositions( "the target's own", samples, false );
+	}
+	GLfloat positions[32];
+	for ( int i = 0; i < samples; i++ ) {
+		glGetMultisamplefv( GL_SAMPLE_POSITION, i, &positions[i * 2] );
+		positions[i * 2 + 1] = 1.0f - positions[i * 2 + 1];
+	}
+	glFramebufferParameteri( GL_DRAW_FRAMEBUFFER, GL_FRAMEBUFFER_PROGRAMMABLE_SAMPLE_LOCATIONS_ARB, GL_TRUE );
+	glFramebufferSampleLocationsfvARB( GL_DRAW_FRAMEBUFFER, 0, samples, positions );
+	if ( glGetError() != GL_NO_ERROR ) {
+		// leave the object's own pattern rather than a half-set one
+		glFramebufferParameteri( GL_DRAW_FRAMEBUFFER, GL_FRAMEBUFFER_PROGRAMMABLE_SAMPLE_LOCATIONS_ARB, GL_FALSE );
+		while ( glGetError() != GL_NO_ERROR ) {
+		}
+	}
+}
+
+// r_glWindowViewMultisample 2: the sample positions of the bound draw framebuffer, once per label.
+static void RB_WindowView_PrintSamplePositions( const char *label, int samples, bool programmable ) {
+	if ( glGetMultisamplefv == NULL || samples <= 1 || samples > 16 ) {
+		return;
+	}
+	idStr text;
+	for ( int i = 0; i < samples; i++ ) {
+		GLfloat position[2] = { 0.0f, 0.0f };
+		glGetMultisamplefv( programmable ? GL_PROGRAMMABLE_SAMPLE_LOCATION_ARB : GL_SAMPLE_POSITION, i, position );
+		text += va( " (%.4f %.4f)", position[0], position[1] );
+	}
+	common->Printf( "GL window view: %s sample positions:%s\n", label, text.c_str() );
+}
+
+static void RB_WindowView_Blit( const rbWindowViewState_t &state ) {
+	// glBlitFramebuffer obeys the scissor, which a prior light may have left set
+	const GLboolean scissorWasEnabled = glIsEnabled( GL_SCISSOR_TEST );
+	if ( scissorWasEnabled ) {
+		glDisable( GL_SCISSOR_TEST );
+	}
+	glBlitFramebuffer( state.x, state.y, state.x + state.width, state.y + state.height,
+		state.x, state.y, state.x + state.width, state.y + state.height, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+	if ( scissorWasEnabled ) {
+		glEnable( GL_SCISSOR_TEST );
+	}
+}
+
+static void RB_WindowView_Begin( const viewDef_t *viewDef, rbWindowViewState_t &state ) {
+	state.active = false;
+	const int samples = r_multiSamples.GetInteger();
+	// A window that carries MSAA needs nothing, a VR eye or virtual screen
+	// standing in for the window keeps one sample, and a render texture
+	// carries its own.
+	if ( !r_glWindowViewMultisample.GetBool() || samples <= 1 || viewDef == NULL || viewDef->viewEntitys == NULL
+			|| backEnd.renderTexture != NULL || R_DefaultFramebufferHandle() != 0
+			|| R_WindowCarriesMultisampling() || R_DefaultFramebufferSamples() != 0
+			|| glBlitFramebuffer == NULL || glBindFramebuffer == NULL ) {
+		static int printedWindowSamples = 0;
+		if ( r_glWindowViewMultisample.GetInteger() == 2 && backEnd.renderTexture == NULL
+				&& R_DefaultFramebufferHandle() == 0 && R_DefaultFramebufferSamples() > 1
+				&& printedWindowSamples != R_DefaultFramebufferSamples() ) {
+			printedWindowSamples = R_DefaultFramebufferSamples();
+			glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+			RB_WindowView_PrintSamplePositions( "the window's", printedWindowSamples, false );
+		}
+		if ( r_glWindowViewMultisample.GetInteger() == 2 && viewDef != NULL && viewDef->viewEntitys != NULL ) {
+			common->Printf( "GL window view: skipped %dx%d (samples %d, render texture %d, stand-in %d, window carries %d, window samples %d)\n",
+				viewDef->viewport.x2 - viewDef->viewport.x1 + 1, viewDef->viewport.y2 - viewDef->viewport.y1 + 1, samples,
+				backEnd.renderTexture != NULL ? 1 : 0, R_DefaultFramebufferHandle() != 0 ? 1 : 0,
+				R_WindowCarriesMultisampling() ? 1 : 0, R_DefaultFramebufferSamples() );
+		}
+		return;
+	}
+
+	// the part of the view that lands in the window (a capture tile can hang over its edge)
+	const int x0 = Max( 0, tr.viewportOffset[0] + viewDef->viewport.x1 );
+	const int y0 = Max( 0, tr.viewportOffset[1] + viewDef->viewport.y1 );
+	const int x1 = Min( glConfig.vidWidth, tr.viewportOffset[0] + viewDef->viewport.x2 + 1 );
+	const int y1 = Min( glConfig.vidHeight, tr.viewportOffset[1] + viewDef->viewport.y2 + 1 );
+	if ( x1 <= x0 || y1 <= y0 ) {
+		return;
+	}
+	if ( !RB_WindowView_EnsureTarget( glConfig.vidWidth, glConfig.vidHeight, samples ) ) {
+		return;
+	}
+
+	state.x = x0;
+	state.y = y0;
+	state.width = x1 - x0;
+	state.height = y1 - y0;
+	GL_CheckErrors();
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	state.windowBuffer = GL_BACK;
+	glGetIntegerv( GL_DRAW_BUFFER, &state.windowBuffer );
+	glReadBuffer( state.windowBuffer );
+	glBindFramebuffer( GL_DRAW_FRAMEBUFFER, rbWindowViewRenderTexture->GetDeviceHandle() );
+	glDrawBuffer( GL_COLOR_ATTACHMENT0 );
+	RB_WindowView_MirrorSamplePositions( rbWindowViewRenderTexture->GetDeviceHandle(), samples );
+	RB_WindowView_Blit( state );
+	const bool seeded = glGetError() == GL_NO_ERROR;
+	if ( seeded ) {
+		R_SetDefaultRenderTarget( rbWindowViewRenderTexture );
+	}
+	const bool standing = seeded && R_GetDefaultRenderTarget() == rbWindowViewRenderTexture;
+	if ( !standing ) {
+		R_SetDefaultRenderTarget( NULL );
+	}
+	idRenderTexture::BindNull();
+	if ( standing ) {
+		R_SetDefaultDrawAndReadBuffers();
+	} else {
+		glDrawBuffer( state.windowBuffer );
+		glReadBuffer( state.windowBuffer );
+		RB_WindowView_Refuse( "the window could not be copied into the target" );
+		return;
+	}
+	state.active = true;
+	state.captured = viewDef->isSubview;
+	if ( r_glWindowViewMultisample.GetInteger() == 2 ) {
+		common->Printf( "GL window view: %dx%d at %d,%d with %d samples (subview %d)\n",
+			state.width, state.height, state.x, state.y, samples, viewDef->isSubview ? 1 : 0 );
+	}
+}
+
+/*
+====================
+RB_WindowView_End
+
+Resolves the view's rectangle back into the window, the way a multisampled
+window's samples reached their reader:
+
+- A subview is copied into a texture next (a remote camera, a mirror). That
+  copy read a multisampled window with glCopyTexSubImage2D, a plain average of
+  the samples. So the samples are averaged into a single-sample target of the
+  same format first, as every other multisampled target here is resolved, and
+  that is copied to the window.
+- Any other view stays in the window (a GUI renderDef window) and was
+  downsampled by the window system when the frame was read or presented. A
+  blit straight from the multisampled target into the window is that same
+  downsample, with whatever weighting the driver gives it (NVIDIA's
+  gamma-correct antialiasing).
+====================
+*/
+static void RB_WindowView_End( rbWindowViewState_t &state ) {
+	if ( !state.active ) {
+		return;
+	}
+	state.active = false;
+	R_SetDefaultRenderTarget( NULL );
+	if ( rbWindowViewRenderTexture != NULL && rbWindowViewResolveRenderTexture != NULL ) {
+		glBindFramebuffer( GL_READ_FRAMEBUFFER, rbWindowViewRenderTexture->GetDeviceHandle() );
+		glReadBuffer( GL_COLOR_ATTACHMENT0 );
+		if ( state.captured ) {
+			glBindFramebuffer( GL_DRAW_FRAMEBUFFER, rbWindowViewResolveRenderTexture->GetDeviceHandle() );
+			glDrawBuffer( GL_COLOR_ATTACHMENT0 );
+			RB_WindowView_Blit( state );
+			glBindFramebuffer( GL_READ_FRAMEBUFFER, rbWindowViewResolveRenderTexture->GetDeviceHandle() );
+			glReadBuffer( GL_COLOR_ATTACHMENT0 );
+		}
+		glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0 );
+		glDrawBuffer( state.windowBuffer );
+		RB_WindowView_Blit( state );
+	}
+	idRenderTexture::BindNull();
+	glDrawBuffer( state.windowBuffer );
+	glReadBuffer( state.windowBuffer );
+}
+
+/*
 =============
 RB_STD_DrawView
 
@@ -16418,6 +16859,18 @@ void	RB_STD_DrawView( void ) {
 		// image. If target allocation failed, draw the direct compatibility path
 		// with the projection centered before any world work reaches the backbuffer.
 		RB_RecenterDirectTemporalProjection( sceneScaleState, backEnd.viewDef );
+	}
+
+	// A 3D view left to draw straight to a single-sample window gets a
+	// multisampled stand-in for it.
+	rbWindowViewState_t windowView;
+	windowView.active = false;
+	if ( !sceneRenderTargetReady ) {
+		RB_WindowView_Begin( backEnd.viewDef, windowView );
+	} else if ( r_glWindowViewMultisample.GetInteger() == 2 && backEnd.viewDef->viewEntitys != NULL ) {
+		common->Printf( "GL window view: %dx%d drawn in the renderer's scene target (%d samples, inline subview %d)\n",
+			backEnd.viewDef->viewport.x2 - backEnd.viewDef->viewport.x1 + 1, backEnd.viewDef->viewport.y2 - backEnd.viewDef->viewport.y1 + 1,
+			rbSceneRenderTextureSamples, inlineSubviewSceneRenderTargetRequested ? 1 : 0 );
 	}
 
 	// If we have a backend rendertexture, assign it here.
@@ -16666,6 +17119,9 @@ void	RB_STD_DrawView( void ) {
 		backEnd.renderTexture = NULL;
 		idRenderTexture::BindNull();
 	}
+
+	// resolve a window view's rectangle back into the window
+	RB_WindowView_End( windowView );
 
 	RB_CapturePortalSkyBackdrop( backEnd.viewDef );
 

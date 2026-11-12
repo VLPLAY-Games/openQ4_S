@@ -35,6 +35,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "ArenaCampaign.h"
 #include "BuildVersion.h"
 #include "SaveGameReleases.h"
+#include "VRSystemLocal.h"
 #include "../sys/NetworkEndpoint.h"
 #if defined( __has_include )
 #if __has_include( "openq4_savegame_compat_generated.h" )
@@ -97,6 +98,7 @@ idCVar	idSessionLocal::com_guid( "com_guid", "", CVAR_SYSTEM | CVAR_ARCHIVE | CV
 idCVar	idSessionLocal::com_lastQuicksave( "com_lastQuicksave", "Quicksave0", CVAR_SYSTEM | CVAR_ARCHIVE, "last quicksave slot" );
 idCVar	com_loadingContinueAutoAdvance( "com_loadingContinueAutoAdvance", "0", CVAR_SYSTEM | CVAR_INTEGER, "auto-accept the single-player loading-screen continue gate after N msec (testing), 0 = off", 0, 60000, idCmdSystem::ArgCompletion_Integer<0,60000> );
 idCVar	com_skipLoadingContinue( "com_skipLoadingContinue", "0", CVAR_SYSTEM | CVAR_BOOL, "skip the single-player loading-screen continue gate (testing)" );
+static idCVar com_captureLoadingScreen( "com_captureLoadingScreen", "0", CVAR_SYSTEM | CVAR_BOOL | CVAR_NOCHEAT, "diagnostic: capture each map's finished loading screen with the engine screenshot command, as screenshots/loading_<n>.tga" );
 static idCVar ui_testGuiInGame( "ui_testGuiInGame", "0", CVAR_SYSTEM | CVAR_BOOL | CVAR_CHEAT, "draw the loaded game behind testGUI for transparent overlay validation" );
 idCVar	com_minLoadingGuiMsec( "com_minLoadingGuiMsec", "250", CVAR_SYSTEM | CVAR_INTEGER, "minimum time to show the loading GUI before blocking map work starts", 0, 2000, idCmdSystem::ArgCompletion_Integer<0,2000> );
 idCVar	com_showLevelLoadTimes( "com_showLevelLoadTimes", "1", CVAR_SYSTEM | CVAR_BOOL, "print detailed phase timings for level loads" );
@@ -2400,10 +2402,13 @@ static void Session_ReplicateRowIntoRect( byte *dest, int destWidth, int destHei
 	}
 }
 
-static bool Session_GetLoadingCanvasExpansion( float &windowAspect, bool &expandHorizontally, bool &expandVertically ) {
+static bool Session_GetLoadingCanvasExpansion( float &windowAspect, bool &expandHorizontally, bool &expandVertically,
+	int &viewportPixelWidth, int &viewportPixelHeight ) {
 	windowAspect = static_cast<float>( SCREEN_WIDTH ) / static_cast<float>( SCREEN_HEIGHT );
 	expandHorizontally = false;
 	expandVertically = false;
+	viewportPixelWidth = 0;
+	viewportPixelHeight = 0;
 
 	if ( !cvarSystem->GetCVarBool( "ui_aspectCorrection" ) ) {
 		return false;
@@ -2423,6 +2428,8 @@ static bool Session_GetLoadingCanvasExpansion( float &windowAspect, bool &expand
 	const float targetAspect = static_cast<float>( SCREEN_WIDTH ) / static_cast<float>( SCREEN_HEIGHT );
 	const float aspectEpsilon = 0.0001f;
 
+	viewportPixelWidth = idMath::Ftoi( viewportWidth );
+	viewportPixelHeight = idMath::Ftoi( viewportHeight );
 	windowAspect = viewportWidth / viewportHeight;
 	if ( windowAspect > targetAspect + aspectEpsilon ) {
 		expandHorizontally = true;
@@ -2433,33 +2440,114 @@ static bool Session_GetLoadingCanvasExpansion( float &windowAspect, bool &expand
 	return expandHorizontally || expandVertically;
 }
 
-static idStr Session_MakeExpandedLoadingBackgroundPath( const char *mapName, int width, int height ) {
-	idStr safeName = mapName;
-	safeName.BackSlashesToSlashes();
-	safeName.StripPath();
-	safeName.StripFileExtension();
-	if ( safeName.Length() <= 0 ) {
-		safeName = "generated";
-	}
+/*
+================
+Expanded loading background
 
-	return va( "guis/assets/generated/loadscreens/%s_%dx%d.tga", safeName.c_str(), width, height );
+In a window that is not 4:3 the session widens the loading screen: it composes
+the map's levelshot, and any _left/_right/_top/_bottom art beside it, into one
+picture of the window's shape. The picture exists only in memory. The renderer
+holds it as a scratch image whose name starts with '_', so the stock GUI's
+implicit material and the retained screen's _retained/ material both find it by
+name whatever their image options. The session keeps the pixels too, because a
+video restart reallocates scratch images without their contents.
+
+Nothing is written under fs_savepath or read back through the search paths, so
+a pure lock has nothing to refuse and a pure server's clients see the wide
+background as well: its sources are VFS reads that the lock already admits (the
+loadscreen pack is client-only and allowed). Builds until 9 November 2026
+published the picture as guis/assets/generated/loadscreens/<map>_<w>x<h>.tga;
+this build never names those files (see FS_IsGeneratedLoadscreenPath).
+================
+*/
+#define SESSION_LOADING_BACKGROUND_IMAGE	"_expandedLoadingBackground"
+
+struct sessionLoadingBackground_t {
+	// SESSION_LOADING_BACKGROUND_IMAGE_<w>x<h>, empty while none is held. The
+	// size is part of the name because the retained interface keeps an image's
+	// dimensions by its name, and a picture of another shape must not reuse them.
+	idStr			imageName;
+	idList<byte>	pixels;				// RGBA, top row first, exactly as uploaded
+	int				width = 0;
+	int				height = 0;
+	int				restartCount = 0;	// renderSystem->GetVideoRestartCount() at the upload
+};
+static sessionLoadingBackground_t sessionLoadingBackground;
+
+// Allocates the held image at the pixels' size and uploads them.
+static bool Session_UploadLoadingBackground( void ) {
+	sessionLoadingBackground_t &background = sessionLoadingBackground;
+	idImageOpts options;
+	options.width = background.width;
+	options.height = background.height;
+	options.format = FMT_RGBA8;
+	options.numLevels = 1;
+	options.isPersistant = true;
+	idImage *image = renderSystem->CreateImage( background.imageName.c_str(), &options, TF_LINEAR );
+	if ( image == NULL ) {
+		return false;
+	}
+	int width = 0;
+	int height = 0;
+	renderSystem->GetImageSize( image, width, height );
+	if ( width != background.width || height != background.height ||
+		!renderSystem->UploadImage( background.imageName.c_str(), background.pixels.Ptr(), background.width, background.height ) ) {
+		return false;
+	}
+	background.restartCount = renderSystem->GetVideoRestartCount();
+	return true;
 }
 
-static bool Session_PrepareExpandedLoadingBackground( const idStr &backgroundPath, const char *mapName, idStr &generatedPath ) {
+// A load that shows the stock levelshot keeps no picture. The held image shrinks
+// to one black pixel, so a GUI that still names it draws nothing stale. During
+// shutdown the renderer's own teardown owns the image; only the pixels go.
+static void Session_ReleaseLoadingBackground( bool shrinkImage ) {
+	sessionLoadingBackground_t &background = sessionLoadingBackground;
+	if ( shrinkImage && background.imageName.Length() > 0 && renderSystem != NULL ) {
+		static const byte black[4] = { 0, 0, 0, 255 };
+		idImageOpts options;
+		options.width = 1;
+		options.height = 1;
+		options.format = FMT_RGBA8;
+		options.numLevels = 1;
+		options.isPersistant = true;
+		if ( renderSystem->CreateImage( background.imageName.c_str(), &options, TF_LINEAR ) != NULL ) {
+			renderSystem->UploadImage( background.imageName.c_str(), black, 1, 1 );
+		}
+	}
+	background.imageName.Clear();
+	background.pixels.Clear();
+	background.width = 0;
+	background.height = 0;
+	background.restartCount = 0;
+}
+
+// Each session frame, before any GUI draws: a video restart reallocated the held
+// image empty, so put its pixels back. A loading screen can outlive one, as the
+// retained screen held over a multiplayer join does.
+static void Session_RestoreLoadingBackground( void ) {
+	sessionLoadingBackground_t &background = sessionLoadingBackground;
+	if ( background.pixels.Num() == 0 || renderSystem == NULL ||
+		renderSystem->GetVideoRestartCount() == background.restartCount ) {
+		return;
+	}
+	if ( !Session_UploadLoadingBackground() ) {
+		common->Warning( "Could not restore expanded loading background '%s' after a video restart",
+			background.imageName.c_str() );
+		Session_ReleaseLoadingBackground( true );
+		return;
+	}
+	common->DPrintf( "Expanded loading background '%s' restored after a video restart\n", background.imageName.c_str() );
+}
+
+static bool Session_PrepareExpandedLoadingBackground( const idStr &backgroundPath, idStr &imageName ) {
 	float windowAspect = 0.0f;
 	bool expandHorizontally = false;
 	bool expandVertically = false;
-	if ( !Session_GetLoadingCanvasExpansion( windowAspect, expandHorizontally, expandVertically ) ) {
-		return false;
-	}
-
-	// Never use a shared, predictable staging name. If the platform cannot
-	// provide a secure nonce, keep the stock source levelshot instead of risking
-	// another client truncating this client's in-progress publication.
-	uint64 stagingNonce[2] = { 0, 0 };
-	if ( !Sys_GetSecureRandomBytes( stagingNonce, sizeof( stagingNonce ) ) ) {
-		common->Warning( "Could not create a secure expanded-loadscreen staging path for '%s'; using the source levelshot",
-			backgroundPath.c_str() );
+	int viewportWidth = 0;
+	int viewportHeight = 0;
+	if ( !Session_GetLoadingCanvasExpansion( windowAspect, expandHorizontally, expandVertically, viewportWidth, viewportHeight ) ||
+		renderSystem == NULL || !renderSystem->IsOpenGLRunning() ) {
 		return false;
 	}
 
@@ -2622,49 +2710,6 @@ static bool Session_PrepareExpandedLoadingBackground( const idStr &backgroundPat
 		}
 	}
 
-	generatedPath = Session_MakeExpandedLoadingBackgroundPath( mapName, outputWidth, outputHeight );
-	// Multiple isolated clients may generate the same resolution at once. Give
-	// every publication a CSPRNG-backed staging qpath so one client cannot
-	// truncate another client's in-progress TGA before either atomic rename.
-	// Stage below a short root-level namespace rather than beside the final
-	// loadscreen. The source and destination still share fs_savepath (and thus a
-	// filesystem), preserving atomic cross-directory rename while leaving enough
-	// path budget for legacy Windows stdio under deeply nested save roots. The
-	// 128-bit nonce is the complete collision identity; no predictable shared
-	// staging name or process-local sequence is needed.
-	const idStr stagingPath = va( "_oq4/%016llx%016llx.tmp",
-		static_cast<unsigned long long>( stagingNonce[0] ),
-		static_cast<unsigned long long>( stagingNonce[1] ) );
-	bool published = R_WriteTGA( stagingPath.c_str(), composite.Ptr(), outputWidth, outputHeight, false, "fs_savepath" );
-	if ( published ) {
-		published = fileSystem->PromoteFile( stagingPath.c_str(), generatedPath.c_str(), "fs_savepath" );
-	}
-	if ( !published ) {
-		// A short or interrupted direct write used to leave a truncated final TGA.
-		// Loading that generated file raises a fatal "incomplete file" error on
-		// the next material lookup. Keep the old final intact and fall back to the
-		// source levelshot whenever publication cannot complete (GitHub issue #102).
-		fileSystem->RemoveFileChecked( stagingPath.c_str(), "fs_savepath" );
-		common->Warning( "Could not publish expanded loading background '%s'; using the source levelshot",
-			generatedPath.c_str() );
-	} else if ( !Session_FileExistsInSearchPaths( generatedPath.c_str() ) ) {
-		// A pure server deliberately excludes loose image files even when this
-		// client just authored them under fs_savepath.  Publication alone is not
-		// permission to consume the file: require the active VFS policy to expose
-		// it before handing its name to the loading GUI/material system.  Keeping
-		// published=false leaves the caller's stock levelshot selected.
-		common->DPrintf( "Expanded loading background '%s' is unavailable through the active VFS; using the source levelshot\n",
-			generatedPath.c_str() );
-		published = false;
-	} else {
-		const idMaterial *generatedMaterial = declManager->FindMaterial( generatedPath.c_str() );
-		if ( generatedMaterial == NULL || generatedMaterial->TestMaterialFlag( MF_DEFAULTED ) ) {
-			common->DPrintf( "Expanded loading background '%s' has no usable material; using the source levelshot\n",
-				generatedPath.c_str() );
-			published = false;
-		}
-	}
-
 	R_StaticFree( centerPic );
 	if ( leftPic ) {
 		R_StaticFree( leftPic );
@@ -2679,7 +2724,64 @@ static bool Session_PrepareExpandedLoadingBackground( const idStr &backgroundPat
 		R_StaticFree( bottomPic );
 	}
 
-	return published;
+	idList<byte> pixels;
+	pixels.SetNum( outputWidth * outputHeight * 4 );
+	memcpy( pixels.Ptr(), composite.Ptr(), pixels.Num() );
+
+	// The picture is composed at the levelshot's resolution and held without
+	// mipmaps. Halve it, as a mip chain would, while it is at least twice the
+	// window, so drawing it minifies by less than two and stays smooth, and
+	// while it exceeds the device's texture size.
+	const int maxTextureSize = renderSystem->GetGLConfig().maxTextureSize;
+	while ( outputWidth >= 2 && outputHeight >= 2 &&
+		( ( outputWidth >= 2 * viewportWidth && outputHeight >= 2 * viewportHeight ) ||
+			( maxTextureSize > 0 && ( outputWidth > maxTextureSize || outputHeight > maxTextureSize ) ) ) ) {
+		const int halfWidth = outputWidth / 2;
+		const int halfHeight = outputHeight / 2;
+		byte *halved = R_ResampleTexture( pixels.Ptr(), outputWidth, outputHeight, halfWidth, halfHeight );
+		if ( halved == NULL ) {
+			break;
+		}
+		pixels.SetNum( halfWidth * halfHeight * 4 );
+		memcpy( pixels.Ptr(), halved, pixels.Num() );
+		R_StaticFree( halved );
+		outputWidth = halfWidth;
+		outputHeight = halfHeight;
+	}
+	if ( maxTextureSize > 0 && ( outputWidth > maxTextureSize || outputHeight > maxTextureSize ) ) {
+		common->DPrintf( "Expanded loading background for '%s' exceeds the texture size; using the source levelshot\n",
+			backgroundPath.c_str() );
+		return false;
+	}
+
+	sessionLoadingBackground_t &background = sessionLoadingBackground;
+	const idStr name = va( SESSION_LOADING_BACKGROUND_IMAGE "_%dx%d", outputWidth, outputHeight );
+	if ( background.imageName.Icmp( name ) != 0 ) {
+		Session_ReleaseLoadingBackground( true );
+	}
+	background.imageName = name;
+	background.pixels.Swap( pixels );
+	background.width = outputWidth;
+	background.height = outputHeight;
+
+	bool uploaded = Session_UploadLoadingBackground();
+	if ( !uploaded ) {
+		common->Warning( "Could not upload expanded loading background '%s'; using the source levelshot", name.c_str() );
+	} else {
+		const idMaterial *material = declManager->FindMaterial( name.c_str() );
+		if ( material == NULL || material->TestMaterialFlag( MF_DEFAULTED ) ) {
+			common->DPrintf( "Expanded loading background '%s' has no usable material; using the source levelshot\n",
+				name.c_str() );
+			uploaded = false;
+		}
+	}
+	if ( !uploaded ) {
+		Session_ReleaseLoadingBackground( true );
+		return false;
+	}
+	common->DPrintf( "Expanded loading background '%s' composed in memory from '%s'\n", name.c_str(), resolvedCenterPath.c_str() );
+	imageName = name;
+	return true;
 }
 
 void idSessionLocal::SetMainMenuBackgroundMontageGuiVars( void ) {
@@ -4043,7 +4145,6 @@ void idSessionLocal::Clear() {
 	renderDemoSeekMuteOwned = false;
 	renderDemoSeekRestoreMute = false;
 	renderDemoPlaybackRate = 1.0f;
-	renderDemoFrameAccumulator = 0.0;
 	renderDemoStartViewTime = 0;
 	renderDemoKnownDurationMS = -1;
 	renderDemoSeekTargetMS = 0;
@@ -4055,8 +4156,18 @@ void idSessionLocal::Clear() {
 	renderDemoRecordStartMsec = 0;
 	renderDemoRecordSegments.Clear();
 	renderDemoNextSegmentReason.Clear();
+	renderDemoRecordTimeUS = 0;
+	renderDemoRecordLastFrameClockUS = 0.0;
+	renderDemoRecordLastFrameDraw = 0;
+	renderDemoDrawSerial = 0;
 	renderDemoFrameClock = false;
 	renderDemoUserCmdHz = 0;
+	renderDemoTimedFrames = false;
+	renderDemoFrameTimeUS = 0;
+	renderDemoPrevFrameTimeUS = 0;
+	renderDemoPendingFrameDeltaUS = -1;
+	renderDemoPlayClockUS = 0.0;
+	renderDemoPlayRealClockUS = -1.0;
 	renderDemoPlayHeader.Clear();
 	renderDemoPlaySegments.Clear();
 	renderDemoPlaySegment = -1;
@@ -4073,6 +4184,7 @@ void idSessionLocal::Clear() {
 	// uiManager owns and frees these, and an engine reload frees them with it.
 	// Init finds them again; a dedicated server's session leaves them NULL.
 	guiMainMenu = guiRestartMenu = guiGameOver = guiMsg = guiTakeNotes = guiIntro = NULL;
+	guiMsgStock = guiMsgRetained = NULL;
 	guiInGame = guiLoading = guiTest = NULL;
 	guiSystem = guiSystemParent = NULL;
 	guiSystemParentHandle = NULL;
@@ -4243,6 +4355,7 @@ idSessionLocal::idSessionLocal() {
 	guiInGame = guiMainMenu = guiIntro \
 		= guiRestartMenu = guiLoading = guiGameOver = guiActive \
 		= guiTest = guiMsg = guiMsgRestore = guiTakeNotes = guiDemoMenu = NULL;
+	guiMsgStock = guiMsgRetained = NULL;
 	guiDemoList = NULL;
 	
 	menuSoundWorld = NULL;
@@ -4405,6 +4518,7 @@ void idSessionLocal::Shutdown() {
 	arenaCampaign.Shutdown();
 #endif
 	ShutdownDemoSystem();
+	Session_ReleaseLoadingBackground( false );
 
 	Clear();
 }
@@ -4892,6 +5006,26 @@ static void Session_OpenQ4GuiAction_f( const idCmdArgs &args ) {
 	}
 }
 
+/*
+================
+Session_OpenQ4GuiFocus_f
+
+openQ4: openq4_guiFocus [next|previous] steps the active classic GUI's focus
+as a menu's Down or Up arrow does and reports where it stands, touching no
+device; without an argument it only reports.
+================
+*/
+static void Session_OpenQ4GuiFocus_f( const idCmdArgs &args ) {
+	idUserInterface *gui = session->GetActiveGUI();
+	const int direction = args.Argc() != 2 ? 0 : !idStr::Icmp( args.Argv( 1 ), "next" ) ? 1 : !idStr::Icmp( args.Argv( 1 ), "previous" ) ? -1 : 0;
+	idStr report;
+	if ( gui == NULL || args.Argc() > 2 || ( args.Argc() == 2 && direction == 0 ) || !UI_StepLegacyFocus( gui, direction, report ) ) {
+		common->Printf( "usage: openq4_guiFocus [next|previous] with an active classic GUI\n" );
+		return;
+	}
+	common->Printf( "GUI_FOCUS %s\n", report.c_str() );
+}
+
 static void Session_RetainedGui_f( const idCmdArgs &args ) {
 #ifndef ID_DEDICATED
 	// While a retained home screen covers the legacy menu, or the multiplayer
@@ -4967,7 +5101,7 @@ static void Session_SystemSettings_f( const idCmdArgs &args ) {
 			return;
 		}
 	}
-	common->Printf( "usage: openq4_system open | report | back (requires ui_retainedSystem 1, or ui_retained 1 once every stock setting works on the retained page, and the normal main menu)\n" );
+	common->Printf( "usage: openq4_system open | report | back (requires ui_retained 1 or ui_retainedSystem 1, and the normal main menu)\n" );
 }
 
 // Reports the ui_retained gate, the retained screen presenting now and the
@@ -5305,6 +5439,7 @@ void idSessionLocal::StartRecordingRenderDemo( const char *demoName ) {
 
 	renderDemoRecordPath = demoName;
 	renderDemoRecordFrames = 0;
+	renderDemoRecordTimeUS = 0;
 	renderDemoRecordStartMsec = Sys_Milliseconds();
 	renderDemoRecordSegments.Clear();
 	renderDemoNextSegmentReason.Clear();
@@ -5404,9 +5539,12 @@ void idSessionLocal::StopRecordingRenderDemo() {
 		return;
 	}
 
+	// the last frame's time, where the timeline ends
+	const int durationMS = static_cast<int>( Min( renderDemoRecordTimeUS / 1000, static_cast<int64>( idMath::INT_MAX ) ) );
 	idDict end;
 	end.SetInt( "frames", renderDemoRecordFrames );
 	end.SetInt( "segments", renderDemoRecordSegments.Num() );
+	end.SetInt( "durationMS", durationMS );
 	file->WriteInt( DS_SESSION );
 	file->WriteInt( DSC_END );
 	file->WriteDict( end );
@@ -5414,22 +5552,26 @@ void idSessionLocal::StopRecordingRenderDemo() {
 	idDict summary;
 	summary.SetInt( "version", OPENQ4_RENDERDEMO_CURRENT_VERSION );
 	summary.SetInt( "frames", renderDemoRecordFrames );
+	summary.SetInt( "durationMS", durationMS );
 	summary.SetInt( "userCmdHz", common->GetUserCmdHz() );
 	summary.SetInt( "segments", renderDemoRecordSegments.Num() );
 	summary.Set( "game", fileSystem->GetActiveGameDir() );
 	for ( int i = 0; i < renderDemoRecordSegments.Num(); i++ ) {
 		const renderDemoSegment_t &segment = renderDemoRecordSegments[i];
-		summary.Set( va( "segment%d", i ), va( "%d %s %s %s", segment.startFrame, segment.reason.c_str(),
-			segment.map.c_str(), segment.entityFilter.IsEmpty() ? "-" : segment.entityFilter.c_str() ) );
+		// v13 appends the start time, which earlier readers never look for
+		summary.Set( va( "segment%d", i ), va( "%d %s %s %s %d", segment.startFrame, segment.reason.c_str(),
+			segment.map.c_str(), segment.entityFilter.IsEmpty() ? "-" : segment.entityFilter.c_str(),
+			segment.startMS >= 0 ? segment.startMS : durationMS ) );
 	}
 	const bool summarized = file->CloseWithTrailer( summary );
 	delete file;
 	common->Printf( "stopped recording %s: %d frames, %d s over %d segment%s%s.\n", path.c_str(),
-		renderDemoRecordFrames, Session_RenderDemoFramesToMS( renderDemoRecordFrames, common->GetUserCmdHz() ) / 1000,
+		renderDemoRecordFrames, durationMS / 1000,
 		renderDemoRecordSegments.Num(), renderDemoRecordSegments.Num() == 1 ? "" : "s",
 		summarized ? "" : "; its summary could not be written" );
 	renderDemoRecordSegments.Clear();
 	renderDemoRecordFrames = 0;
+	renderDemoRecordTimeUS = 0;
 }
 
 /*
@@ -5470,7 +5612,9 @@ void idSessionLocal::StopPlayingRenderDemo() {
 	renderDemoStepPending = false;
 	renderDemoFramePayloadPending = false;
 	renderDemoPlaybackRate = 1.0f;
-	renderDemoFrameAccumulator = 0.0;
+	renderDemoTimedFrames = false;
+	renderDemoPendingFrameDeltaUS = -1;
+	renderDemoPlayRealClockUS = -1.0;
 	if ( sw != NULL ) {
 		sw->SetSlowmoSpeed( 1.0f );
 		if ( sw->IsPaused() ) {
@@ -5578,8 +5722,8 @@ void idSessionLocal::StartPlayingRenderDemo( idStr demoName ) {
 	activeRenderDemoName = demoName;
 	// A campaign demo's summary gives its duration and level starts up front.
 	ResetRenderDemoPlaybackSession();
-	if ( renderDemoUserCmdHz > 0 && renderDemoPlayHeader.GetInt( "frames" ) > 0 ) {
-		cachedDuration = RenderDemoFramesToMS( renderDemoPlayHeader.GetInt( "frames" ) - 1 );
+	if ( renderDemoPlayHeader.GetInt( "durationMS", "-1" ) >= 0 ) {
+		cachedDuration = renderDemoPlayHeader.GetInt( "durationMS" );
 		renderDemoDurationName = demoName;
 	}
 	renderDemoPaused = false;
@@ -5589,7 +5733,12 @@ void idSessionLocal::StartPlayingRenderDemo( idStr demoName ) {
 	renderDemoStepPending = false;
 	renderDemoFramePayloadPending = false;
 	renderDemoPlaybackRate = 1.0f;
-	renderDemoFrameAccumulator = 0.0;
+	renderDemoTimedFrames = false;
+	renderDemoFrameTimeUS = 0;
+	renderDemoPrevFrameTimeUS = 0;
+	renderDemoPendingFrameDeltaUS = -1;
+	renderDemoPlayClockUS = 0.0;
+	renderDemoPlayRealClockUS = -1.0;
 	renderDemoStartViewTime = 0;
 	renderDemoKnownDurationMS = cachedDuration;
 	renderDemoSeekDeadlineMS = 0;
@@ -5632,7 +5781,8 @@ void idSessionLocal::StartPlayingRenderDemo( idStr demoName ) {
 	}
 	renderDemoStartViewTime = currentDemoRenderView.time;
 
-	lastDemoTic = -1;
+	// the first frame is on screen; the next one is due after its own duration
+	SyncRenderDemoPlayClock();
 	timeDemoStartTime = Sys_Milliseconds();
 	if ( restoreDemoMenu && guiDemoMenu != NULL ) {
 		// The menu chooses its visual mode in onActivate, so publish the current
@@ -5739,6 +5889,8 @@ void idSessionLocal::AVIRenderDemo( const char *_demoName ) {
 	}
 
 	BeginAVICapture( demoName.c_str() ) ;
+	// capture from here on steps a fixed interval, from the middle of one
+	SyncRenderDemoPlayClock();
 
 	// I don't understand why I need to do this twice, something
 	// strange with the nvidia swapbuffers?
@@ -6884,9 +7036,11 @@ void idSessionLocal::LoadLoadingGui( const char *mapName ) {
 	}
 
 	idStr expandedLoadingBackground;
-	if ( Session_PrepareExpandedLoadingBackground( loadingBackground, stripped.c_str(), expandedLoadingBackground ) ) {
+	if ( Session_PrepareExpandedLoadingBackground( loadingBackground, expandedLoadingBackground ) ) {
 		loadingBackground = expandedLoadingBackground;
 		loadingBackgroundCanvasFill = true;
+	} else {
+		Session_ReleaseLoadingBackground( true );
 	}
 
 	char guiMap[ MAX_STRING_CHARS ];
@@ -7331,7 +7485,7 @@ void idSessionLocal::PublishCampaignChapters( idUserInterface *gui, int select )
 	if ( gui == NULL ) {
 		return;
 	}
-	const bool retained = idStr::CheckExtension( gui->Name(), ".q4ui" );
+	const bool retained = idStr::CheckExtension( gui->Name(), ".rui" );
 	int count = 0;
 	const sessionChapter_t *chapters = Session_CampaignChapters( count );
 	idStrList saves;
@@ -7355,6 +7509,8 @@ void idSessionLocal::PublishCampaignChapters( idUserInterface *gui, int select )
 			gui->SetStateString( va( "chapter.row%d.name", i ), names[i].c_str() );
 			gui->SetStateString( va( "chapter.row%d.location", i ), language->GetString( status ) );
 			gui->SetStateBool( va( "chapter.row%d.open", i ), open );
+			// The row's save mark: a level reached that has its start autosave.
+			gui->SetStateBool( va( "chapter.row%d.saved", i ), open && saves[i].Length() > 0 );
 		} else {
 			// A locked row reads gray: the stock list cannot disable one.
 			gui->SetStateString( va( "chapters_item_%d", i ), va( open ? "%s\t%s" : S_COLOR_GRAY "%s\t" S_COLOR_GRAY "%s",
@@ -7905,6 +8061,13 @@ void idSessionLocal::ExecuteMapChange( bool noFadeWipe ) {
 			guiLoading->StateChanged( common->GetPresentationTime() );
 			Sys_GenerateEvents();
 			UpdateScreen();
+		}
+		// Diagnostic: the finished loading screen, as the screenshot command
+		// draws it while the load still owns the screen. Console commands do
+		// not run inside a load, so nothing else can capture it.
+		if ( com_captureLoadingScreen.GetBool() ) {
+			static int loadingScreenCaptures = 0;
+			cmdSystem->BufferCommandText( CMD_EXEC_NOW, va( "screenshot \"screenshots/loading_%d.tga\"", ++loadingScreenCaptures ) );
 		}
 	}
 
@@ -8503,6 +8666,121 @@ private:
 
 /*
 ===============
+idSessionLocal::SaveForSuspension
+
+Android may end a backgrounded app at any time without another call, so
+single player is saved as it leaves the foreground (ui-visual-design.md
+13.6: saves survive process death). The save is the "Suspended" autosave:
+it needs no screenshot, which a backgrounded window cannot draw, it rolls
+over each time and CONTINUE, which resumes the newest save, finds it after a
+restart. Nothing is saved, and no message is shown, where a save would be
+refused or would not resume cleanly: multiplayer, menus over a level that is
+not running, loading, demos, cinematics, death or a failed objective.
+===============
+*/
+static idCVar com_suspendSave( "com_suspendSave", "1", CVAR_SYSTEM | CVAR_ARCHIVE | CVAR_BOOL,
+	"Android: save single player as 'Suspended' whenever the app goes to the background, so the system ending it there loses no progress" );
+
+bool idSessionLocal::SaveForSuspension( void ) {
+#if defined( __ANDROID__ ) && !defined( ID_DEDICATED )
+	if ( !com_suspendSave.GetBool() || !mapSpawned || insideExecuteMapChange || IsMultiplayer() || readDemo
+			|| IsDemoPlaybackActive() || com_editorActive || game == NULL || idAsyncNetwork::IsActive() ) {
+		return false;
+	}
+	if ( game->InCinematic() || objectiveFailed || game->GetPersistentPlayerInfo( 0 ).GetInt( "health" ) <= 0
+			|| Sys_GetDriveFreeSpace( cvarSystem->GetCVarString( "fs_savepath" ) ) < 25 ) {
+		common->Printf( "Not saving for the background: the game cannot be saved now\n" );
+		return false;
+	}
+	common->Printf( "Saving 'Suspended' as the app goes to the background\n" );
+	return SaveGame( "Suspended", ST_AUTO );
+#else
+	return false;
+#endif
+}
+
+void Session_SuspendSave( void ) {
+	sessLocal.SaveForSuspension();
+}
+
+/*
+===============
+idSessionLocal::SaveForRendererRestart
+
+Another rendering API or GPU is taken up by an engine reload, and a reload ends
+the running game. Single player is carried across it in the "RendererRestart"
+autosave, like the "Suspended" save above: it needs no screenshot, shows no HUD
+message and rolls over each time. The reload's post command loads it again.
+
+Nothing is offered where a save would be refused or would not resume cleanly:
+multiplayer, loading, demos, the editor, cinematics, death or a failed
+objective. The Rendering page then asks for the main menu, as it always did.
+===============
+*/
+static const char *const SESSION_RENDERER_RESTART_SAVE = "RendererRestart";
+
+bool idSessionLocal::CanSaveForRendererRestart( void ) const {
+#ifdef ID_DEDICATED
+	return false;
+#else
+	if ( !mapSpawned || insideExecuteMapChange || loadingSaveGame || readDemo || IsDemoPlaybackActive()
+			|| com_editorActive || game == NULL || idAsyncNetwork::IsActive() ) {
+		return false;
+	}
+	return !game->InCinematic() && !objectiveFailed && game->GetPersistentPlayerInfo( 0 ).GetInt( "health" ) > 0;
+#endif
+}
+
+bool idSessionLocal::SaveForRendererRestart( void ) {
+#ifdef ID_DEDICATED
+	return false;
+#else
+	if ( !CanSaveForRendererRestart() || IsMultiplayer()
+			|| Sys_GetDriveFreeSpace( cvarSystem->GetCVarString( "fs_savepath" ) ) < 25 ) {
+		common->Printf( "Not restarting the renderer: the game cannot be saved now\n" );
+		return false;
+	}
+	common->Printf( "Saving '%s' to carry the game across the renderer restart\n", SESSION_RENDERER_RESTART_SAVE );
+	return SaveGame( SESSION_RENDERER_RESTART_SAVE, ST_AUTO ) && FinishPendingSave( true );
+#endif
+}
+
+void idSessionLocal::QueueRendererRestart( void ) {
+	idCmdArgs resume;
+	resume.AppendArg( "resumeAfterRendererRestart" );
+	cmdSystem->SetupReloadEngineMenu( resume );
+}
+
+#ifndef ID_DEDICATED
+// The reload's post command. A save that will not load leaves the player at the
+// main menu, where the reload would have put them, rather than at a blank screen.
+static void Session_ResumeAfterRendererRestart_f( const idCmdArgs &args ) {
+	if ( !sessLocal.LoadGame( SESSION_RENDERER_RESTART_SAVE ) ) {
+		common->Warning( "The game saved before the renderer restart could not be loaded" );
+		sessLocal.StartMenu();
+	}
+}
+#endif
+
+/*
+===============
+Session_AppForeground
+
+The SDL pump's return from the Android background. A multiplayer client
+reconnects when the server has dropped it while the app was away, instead of
+waiting out the time-out (ui-visual-design.md 13.6). This runs before the
+frame's network processing: a disconnect the server queued meanwhile must not
+reach the client first, which would end the match behind a message box.
+===============
+*/
+void Session_AppForeground( int suspendedMs ) {
+	if ( idAsyncNetwork::client.IsActive() ) {
+		idAsyncNetwork::client.ApplicationResumed( suspendedMs );
+	}
+}
+
+/*
+===============
 idSessionLocal::SaveGame
 ===============
 */
@@ -8669,6 +8947,9 @@ bool idSessionLocal::SaveGame( const char *saveName, saveType_t saveType ) {
 	idStr menuDescription = "^:";
 	if ( explicitSaveName && saveType == ST_REGULAR ) {
 		menuDescription += saveSlotName;
+	} else if ( explicitSaveName && saveType == ST_AUTO && !saveSlotName.Icmp( SESSION_RENDERER_RESTART_SAVE ) ) {
+		// It is not a map start: name it after the action that wrote it.
+		menuDescription += common->GetLanguageDict()->GetString( "#str_230153" );
 	} else {
 		menuDescription += common->GetLanguageDict()->GetString( Session_GetGeneratedSaveLabel( saveType ) );
 	}
@@ -9314,8 +9595,10 @@ bool idSessionLocal::ProcessEvent( const sysEvent_t *event ) {
     if (!NativeInput_SessionCurrent()) return false;
 	if ( event->evType == SE_RETAINED_UI ) return RetainedUI_ProcessEvent( event );
 	// hitting escape anywhere brings up the menu
+	// openQ4: except with the console down, where Escape first puts away the
+	// console (idConsoleLocal::KeyDownEvent); a second press brings up the menu
 	if ( !guiActive && !guiTest && !RetainedUI_IsOpen() && event->evType == SE_KEY && event->evValue2 == 1 &&
-		( event->evValue == K_ESCAPE || event->evValue == K_JOY7 || event->evValue == K_JOY8 ) ) {
+		( ( event->evValue == K_ESCAPE && !console->Active() ) || event->evValue == K_JOY7 || event->evValue == K_JOY8 ) ) {
 		console->Close();
 		if (!NativeInput_SessionCurrent()) return true;
 		if ( IsDemoPlaybackActive() ) {
@@ -9453,47 +9736,37 @@ void idSessionLocal::AdvanceRenderDemo( bool singleFrameOnly ) {
 		ProcessRenderDemoSeekBudget();
 		return;
 	}
-	if ( lastDemoTic == -1 ) {
-		lastDemoTic = latchedTicNumber - 1;
-	}
-
-	int skipFrames = 0;
-
-	if ( !aviCaptureMode && !timeDemo && !singleFrameOnly ) {
-		const int scheduledDemoTic =
-			latchedTicNumber - latchedTicNumber % USERCMD_PER_DEMO_FRAME;
-		if ( renderDemoPaused && !renderDemoStepPending ) {
-			lastDemoTic = scheduledDemoTic;
-			return;
-		}
+	// One frame for a step, a seek or a timedemo. Otherwise every frame whose
+	// time the playback clock has passed: the clock runs at the playback rate
+	// in real time (fixed steps while capturing), and the frame on screen is
+	// the first one whose time is still ahead of it. A recording keeps its own
+	// frame rate this way, whatever the rate of the display playing it.
+	static const int RENDER_DEMO_MAX_FRAMES_PER_UPDATE = 64;
+	int framesLeft = 1;
+	bool paced = false;
+	bool stepped = false;
+	if ( !timeDemo && !singleFrameOnly ) {
 		if ( renderDemoStepPending ) {
 			renderDemoStepPending = false;
-			skipFrames = 0;
+			stepped = true;
 		} else {
-			const int elapsedDemoFrames = Max( 0,
-				( scheduledDemoTic - lastDemoTic ) / USERCMD_PER_DEMO_FRAME );
-			lastDemoTic = scheduledDemoTic;
-			if ( elapsedDemoFrames <= 0 ) {
+			const double elapsedUS = RenderDemoPlaybackElapsedUS();
+			if ( renderDemoPaused ) {
 				return;
 			}
-			renderDemoFrameAccumulator +=
-				elapsedDemoFrames *
-				idMath::ClampFloat( 0.05f, 16.0f, renderDemoPlaybackRate );
-			int framesToAdvance = static_cast<int>( renderDemoFrameAccumulator );
-			if ( framesToAdvance <= 0 ) {
+			renderDemoPlayClockUS += aviCaptureMode
+				? elapsedUS
+				: elapsedUS * idMath::ClampFloat( 0.05f, 16.0f, renderDemoPlaybackRate );
+			if ( static_cast<double>( renderDemoFrameTimeUS ) > renderDemoPlayClockUS ) {
+				// the frame on screen is not over yet
 				return;
 			}
-			framesToAdvance = Min( framesToAdvance, 64 );
-			renderDemoFrameAccumulator -= framesToAdvance;
-			skipFrames = framesToAdvance - 1;
+			framesLeft = RENDER_DEMO_MAX_FRAMES_PER_UPDATE;
+			paced = true;
 		}
-		lastDemoTic = scheduledDemoTic;
-	} else {
-		// always advance a single frame with avidemo and timedemo
-		lastDemoTic = latchedTicNumber; 
 	}
 
-	while( skipFrames > -1 ) {
+	while( framesLeft > 0 ) {
 		if ( renderDemoSeeking && singleFrameOnly &&
 			 renderDemoSeekDeadlineMS > 0 &&
 			 Sys_Milliseconds() > renderDemoSeekDeadlineMS ) {
@@ -9540,9 +9813,7 @@ void idSessionLocal::AdvanceRenderDemo( bool singleFrameOnly ) {
 				StartMenu( false );
 				break;
 			}
-			renderDemoKnownDurationMS = renderDemoFrameClock
-				? RenderDemoFramesToMS( numDemoFrames - 1 )
-				: Max( 0, currentDemoRenderView.time - renderDemoStartViewTime );
+			renderDemoKnownDurationMS = RenderDemoCurrentTimeMS();
 			renderDemoDurationName = activeRenderDemoName;
 			if ( numDemoFrames != 1 ) {
 				// if the demo has a single frame (a demoShot), continuously replay
@@ -9557,8 +9828,18 @@ void idSessionLocal::AdvanceRenderDemo( bool singleFrameOnly ) {
 			if ( rw->ProcessDemoCommand( readDemo, &currentDemoRenderView, &demoTimeOffset ) ) {
 				// The render world returns true once the full frame payload has been consumed.
 				renderDemoFramePayloadPending = false;
-				skipFrames--;
-				numDemoFrames++;
+				if ( !CompleteRenderDemoFrame() ) {
+					common->Warning( "Render demo '%s' has a frame without its time; playback stopped safely",
+						activeRenderDemoName.c_str() );
+					Stop();
+					StartMenu( false );
+					break;
+				}
+				framesLeft--;
+				if ( paced && static_cast<double>( renderDemoFrameTimeUS ) > renderDemoPlayClockUS ) {
+					// this frame is still ahead of the clock: it is the one to show
+					framesLeft = 0;
+				}
 			}
 			continue;
 		}
@@ -9599,7 +9880,7 @@ void idSessionLocal::AdvanceRenderDemo( bool singleFrameOnly ) {
 					StartMenu( false );
 					break;
 				}
-				renderDemoKnownDurationMS = RenderDemoFramesToMS( numDemoFrames - 1 );
+				renderDemoKnownDurationMS = RenderDemoCurrentTimeMS();
 				renderDemoDurationName = activeRenderDemoName;
 				if ( numDemoFrames != 1 ) {
 					Stop();
@@ -9633,6 +9914,7 @@ void idSessionLocal::AdvanceRenderDemo( bool singleFrameOnly ) {
 				break;
 			}
 			renderdemoVersion = streamVersion;
+			renderDemoTimedFrames = renderdemoVersion >= OPENQ4_RENDERDEMO_FRAME_TIME_VERSION;
 			common->Printf( "reading a v%d render demo\n", renderdemoVersion );
 			// set the savegameVersion to current for render demo paths that share the savegame paths
 			savegameVersion = SAVEGAME_VERSION;
@@ -9645,8 +9927,18 @@ void idSessionLocal::AdvanceRenderDemo( bool singleFrameOnly ) {
 		break;
 	}
 
+	if ( readDemo != NULL &&
+		 ( stepped || ( paced && static_cast<double>( renderDemoFrameTimeUS ) <= renderDemoPlayClockUS ) ) ) {
+		// A step shows its frame for the frame's own duration, and playback too
+		// far behind to catch up in one update drops what it owes rather than
+		// racing through it on the following ones.
+		SyncRenderDemoPlayClock();
+	}
+
 	if ( com_showDemo.GetBool() ) {
-		common->Printf( "frame:%i DemoTic:%i latched:%i skip:%i\n", numDemoFrames, lastDemoTic, latchedTicNumber, skipFrames );
+		// the recorded view's own time shows how fast the recorded action plays
+		common->Printf( "frame:%i timeUS:%lld clockUS:%.0f view:%i\n", numDemoFrames,
+			static_cast<long long>( renderDemoFrameTimeUS ), renderDemoPlayClockUS, currentDemoRenderView.time );
 	}
 
 }
@@ -9859,7 +10151,10 @@ idSessionLocal::Draw
 ===============
 */
 void idSessionLocal::Draw() {
+	// a recording tells consecutive gameplay frames from ones a menu or a load came between
+	renderDemoDrawSerial++;
 	if ( guiActive != NULL || mapSpawned ) RetainedUI_EndInitialization();
+	Session_RestoreLoadingBackground();
 	static const int fallbackMenuDelayMs = 3000;
 	const int presentationTime = common->GetPresentationTime();
 	if ( guiDemoMenu != NULL && ( IsDemoPlaybackActive() || guiActive == guiDemoMenu ) ) {
@@ -9988,11 +10283,9 @@ void idSessionLocal::Draw() {
 
 		// save off the 2D drawing from the game, and end the recorded frame:
 		// only gameplay draws make frames, so a recording skips menus,
-		// pauses and loading screens
+		// pauses and loading screens, and every one of them is recorded
 		if ( writeDemo ) {
-			renderSystem->WriteDemoPics();
-			renderSystem->WriteDemoEndFrame();
-			renderDemoRecordFrames++;
+			EndRenderDemoRecordFrame();
 		}
 		// A pause screen that just closed releases the softened view.
 		if ( guiRetainedReleasing != NULL ) {
@@ -10159,9 +10452,29 @@ void idSessionLocal::HandleAppResume( bool afterMapLoad ) {
 	(void)afterMapLoad;
 }
 
+/*
+===============
+idSessionLocal::HandleVRFocusLoss
+
+A player whose headset came off, or whose runtime opened its own menu over
+the game, can neither see nor steer: single player pauses on the menu, as
+Escape would, and waits there for them. Multiplayer cannot pause.
+===============
+*/
+void idSessionLocal::HandleVRFocusLoss() {
+	if ( !VR_ConsumeFocusLoss() || !vr_pauseOnFocusLoss.GetBool() ) {
+		return;
+	}
+	if ( mapSpawned && !insideExecuteMapChange && !IsGUIActive() && !readDemo && !com_editorActive && !idAsyncNetwork::IsActive() ) {
+		common->Printf( "VR: the headset lost input focus; single player is paused on the menu\n" );
+		StartMenu();
+	}
+}
+
 void idSessionLocal::Frame() {
 	FinishPendingSave( false );
 	HandleAppResume( false );
+	HandleVRFocusLoss();
 	// Re-derive the playing sound world from the current focus state before the
 	// mix runs, so s_muteUnfocused can never leave audio switched off once the
 	// window is back.
@@ -10214,30 +10527,17 @@ void idSessionLocal::Frame() {
 	}
 	const int previousLatchedTicNumber = latchedTicNumber;
 
-	// Phase 2 decouples presentation from simulation: only demos / fixed-rate capture
-	// still wait for exact async tics before the foreground frame proceeds.
+	// Phase 2 decouples presentation from simulation: only fixed-rate capture
+	// still waits for exact async tics before the foreground frame proceeds.
+	// Render demos no longer do: a recording (v13) stamps every gameplay frame
+	// with its own time instead of holding the game to two tics a frame, which
+	// ran it at 30 Hz, and playback paces frames on those times
+	// (AdvanceRenderDemo).
 	int	minTic = previousLatchedTicNumber + 1;
 	if ( com_minTics.GetInteger() > 1 ) {
 		minTic = lastGameTic + com_minTics.GetInteger();
 	}
-	
-	if ( readDemo ) {
-		if ( renderDemoSeeking ) {
-			// Replay-seek work is main-thread budgeted and does not represent
-			// real-time presentation, so do not throttle it to the 30 Hz demo
-			// cadence.
-			minTic = previousLatchedTicNumber;
-		} else if ( !timeDemo && numDemoFrames != 1 ) {
-			minTic = lastDemoTic + USERCMD_PER_DEMO_FRAME;
-		} else {
-			// timedemos and demoshots will run as fast as they can, other demos
-			// will not run more than 30 hz
-			minTic = latchedTicNumber;
-		}
-	} else if ( writeDemo ) {
-		minTic = lastGameTic + USERCMD_PER_DEMO_FRAME;		// demos are recorded at 30 hz
-	}
-	
+
 	// fixedTic lets us run a forced number of usercmd each frame without timing
 	if ( com_fixedTic.GetInteger() ) {
 		minTic = previousLatchedTicNumber;
@@ -10250,7 +10550,7 @@ void idSessionLocal::Frame() {
 
 	int requestedWaitMsec = 0;
 	int actualWaitMsec = 0;
-	const bool shouldWaitForGameTic = readDemo || writeDemo || aviCaptureMode;
+	const bool shouldWaitForGameTic = aviCaptureMode;
 	const int latchedTicBeforeWait = previousLatchedTicNumber;
 
 	if ( shouldWaitForGameTic && minTic > latchedTicBeforeWait ) {
@@ -10321,12 +10621,7 @@ void idSessionLocal::Frame() {
 		numCmdsToRun = 0;
 	}
 
-	// don't let a long onDemand sound load unsync everything; a recording
-	// runs exactly USERCMD_PER_DEMO_FRAME tics a frame, and skipping tics
-	// under it would fail the fixed-tic check below
-	if ( timeHitch && writeDemo ) {
-		timeHitch = 0;
-	}
+	// don't let a long onDemand sound load unsync everything
 	if ( timeHitch ) {
 		int	skip = common->GetUserCmdTicsForMsecFloor( timeHitch );
 		lastGameTic += skip;
@@ -10339,17 +10634,7 @@ void idSessionLocal::Frame() {
 		lastGameTic = latchedTicNumber - 10;
 	}
 
-	// never use more than USERCMD_PER_DEMO_FRAME,
-	// which makes it go into slow motion when recording
-	if ( writeDemo ) {
-		int fixedTic = USERCMD_PER_DEMO_FRAME;
-		// we should have waited long enough
-		if ( numCmdsToRun < fixedTic ) {
-			common->Error( "idSessionLocal::Frame: numCmdsToRun < fixedTic" );
-		}
-		// we may need to dump older commands
-		lastGameTic = latchedTicNumber - fixedTic;
-	} else if ( com_fixedTic.GetInteger() > 0 ) {
+	if ( com_fixedTic.GetInteger() > 0 ) {
 		// this may cause commands run in a previous frame to
 		// be run again if we are going at above the real time rate
 		lastGameTic = latchedTicNumber - com_fixedTic.GetInteger();
@@ -10657,10 +10942,12 @@ void idSessionLocal::Init() {
 	cmdSystem->AddCommand( "openq4_guiSet", Session_OpenQ4GuiSet_f, CMD_FL_SYSTEM | CMD_FL_CHEAT, "sets an existing active GUI variable for engine-scripted layout validation" );
 	cmdSystem->AddCommand( "openq4_guiGet", Session_OpenQ4GuiGet_f, CMD_FL_SYSTEM | CMD_FL_CHEAT, "reports an existing active GUI variable for engine-scripted layout validation" );
 	cmdSystem->AddCommand( "openq4_guiAction", Session_OpenQ4GuiAction_f, CMD_FL_SYSTEM | CMD_FL_CHEAT, "runs a classic GUI window's onAction, or onBackAction with back, as a click would, for engine-scripted validation" );
+	cmdSystem->AddCommand( "openq4_guiFocus", Session_OpenQ4GuiFocus_f, CMD_FL_SYSTEM | CMD_FL_CHEAT, "steps a classic GUI's focus as a menu's arrow key does (next, previous) and reports the focused window, for engine-scripted validation" );
 	cmdSystem->AddCommand( "openq4_browser", Session_OpenQ4Browser_f, CMD_FL_SYSTEM | CMD_FL_CHEAT, "reports and exercises main-menu server-browser operations for engine-scripted validation" );
 	cmdSystem->AddCommand( "saveGame", SaveGame_f, CMD_FL_SYSTEM|CMD_FL_CHEAT, "saves a game" );
 	cmdSystem->AddCommand( "testAutoSave", TestAutoSave_f, CMD_FL_SYSTEM|CMD_FL_CHEAT, "writes a named autosave for developer lifecycle validation" );
 	cmdSystem->AddCommand( "loadGame", LoadGame_f, CMD_FL_SYSTEM|CMD_FL_CHEAT, "loads a game", idCmdSystem::ArgCompletion_SaveGame );
+	cmdSystem->AddCommand( "resumeAfterRendererRestart", Session_ResumeAfterRendererRestart_f, CMD_FL_SYSTEM|CMD_FL_CHEAT, "loads the game that a renderer restart saved" );
 #endif
 
 	cmdSystem->AddCommand( "takeViewNotes", TakeViewNotes_f, CMD_FL_SYSTEM, "take notes about the current map from the current view" );
@@ -10727,7 +11014,10 @@ void idSessionLocal::Init() {
 		idAsyncNetwork::client.serverList.GUIConfig( guiMainMenu, "serverList" );
 		guiRestartMenu = uiManager->FindGui( "guis/restart.gui", true, false, true );
 		guiGameOver = uiManager->FindGui( "guis/gameover.gui", true, false, true );
-		guiMsg = uiManager->FindGui( "guis/msg.gui", true, false, true );
+		// The stock box; a box that the retained pop-up can present finds that
+		// when it is first needed (SelectMessageBox).
+		guiMsgStock = guiMsg = uiManager->FindGui( "guis/msg.gui", true, false, true );
+		guiMsgRetained = NULL;
 		guiTakeNotes = uiManager->FindGui( "guis/takeNotes.gui", true, false, true );
 		guiIntro = uiManager->FindGui( "guis/intro.gui", true, false, true );
 		InitDemoSystem();

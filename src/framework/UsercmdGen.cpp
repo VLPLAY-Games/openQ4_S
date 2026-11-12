@@ -32,6 +32,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "NativeInputDispatch.h"
 #include "PresentationLook.h"
 #include "Session_local.h"
+#include "VRSystemLocal.h"
 #include "../idlib/NumericString.h"
 #include "../ui/RetainedUI.h"
 
@@ -840,7 +841,13 @@ idUsercmdGenLocal::GetZoomLookSensitivityScale
 =================
 */
 float idUsercmdGenLocal::GetZoomLookSensitivityScale( void ) const {
-	const int zoomedSlowPercent = cvarSystem->GetCVarInteger( "pm_isZoomed" );
+	// openQ4: the game module registers this cvar; find it once it exists
+	// rather than by name for every usercmd and every late-look sample
+	static idCVar *zoomedCVar = NULL;
+	if ( zoomedCVar == NULL ) {
+		zoomedCVar = cvarSystem->Find( "pm_isZoomed" );
+	}
+	const int zoomedSlowPercent = zoomedCVar != NULL ? zoomedCVar->GetInteger() : 0;
 	if ( zoomedSlowPercent <= 0 ) {
 		return 1.0f;
 	}
@@ -1338,6 +1345,7 @@ void idUsercmdGenLocal::MakeCurrent( void ) {
 			if ( vrInput.crouch ) {
 				cmd.buttons |= BUTTON_VRCROUCH;
 			}
+			cmd.buttons |= BUTTON_VRAIM;
 		}
 	} else {
 		mouseDx = 0;
@@ -1419,6 +1427,8 @@ void idUsercmdGenLocal::InitForNewMap( void ) {
 
 	Clear();
 	ClearAngles();
+	// openQ4 VR: the tracked aim starts again from the zeroed angles
+	VR_UsercmdAnglesCleared();
 }
 
 /*

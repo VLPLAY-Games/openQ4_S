@@ -269,6 +269,22 @@ const char *r_multiSamplesArgs[] = { "0", "2", "4", "8", "16", NULL };
 idCVar r_inhibitFragmentProgram( "r_inhibitFragmentProgram", "0", CVAR_RENDERER | CVAR_BOOL, "ignore the fragment program extension" );
 idCVar r_glDriver( "r_glDriver", "", CVAR_RENDERER, "\"opengl32\", etc." );
 idCVar r_useLightPortalFlow( "r_useLightPortalFlow", "1", CVAR_RENDERER | CVAR_BOOL, "use a more precise area reference determination" );
+// Where multisample textures are missing (Apple's OpenGL 2.1 context) the
+// window is the only MSAA there is, so that platform keeps it by default.
+#if defined( __APPLE__ )
+#define R_GL_WINDOW_MULTISAMPLE_DEFAULT "1"
+#else
+#define R_GL_WINDOW_MULTISAMPLE_DEFAULT "0"
+#endif
+idCVar r_glWindowMultisample( "r_glWindowMultisample", R_GL_WINDOW_MULTISAMPLE_DEFAULT, CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL,
+	"OpenGL: 0 = the window is single-sample and 3D views are multisampled in render targets, so r_multiSamples applies to the running renderer; 1 = the window itself is created with r_multiSamples samples, and an MSAA change needs a renderer restart. Read when the renderer starts; OpenGL ES always uses 1" );
+// Latched when the device creates its window.
+static bool r_windowCarriesMultisampling = false;
+bool R_WindowCarriesMultisampling( void ) {
+	return r_windowCarriesMultisampling;
+}
+int R_WindowMultiSamplesForNewDevice( void );
+
 idCVar r_multiSamples( "r_multiSamples", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "MSAA sample count: 0 = off, 2/4/8/16 = supported quality steps", 0, 16, idCmdSystem::ArgCompletion_String<r_multiSamplesArgs> );
 idCVar r_postAA( "r_postAA", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "post AA mode: 0 = off, 1 = SMAA 1x medium, 2 = SMAA 1x high, 3 = SMAA 1x ultra, 4 = SMAA 1x colour-edge prototype", 0, 4, idCmdSystem::ArgCompletion_Integer<0,4> );
 idCVar r_postAAStatePoisonTest( "r_postAAStatePoisonTest", "0", CVAR_RENDERER | CVAR_BOOL, "intentionally dirty GL texture/client state before SMAA post-AA draws for validation" );
@@ -436,7 +452,7 @@ idCVar r_shadowMapProjectedCSM( "r_shadowMapProjectedCSM", "1", CVAR_RENDERER | 
 idCVar r_shadowMapDepthCompare( "r_shadowMapDepthCompare", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "use hardware comparison sampling for projected depth shadow maps when supported; PCSS-lite (r_shadowMapFilterMode 2) implies the manual path" );
 idCVar r_shadowMapTexelBiasScale( "r_shadowMapTexelBiasScale", "0.45", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "texel-aware receiver bias scale for projected and point shadow maps", 0.0f, 8.0f );
 idCVar r_shadowMapNormalOffsetScale( "r_shadowMapNormalOffsetScale", "1.0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "normal-offset shadow bias in shadow texels; reduces slope acne but excessive values can move contact edges (point-light use is bounded by r_shadowMapPointMaxWorldBias)", 0.0f, 8.0f );
-idCVar r_shadowMapCasterCulling( "r_shadowMapCasterCulling", "2", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "shadow caster face culling: 0 = always two-sided, 1 = force material-oriented near faces, 2 = automatic (near faces for sealed hulls outside the light, two-sided for open/uncertain/enclosing geometry)", 0, 2, idCmdSystem::ArgCompletion_Integer<0,2> );
+idCVar r_shadowMapCasterCulling( "r_shadowMapCasterCulling", "2", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "shadow caster face culling: 0 = always two-sided, 1 = force material-oriented near faces, 2 = automatic (near faces for sealed hulls outside the light, the faces a stencil volume is built from for open geometry: those turned away from the light), 3 = the faces turned away from the light for every caster, 4 = the earlier automatic mode (near faces for sealed hulls, two-sided for everything else)", 0, 4, idCmdSystem::ArgCompletion_Integer<0,4> );
 idCVar r_shadowMapReceiverPlaneBias( "r_shadowMapReceiverPlaneBias", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "enable the experimental derivative receiver-plane depth-bias approximation for projected shadow filters" );
 idCVar r_shadowMapFilterTaps( "r_shadowMapFilterTaps", "9", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "projected-light PCF tap budget: 1, 5, 9, or 13", 1, 13, idCmdSystem::ArgCompletion_Integer<1,13> );
 idCVar r_shadowMapPointFilterTaps( "r_shadowMapPointFilterTaps", "9", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "point-light PCF tap budget: 1, 5, 9, or 13", 1, 13, idCmdSystem::ArgCompletion_Integer<1,13> );
@@ -450,20 +466,27 @@ idCVar r_shadowMapPointLights( "r_shadowMapPointLights", "1", CVAR_RENDERER | CV
 idCVar r_shadowMapPointSize( "r_shadowMapPointSize", "512", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "point-light cube face resolution; separate from r_shadowMapSize because a cube costs six faces of color+depth storage per cached light", 128, 2048, idCmdSystem::ArgCompletion_Integer<128,2048> );
 idCVar r_shadowMapAtlasSize( "r_shadowMapAtlasSize", "4096", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "edge size of the shared projected-light shadow atlas; cached lights occupy r_shadowMapSize-sized cells inside it (CSM lights use a 2x2 cell block)", 2048, 16384, idCmdSystem::ArgCompletion_Integer<2048,16384> );
 idCVar r_shadowMapPointDepthCompare( "r_shadowMapPointDepthCompare", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "use hardware comparison sampling for point-light depth cubemaps when GLSL 1.30 support is available" );
+idCVar r_shadowMapPointDepthOnly( "r_shadowMapPointDepthOnly", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "OpenGL: keep point-light shadow cubes as depth only while nothing samples their packed colour cube, which halves their memory. The colour cube returns by itself without hardware compare, under the modern renderers, the shared interaction stream or the debug overlay; 0 always keeps it" );
 idCVar r_shadowMapStableAlphaHash( "r_shadowMapStableAlphaHash", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "seed shadow-map hashed alpha from stable world coordinates instead of screen-space fragments" );
 idCVar r_shadowMapMaxUpdatesPerView( "r_shadowMapMaxUpdatesPerView", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "maximum shadow-map passes rendered per backend view, 0 = unlimited", 0, 1024, idCmdSystem::ArgCompletion_Integer<0,1024> );
 idCVar r_shadowMapSkipStencilShadows( "r_shadowMapSkipStencilShadows", "1", CVAR_RENDERER | CVAR_BOOL, "skip stencil shadow volume generation and linking for lights that will render shadow maps; a light that fails a shadow-map pass restores its volumes on the next frame" );
 idCVar r_shadowMapStaticCache( "r_shadowMapStaticCache", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "reuse resident shadow maps for static-only lights instead of rerendering every backend view" );
 idCVar r_shadowMapStaticHysteresisFrames( "r_shadowMapStaticHysteresisFrames", "2", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "frames to wait after dynamic casters disappear before static shadow-map reuse", 0, 120, idCmdSystem::ArgCompletion_Integer<0,120> );
 idCVar r_shadowMapResidentFrames( "r_shadowMapResidentFrames", "120", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "frames a resident static shadow map may remain unused before its cache slot can be expired", 1, 3600, idCmdSystem::ArgCompletion_Integer<1,3600> );
-idCVar r_shadowMapProjectedCacheSize( "r_shadowMapProjectedCacheSize", "8", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "static projected-light shadow-map cache slots", 0, 16, idCmdSystem::ArgCompletion_Integer<0,16> );
-idCVar r_shadowMapPointCacheSize( "r_shadowMapPointCacheSize", "12", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "static point-light cubemap cache slots", 0, 16, idCmdSystem::ArgCompletion_Integer<0,16> );
+idCVar r_shadowMapProjectedCacheSize( "r_shadowMapProjectedCacheSize", "8", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "how many full-size (r_shadowMapSize) static projected-light shadow maps the cache keeps; a map cut down for a crowded view takes its share of one, and 0 turns the cache off. Bounds the cache's memory on Vulkan; OpenGL caches into the atlas, which is its bound", 0, 16, idCmdSystem::ArgCompletion_Integer<0,16> );
+idCVar r_shadowMapPointCacheSize( "r_shadowMapPointCacheSize", "64", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "static point-light cubemap cache slots; a dense Quake 4 view lights forty point lights at once, and one without a slot re-renders its cube every frame. r_shadowMapPointCacheMegs bounds the memory the slots may take", 0, 96, idCmdSystem::ArgCompletion_Integer<0,96> );
+idCVar r_shadowMapCacheMovingLights( "r_shadowMapCacheMovingLights", "0", CVAR_RENDERER | CVAR_BOOL, "send a moving light's shadow maps through the static cache like a still light's, for comparison: each view then publishes a map the next cannot use" );
+idCVar r_shadowMapStencilFallbackViews( "r_shadowMapStencilFallbackViews", "240", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "views a light whose shadow map failed goes through without another failure before it stops building stencil volumes for its fallback again; 0 keeps building them for the rest of the level", 0, 100000 );
+idCVar r_shadowMapPointCacheMegs( "r_shadowMapPointCacheMegs", "512", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "video memory the static point-light cubemap cache may fill, in MiB: slots beyond it stay unused, except that the first twelve are always available. Vulkan allows the scratch cubes of a view (uncached and composed point lights) the same figure again", 64, 8192 );
+idCVar r_shadowMapStaticCutouts( "r_shadowMapStaticCutouts", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "cache cutout (alpha-tested) shadow casters with the static shadow depth when their coverage cannot change: constant material registers, ordinary alpha images, no deform. 0 draws every cutout caster every view, over the cached depth" );
+idCVar r_shadowMapPointCompose( "r_shadowMapPointCompose", "1", CVAR_RENDERER | CVAR_BOOL, "draw a point light's moving and cutout casters over a copy of its cached static cube instead of re-rendering all six faces every view; 0 restores the full re-render for comparison" );
 idCVar r_shadowMapCacheCSM( "r_shadowMapCacheCSM", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "allow static-cache reuse for view-fitted CSM/global shadow-map passes" );
 idCVar r_shadowMapTranslucentFilterRadius( "r_shadowMapTranslucentFilterRadius", "-1.0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "translucent shadow moment filter radius in texels, -1 = inherit opaque shadow radius", -1.0f, 8.0f );
 idCVar r_shadowMapTranslucentMinVariance( "r_shadowMapTranslucentMinVariance", "0.00001", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "minimum variance used when resolving translucent shadow moments", 0.000001f, 0.01f );
 idCVar r_shadowMapTranslucentBleedReduction( "r_shadowMapTranslucentBleedReduction", "0.0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "light-bleed reduction applied to translucent shadow moment resolve", 0.0f, 0.95f );
 idCVar r_shadowMapGpuSyncTimings( "r_shadowMapGpuSyncTimings", "0", CVAR_RENDERER | CVAR_BOOL, "diagnostic-only: glFinish around shadow-map passes to report GPU-synchronized milliseconds" );
 idCVar r_shadowMapGpuTimerQueries( "r_shadowMapGpuTimerQueries", "1", CVAR_RENDERER | CVAR_BOOL, "use non-blocking GL timer queries for shadow-map GPU diagnostics when available" );
+idCVar r_heatHazeDepthReject( "r_heatHazeDepthReject", "1", CVAR_RENDERER | CVAR_BOOL, "keep heat haze from refracting the first-person weapon and other geometry in front of the haze: a refracted sample nearer than the haze reads the undistorted pixel instead" );
 idCVar r_softParticles( "r_softParticles", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "depth-fade eligible BSE particles against opaque scene depth when GLSL is available" );
 idCVar r_softParticleFadeDistance( "r_softParticleFadeDistance", "64", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "world-unit distance over which r_softParticles fades particle intersections", 1.0f, 512.0f );
 idCVar r_enhancedMaterials( "r_enhancedMaterials", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "use enhanced GLSL interaction shading for existing materials when supported" );
@@ -571,6 +594,25 @@ idCVar r_renderer( "r_renderer", "best", CVAR_RENDERER | CVAR_ARCHIVE, "hardware
 idCVar r_actualRenderer( "r_actualRenderer", "UNINITIALIZED", CVAR_RENDERER | CVAR_ROM, "actual active renderer backend after request/fallback selection" );
 idCVar r_glTier( "r_glTier", "auto", CVAR_RENDERER | CVAR_ARCHIVE, "OpenGL renderer tier: auto, legacy, gl33, gl41, gl43, gl45, gl46", r_glTierArgs, idCmdSystem::ArgCompletion_String<r_glTierArgs> );
 idCVar r_glesContext( "r_glesContext", "0", CVAR_RENDERER | CVAR_BOOL | CVAR_ARCHIVE, "request an OpenGL ES 3.0 context instead of desktop GL; bring-up aid for the Android GLES backend, on desktop this needs an EGL/GLES translation layer (ANGLE)" );
+
+/*
+==================
+R_WindowMultiSamplesForNewDevice
+
+The samples a new window is asked for, and the latch for the device that owns
+it. An OpenGL ES window always carries them: its targets may not be
+multisampled textures. Desktop OpenGL carries them only where
+r_glWindowMultisample says so.
+==================
+*/
+int R_WindowMultiSamplesForNewDevice( void ) {
+#if defined( __ANDROID__ )
+	r_windowCarriesMultisampling = true;
+#else
+	r_windowCarriesMultisampling = r_glesContext.GetBool() || r_glWindowMultisample.GetBool();
+#endif
+	return r_windowCarriesMultisampling ? r_multiSamples.GetInteger() : 0;
+}
 idCVar r_glCoreProfileFirst( "r_glCoreProfileFirst", "0", CVAR_RENDERER | CVAR_BOOL, "with a forced r_glTier, try core-profile contexts before the compatibility fallback; needed to reach the modern path on drivers that cap compatibility below 3.3 (macOS caps it at 2.1), diagnostic only" );
 idCVar r_vkValidation( "r_vkValidation", "0", CVAR_RENDERER | CVAR_BOOL, "enable Vulkan validation layers for the Vulkan renderer module and rendererVkProbe" );
 idCVar r_vkSampleLocations( "r_vkSampleLocations", "1", CVAR_RENDERER | CVAR_BOOL, "use lower-left standard MSAA locations when supported; read at Vulkan initialization" );
@@ -734,6 +776,7 @@ idCVar r_shadowMapPolygonFactor( "r_shadowMapPolygonFactor", "0.25", CVAR_RENDER
 idCVar r_shadowMapPolygonOffset( "r_shadowMapPolygonOffset", "0.5", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "constant depth bias used when rendering shadow-map casters", 0.0f, 64.0f );
 static idCVar r_shadowMapContactQualityMigrated( "r_shadowMapContactQualityMigrated", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "one-time migration flag for legacy broad shadow filtering defaults" );
 static idCVar r_shadowMapFilterDefaultsMigrated( "r_shadowMapFilterDefaultsMigrated", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "one-time migration flag for the legacy fixed-PCF projected shadow filter defaults" );
+static idCVar r_shadowMapPointCacheDefaultsMigrated( "r_shadowMapPointCacheDefaultsMigrated", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "one-time migration flag for the legacy twelve-slot point shadow cache" );
 static idCVar r_pbrMaterialsDefaultMigrated( "r_pbrMaterialsDefaultMigrated", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "one-time migration flag for the PBR material default" );
 static idCVar r_temporalAADefaultMigrated( "r_temporalAADefaultMigrated", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "one-time migration flag for the automatic temporal AA default" );
 extern idCVar r_temporalAA;
@@ -2083,7 +2126,7 @@ static bool R_CreateOpenGLContext( bool legacyPolicy, bool forceWindow, char *er
 		glConfig.vidHeight = parms.height;
 		parms.borderless = !parms.hiddenWindow && !parms.fullScreen && r_borderless.GetBool();
 		parms.displayHz = r_displayRefresh.GetInteger();
-		parms.multiSamples = r_multiSamples.GetInteger();
+		parms.multiSamples = R_WindowMultiSamplesForNewDevice();
 		parms.stereo = false;
 		if ( !legacyPolicy && r_recoverableWindowRequest != NULL ) {
 			const renderWindowParms_t &requested = r_recoverableWindowRequest->parms;
@@ -2266,6 +2309,14 @@ static bool R_InitOpenGLInternal( bool legacyPolicy, bool forceWindow, char *err
 	R_GLDebugOutput_FlushMessages();
 
 	R_RendererUpload_Init( glConfig.backendCaps );
+
+	// A single-sample window leaves MSAA to multisample textures. A context
+	// without them (an old driver, a 2.1 context) then draws without MSAA, and
+	// the player needs to know which setting brings it back.
+	if ( !r_windowCarriesMultisampling && r_multiSamples.GetInteger() > 1 && glTexImage2DMultisample == NULL ) {
+		common->Printf( "^3r_multiSamples %d has no effect: this OpenGL context has no multisample textures and its window is single-sample. Set r_glWindowMultisample 1 and restart the renderer to multisample the window instead^0\n",
+			r_multiSamples.GetInteger() );
+	}
 	R_GpuSkinning_ContractInit( glConfig.backendCaps );
 
 	// allocate the vertex array range or vertex objects
@@ -3927,7 +3978,7 @@ void R_ScreenShot_f( const idCmdArgs &args ) {
 		}
 		idList<byte> pixels;
 		if ( !image->ReadPixelsRGBA8( pixels ) ) {
-			common->Printf( "screenshot image: readback requires a loaded single-sample RGBA8 2D image up to 8192x8192\n" );
+			common->Printf( "screenshot image: readback requires a loaded single-sample RGBA8 or RGBA16F 2D image up to 8192x8192\n" );
 			return;
 		}
 		const int width = image->GetUploadWidth(), height = image->GetUploadHeight();
@@ -4674,9 +4725,9 @@ static bool R_GfxInfoObservedMSAA( const int requestedMSAA, const int glMaxSampl
 			// image allocation clamps a multisample texture to the limit
 			msaaReason = "gl-max-clamp";
 		} else {
-			// A target keeps the count it was created with: an r_multiSamples
-			// change waits for vid_restart or a map load, and a refused count
-			// retries lower.
+			// A target keeps the count it was created with: the game rebuilds
+			// its targets on the first scene after an r_multiSamples change,
+			// and a refused count retries lower.
 			msaaReason = "scene-target";
 		}
 	} else {
@@ -5822,6 +5873,83 @@ static GLenum R_ClearPendingGLErrors( void ) {
 	return lastErr;
 }
 
+/*
+=================
+R_TryDisplayTransition
+
+Applies a strict display request to the running device. The window changes
+mode, size, display, borders or swap interval in place: OpenGL keeps its
+context and Vulkan rebuilds its swapchain. Every image, buffer and font atlas
+and the world's derived data stay, which is what a full restart spends its
+time rebuilding, and videoRestartCount stays where it was.
+
+The request is refused before anything changes when it needs a new device: a
+window's sample count is fixed when its context is created. A failure once the
+window has started to change leaves the device running; the caller restores
+the display it captured, or restarts the device on the request.
+=================
+*/
+bool R_TryDisplayTransition( const renderWindowRequest_t *request, char *error, int errorSize ) {
+	if ( R_ImagePolicyActive() ) { R_ImagePolicyObserveError( "Reentrant display transition during image policy work" ); return R_RendererRestartError( error, errorSize, "Image policy restart is active" ); }
+	if ( error != NULL && errorSize > 0 ) error[0] = '\0';
+	if ( request == NULL ) return R_RendererRestartError( error, errorSize, "A display request is required" );
+	R_RenderThread_Sync( "display transition" );
+	if ( r_recoverableRendererRestart ) return R_RendererRestartError( error, errorSize, "A renderer device operation is already in progress" );
+	if ( !glConfig.isInitialized || r_recoverableRendererRestore || frameData == NULL || frameData->cmdHead == NULL ||
+		frameData->cmdHead->commandId != RC_NOP || frameData->cmdHead->next != NULL )
+		return R_RendererRestartError( error, errorSize, "A display transition requires a running renderer with its commands submitted" );
+	const renderWindowRequest_t immutable = *request;
+	if ( immutable.parms.multiSamples != R_NormalizeMultiSamplesValue( immutable.parms.multiSamples ) ||
+		immutable.parms.displayHz < 0 || immutable.parms.displayHz > 1000 )
+		return R_RendererRestartError( error, errorSize, "Requested display samples or refresh rate are invalid" );
+	if ( immutable.displayIndex < -1 || immutable.swapInterval < -1 || immutable.swapInterval > 1 ||
+		immutable.parms.stereo || ( immutable.parms.hiddenWindow && ( immutable.parms.fullScreen || immutable.parms.borderless ) ) ||
+		( immutable.parms.fullScreen && immutable.parms.borderless ) )
+		return R_RendererRestartError( error, errorSize, "Requested display policy is invalid" );
+	renderDisplayPresentation_t before = {};
+	R_GetDisplayPresentation( &before );
+	if ( !before.available || !( before.parametersValid & RDP_PARAMETER_SAMPLES ) || before.samples != immutable.parms.multiSamples )
+		return R_RendererRestartError( error, errorSize, "The requested window samples need a new device" );
+
+	struct Scope {
+		explicit Scope( const renderWindowRequest_t *request ) {
+			r_recoverableRendererRestart = true; r_forceWindowRendererRestart = false; r_recoverableWindowRequest = request;
+		}
+		~Scope() { r_recoverableRendererRestart = false; r_forceWindowRendererRestart = false; r_recoverableWindowRequest = NULL; }
+	} scope( &immutable );
+	glimpParms_t parms;
+	parms.width = immutable.parms.width;
+	parms.height = immutable.parms.height;
+	parms.fullScreen = immutable.parms.fullScreen;
+	parms.borderless = immutable.parms.borderless;
+	parms.hiddenWindow = immutable.parms.hiddenWindow;
+	parms.displayHz = immutable.parms.displayHz;
+	parms.multiSamples = immutable.parms.multiSamples;
+	parms.stereo = false;
+	bool applied = false;
+	try {
+		// Inside the scope both back ends apply the strict request and its swap
+		// interval, and report a new presentation generation.
+		applied = GLimp_SetScreenParms( parms );
+	} catch ( const rendererRestartFailure_t &failure ) {
+		return R_RendererRestartError( error, errorSize, failure.reason.c_str() );
+	}
+	if ( !applied ) return R_RendererRestartError( error, errorSize, "The running device could not take the requested display" );
+	(void)R_ClearPendingGLErrors();
+	// The context survived, but the UI viewport may have changed. Re-rasterise
+	// the fixed-cell sheet at the new display scale.
+	//
+	// videoRestartCount does not advance: it tells its readers that every GPU
+	// resource was lost, and none was. The retained interface answers it by
+	// shutting down and reloading every document, which held the first frame
+	// after a transition for seconds (and for over half a minute on a busy
+	// machine). Whatever depends on the output size already follows the size
+	// itself, as it does when the window is resized by hand; the caller
+	// re-rasterises the classic GUI fonts, which are sized for the display.
+	R_RefreshConsoleFontAtlas();
+	return true;
+}
+
 void R_VidRestart_f( const idCmdArgs &args ) {
 	R_RenderThread_Sync( "vid_restart" );
 	int	err;
@@ -5876,7 +6004,8 @@ void R_VidRestart_f( const idCmdArgs &args ) {
 		}
 		parms.borderless = !parms.hiddenWindow && !parms.fullScreen && r_borderless.GetBool();
 		parms.displayHz = r_displayRefresh.GetInteger();
-		parms.multiSamples = r_multiSamples.GetInteger();
+		// the window keeps the samples its device gave it
+		parms.multiSamples = r_windowCarriesMultisampling ? r_multiSamples.GetInteger() : 0;
 		parms.stereo = false;
 		if ( !GLimp_SetScreenParms( parms ) ) {
 			common->Printf( "^3vid_restart partial failed, retrying full restart\n" );
@@ -6048,6 +6177,27 @@ static void R_MigrateLegacyShadowMapContactQuality( void ) {
 
 /*
 ==================
+R_MigrateLegacyShadowMapPointCacheSize
+
+The point cache held twelve cubes, a third of the point lights one dense stock
+view shows; every light past the twelfth re-rendered six faces each frame. An
+archived profile keeps that twelve, so move exactly the old default once; any
+other count is a player's choice and is kept.
+==================
+*/
+static void R_MigrateLegacyShadowMapPointCacheSize( void ) {
+	if ( r_shadowMapPointCacheDefaultsMigrated.GetBool() ) {
+		return;
+	}
+	if ( r_shadowMapPointCacheSize.GetInteger() == 12 ) {
+		common->Printf( "Migrating the legacy point shadow cache: 64 slots within r_shadowMapPointCacheMegs\n" );
+		r_shadowMapPointCacheSize.SetInteger( 64 );
+	}
+	r_shadowMapPointCacheDefaultsMigrated.SetBool( true );
+}
+
+/*
+==================
 R_MigrateLegacyShadowMapFilterDefaults
 
 Projected shadow maps now default to PCSS-lite with a 2 texel minimum radius.
@@ -6058,6 +6208,8 @@ Runs after the contact-quality migration, which can itself leave the old pair.
 ==================
 */
 static void R_MigrateLegacyShadowMapFilterDefaults( void ) {
+	// the other shadow default that moved; it keeps its own one-time flag
+	R_MigrateLegacyShadowMapPointCacheSize();
 	if ( r_shadowMapFilterDefaultsMigrated.GetBool() ) {
 		return;
 	}
@@ -6573,6 +6725,11 @@ static bool R_InitRendererDevice( bool legacyPolicy, bool forceWindow, char *err
 			common->Printf( "glGetError() = 0x%x\n", err );
 		}
 #endif
+		// Every image the device holds was just built under the image settings
+		// in effect, and one loaded later reads them then. A change made
+		// before this start is therefore applied: swallow its modified state so
+		// the next frame's check does not reload every image a second time.
+		globalImages->PrimeCvars();
 	}
 	r_initialRendererDevicePending = false;
 	if ( glConfig.isInitialized ) {

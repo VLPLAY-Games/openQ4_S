@@ -85,9 +85,10 @@ SECTIONS = (
     ("crosshair", "#str_231543", (
         choice("game_customcrosshair", "#str_200307", "g_crosshairCustom", "#str_200296", ("0", "1")),
         ("crosshair", "game_crosshair", "#str_200308", "gameCrosshair", None),
-        choice("game_crosshairsize", "#str_201010", "g_crosshairSize", "#str_201022", (16, 24, 32, 40, 48)),
-        choice("game_crosshaircolor", "#str_200299", "g_crosshairColor", "#str_229942", CROSSHAIR_COLORS),
+        choice("game_crosshairsize", "#str_231764", "g_crosshairSize", "#str_201022", (16, 24, 32, 40, 48)),
+        choice("game_crosshaircolor", "#str_231765", "g_crosshairColor", "#str_229942", CROSSHAIR_COLORS),
         toggle("game_hitmarker", "#str_229979", "hud_hitMarker"),
+        toggle("game_crosshairanimated", "#str_231763", "hud_crosshairAnimated"),
     )),
     ("hud", "#str_231235", (
         choice("game_hudlayout", "#str_231236", "ui_hudLayout", "#str_231237", (0, 1, 2, 3)),

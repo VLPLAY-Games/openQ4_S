@@ -227,6 +227,25 @@ static bool openQ4_ExtractKeyBindingIcon( const char *escape, int &keyNum, float
 	return keyNum >= 0 && keyNum <= 0xff;
 }
 
+static bool openQ4_PlainKeyNames( const char *text, idStr &plain ) {
+	plain = text != NULL ? text : "";
+	bool changed = false;
+	for ( int at = plain.Find( "^i" ); at >= 0; at = plain.Find( "^i", true, at + 1 ) ) {
+		int keyNum = 0;
+		if ( at + 5 > plain.Length() || !openQ4_ExtractKeyBindingIcon( plain.c_str() + at, keyNum ) ) {
+			continue;
+		}
+		idStr name = idKeyInput::KeyNumToString( keyNum, true );
+		if ( name.Length() == 1 ) {
+			name.ToUpper();
+		}
+		plain = plain.Left( at ) + name + plain.Right( plain.Length() - at - 5 );
+		at += name.Length() - 1;
+		changed = true;
+	}
+	return changed;
+}
+
 static void openQ4_GetKeyBindingIconInfo( int keyNum, q4KeyBindingIconInfo_t &info ) {
 	info.kind = Q4_KEY_BINDING_KEYBOARD;
 	info.detail = keyNum;
@@ -1134,6 +1153,13 @@ int idDeviceContext::FindFont( const char *name ) {
 		return index;
 	} else {
 		common->Printf( "Could not register font %s [%s]\n", name, fileName.c_str() );
+		// The unnamed placeholder can never match a later lookup, so keeping it
+		// grew the list on every retry and made ReloadFonts report a failure
+		// after every vid_restart. It is the last entry, so removing it moves
+		// nothing; entry 0 stays as the SetFont fallback slot.
+		if ( index > 0 ) {
+			fonts.RemoveIndex( index );
+		}
 		return -1;
 	}
 }
@@ -1248,6 +1274,24 @@ void idDeviceContext::EnsureFontsCurrent() {
 	if ( !ReloadFonts() ) {
 		common->Warning( "could not rebuild every GUI font" );
 	}
+}
+
+/*
+================
+idDeviceContext::DisplayChanged
+
+A display change applied to the running device (R_TryDisplayTransition) leaves
+the renderer's restart count alone, because no GPU resource was lost. These
+fonts are still rasterised for the old display height, so forget which restart
+they were built for: EnsureFontsCurrent rebuilds them on their next use.
+================
+*/
+void idDeviceContext::DisplayChanged() {
+	fontsVideoRestartCount = -1;
+}
+
+void UI_ClassicFontsDisplayChanged( void ) {
+	idDeviceContext::DisplayChanged();
 }
 
 void idDeviceContext::SetFont( int num ) {
@@ -1404,6 +1448,13 @@ float idDeviceContext::GetKeyBindingIconWidth( int keyNum, float textScale, floa
 		const float labelWidth = static_cast<float>( TextWidth( info.label, labelScale, -1 ) );
 		const float maximumWidth = height * ( info.kind == Q4_KEY_BINDING_PAD_GENERIC ? 1.90f : 2.20f );
 		width = Min( maximumWidth, Max( width, labelWidth + sidePadding * 2.0f ) );
+		if ( keyBindingWideLabels && info.kind == Q4_KEY_BINDING_KEYBOARD ) {
+			// A settings row: the keycap takes its name at the size the draw
+			// path gives a label that fits (0.68 of the text scale against the
+			// 0.54 measured above), up to four heights.
+			const float drawnWidth = labelWidth * ( 0.68f / 0.54f );
+			width = Max( width, Min( height * 4.0f, drawnWidth + sidePadding * 2.0f ) );
+		}
 		SetFontByScale( textScale );
 	}
 
@@ -1676,6 +1727,10 @@ void idDeviceContext::DrawKeyBindingIcon( int keyNum, float x, float baselineY, 
 	SetFontByScale( textScale );
 }
 
+bool idDeviceContext::PlainKeyNames( const char *text, idStr &plain ) {
+	return openQ4_PlainKeyNames( text, plain );
+}
+
 void idDeviceContext::RegisterIcon( const char *code, const char *shader, int x, int y, int w, int h ) {
 	if ( code == NULL || shader == NULL || code[0] == '\0' || shader[0] == '\0' ) {
 		return;
@@ -1801,6 +1856,7 @@ void idDeviceContext::Clear() {
 	aspectCorrect = true;
 	drawTextColor.Zero();
 	drawTextColorAdjust = 0.0f;
+	keyBindingWideLabels = false;
 	icons.Clear();
 }
 
@@ -1920,6 +1976,21 @@ bool idDeviceContext::ClippedCoords(float *x, float *y, float *w, float *h, floa
 
 
 void idDeviceContext::AdjustCoords(float *x, float *y, float *w, float *h) {
+	if ( groupScale != 1.0f ) {
+		// A HUD group's scale about its anchor (SetGroupScale).
+		if ( x ) {
+			*x = groupX + ( *x - groupX ) * groupScale;
+		}
+		if ( y ) {
+			*y = groupY + ( *y - groupY ) * groupScale;
+		}
+		if ( w ) {
+			*w *= groupScale;
+		}
+		if ( h ) {
+			*h *= groupScale;
+		}
+	}
 	if (x) {
 		*x = (*x * xScale) + xOffset;
 	}
@@ -1999,8 +2070,44 @@ void idDeviceContext::CaptureLegacyText(const char* text, const char* family, fl
 	SetDrawColor(savedColour);
 }
 
-void idDeviceContext::SetDrawColor(const idVec4& colour) {
+idVec3 idDeviceContext::GroupOrigin() const {
+	if ( groupScale == 1.0f ) {
+		return origin;
+	}
+	return idVec3( groupX + ( origin.x - groupX ) * groupScale, groupY + ( origin.y - groupY ) * groupScale, origin.z );
+}
+
+// The blend bits of the renderer's draw state (tr_local.h, which interface
+// code does not include): one-plus-one, the additive blend.
+static bool openQ4_MaterialIsAdditive( const idMaterial *material ) {
+	const int srcBlendBits = 0x0000000f, dstBlendBits = 0x000000f0, srcBlendOne = 0x00000000, dstBlendOne = 0x00000020;
+	if ( material == NULL || material->GetNumStages() == 0 ) {
+		return false;
+	}
+	for ( int i = 0; i < material->GetNumStages(); i++ ) {
+		const int bits = material->GetStage( i )->drawStateBits;
+		if ( ( bits & srcBlendBits ) != srcBlendOne || ( bits & dstBlendBits ) != dstBlendOne ) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void idDeviceContext::SetDrawColor(const idVec4& colour, const idMaterial* material) {
 	hudColour = colour;
+	if ( drawOpacity < 1.0f ) {
+		// The HUD opacity (SetDrawOpacity): alpha, or the colour of art that
+		// adds its colour whatever its alpha.
+		idVec4 faded = colour;
+		if ( openQ4_MaterialIsAdditive( material ) ) {
+			faded.x *= drawOpacity;
+			faded.y *= drawOpacity;
+			faded.z *= drawOpacity;
+		}
+		faded.w *= drawOpacity;
+		renderSystem->SetColor( faded );
+		return;
+	}
 	renderSystem->SetColor(colour);
 }
 bool idDeviceContext::CaptureHud(const idDrawVert* vertices, const idMaterial* material) {
@@ -2034,8 +2141,9 @@ void idDeviceContext::DrawStretchPic(float x, float y, float w, float h, float s
 	
 	const bool hasTransform = !mat.IsIdentity();
 	if ( hasTransform ) {
+		const idVec3 groupOrigin = GroupOrigin();
 		for ( int i = 0; i < 4; i++ ) {
-			TransformVertInVirtualSpace( verts[i], origin, mat, xScale, yScale, xOffset, yOffset );
+			TransformVertInVirtualSpace( verts[i], groupOrigin, mat, xScale, yScale, xOffset, yOffset );
 		}
 	}
 
@@ -2047,7 +2155,7 @@ void idDeviceContext::DrawStretchPic(float x, float y, float w, float h, float s
 
 void idDeviceContext::DrawMaterial(float x, float y, float w, float h, const idMaterial *mat, const idVec4 &color, float scalex, float scaley) {
 
-	SetDrawColor(color);
+	SetDrawColor(color, mat);
 
 	float	s0, s1, t0, t1;
 // 
@@ -2094,7 +2202,7 @@ void idDeviceContext::DrawMaterial(float x, float y, float w, float h, const idM
 
 void idDeviceContext::DrawMaterialRotated(float x, float y, float w, float h, const idMaterial *mat, const idVec4 &color, float scalex, float scaley, float angle) {
 	
-	SetDrawColor(color);
+	SetDrawColor(color, mat);
 
 	float	s0, s1, t0, t1;
 	// 
@@ -2156,8 +2264,9 @@ void idDeviceContext::DrawStretchPicRotated(float x, float y, float w, float h, 
 
 	const bool ident = !mat.IsIdentity();
 	if ( ident ) {
+		const idVec3 groupOrigin = GroupOrigin();
 		for ( int i = 0; i < 4; i++ ) {
-			TransformVertInVirtualSpace( verts[i], origin, mat, xScale, yScale, xOffset, yOffset );
+			TransformVertInVirtualSpace( verts[i], groupOrigin, mat, xScale, yScale, xOffset, yOffset );
 		}
 	}
 
@@ -3013,12 +3122,19 @@ int idDeviceContext::DrawText( const char *text, float textScale, int textAlign,
 				escapePayloadType, escapeSourceLength, escapeRepeats );
 		}
 		const bool isIconEscape = escapeLength > 0 && escapePayloadType == S_ESCAPE_ICON;
+		// openQ4: an escape that does not fit the line buffer is skipped, and len
+		// must then stay where it is. It used to advance regardless, so a line of
+		// zero-width escapes (which never word-break) walked len past the buffer
+		// and the line's terminator was written out there, on the stack.
+		const bool escapeFits = escapeLength > 0 && len + escapeSourceLength < static_cast<int>( sizeof( buff ) );
 		if ( escapeLength > 0 ) {
-			if ( len + escapeSourceLength < static_cast<int>( sizeof( buff ) ) ) {
+			if ( escapeFits ) {
 				idStr::Copynz( &buff[len], p, escapeSourceLength + 1 );
 			}
 			if ( !isIconEscape ) {
-				len += escapeSourceLength;
+				if ( escapeFits ) {
+					len += escapeSourceLength;
+				}
 				p += escapeSourceLength;
 				continue;
 			}
@@ -3125,7 +3241,9 @@ int idDeviceContext::DrawText( const char *text, float textScale, int textAlign,
 		}
 
 		if ( escapeLength > 0 ) {
-			len += escapeSourceLength;
+			if ( escapeFits ) {
+				len += escapeSourceLength;
+			}
 			p += escapeSourceLength;
 		} else {
 			if ( len + charBytes < static_cast<int>( sizeof( buff ) ) ) {

@@ -1,7 +1,8 @@
 # SYSTEM performance presets
 
-SYSTEM uses the same seven performance profiles and hardware-detection policy as
-the existing engine commands. `framework/PerformancePreset` owns the profile
+SYSTEM uses the same nine performance profiles and hardware-detection policy as
+the existing engine commands (seven until Maximum and Low were added; the dated
+sections below describe the ladder as it stood on their date). `framework/PerformancePreset` owns the profile
 records, their ordered 55 assignments and the read-only detection decision.
 Common retains its original setters, readback checks, modified flags and rollback;
 it publishes the selected profile name only after all other writes succeed.
@@ -10,7 +11,7 @@ The retained settings service exposes two typed draft operations:
 
 | Operation | Arguments | Result |
 | --- | --- | --- |
-| `settings.system.preset` | One string, `name` | Expand Minimum, Low Power, Performance, Balanced, Enhanced, Quality or Ultra into the current draft. |
+| `settings.system.preset` | One string, `name` | Expand Minimum, Low Power, Low, Performance, Balanced, Enhanced, Quality, Ultra or Maximum into the current draft. |
 | `settings.system.autodetect` | None | Observe the existing platform/memory signals and expand the selected profile into the current draft. |
 
 These operations validate the entire merged draft. They replace exactly the
@@ -71,12 +72,16 @@ and the visual contract's 18/24 dp action typography. Its counted host does not 
 engine font, device or settings-service route; gameplay captures provide
 separate evidence for those integration boundaries.
 
-Complete Apply remains gated until every changed effect has a checked execution and
-recovery path. Image/material policy, renderer resources, audio and deferred
-load policy need actual observed results beyond CVar readback, as described in
-[effect execution](settings-effect-execution.md). The complete
-page, editor, supported platforms, all 271 migrations and final product gates
-remain unaccepted.
+Apply was gated at this increment. Since 10 November 2026 a preset or
+Auto-Detect drafted on the page applies through the
+[combined executor](settings-effect-execution.md#combined-executor): one
+journaled attempt that restarts the renderer device and, for a speaker layout
+or EFX change, the sound device, as the stock page's `applyPerformancePreset`
+and APPLY did. Two settings finish at the next start and the page says so
+(`image_ignoreHighQuality`, `s_maxSoundsPerShader`). The checked image and
+audio results described in [effect execution](settings-effect-execution.md)
+are not part of that executor. The complete page, editor, supported platforms,
+all 271 migrations and final product gates remain unaccepted.
 
 ## Maximum-quality revision, 27 October 2026
 
@@ -489,3 +494,167 @@ configuration warnings remain outside this change. Detached clean worktrees
 (4ab985d9d, last 26 October) look inactive but retain unmerged commits; review
 those commits before authorizing removal. `.tmp/wt-hf` and `.tmp/wt-ui-round`
 have local changes and were preserved.
+
+## Hardware-range audit, 10 November 2026
+
+A review of the ladder against the hardware openQ4 supports, from the
+[documented minimum](../../user/getting-started.md#system-requirements) to
+current high-end PCs and phones, found four gaps. The ladder is now nine
+profiles; the 55-field footprint, the SYSTEM catalog and the effect journal are
+unchanged, because every value below was already a preset target.
+
+### The bottom of the ladder shed no rendering cost
+
+Minimum and Low Power differed from Performance only in scene scale, texture
+size, sound samples and the frame cap. Every rendering feature stayed,
+stencil shadows included, so the two profiles for hardware below the minimum
+requirements removed no work except pixels. The
+documented minimum PC (4 GiB RAM, a 1 GiB GPU) was also sent to Low Power,
+whose 30 FPS cap is a battery choice, not a desktop one.
+
+| Profile | Scene | Shadows | Cap | For |
+|---|---|---|---:|---|
+| Minimum | 50% | none | 30 | Software and limited renderers, 2 GiB systems, 512 MiB GPUs |
+| Low Power | 75% | none | 30 | Raspberry Pi, phones with at most 4 GiB, explicit low-power requests |
+| **Low** (new) | 75% | stencil | 60 | The documented minimum PC: at most 4 GiB RAM or a 1 GiB GPU |
+| Performance | 85% | stencil | 60 | Modest desktops, handhelds, phones |
+
+`r_shadows` was already written by every profile as the constant 1; it is now a
+per-profile value (`PerformancePreset::shadows`), and the self-test requires
+0 on exactly Minimum and Low Power and a non-decreasing progression. Low takes
+Low Power's texture and sound budgets with 2x anisotropy. The stock four-way
+quality control maps Low to the new profile, so no stock choice turns shadows
+off. A configuration already on Minimum or Low Power keeps its shadows until
+the profile is selected again.
+
+### Auto-Detect stopped at Enhanced
+
+A 24 GiB card received the same recommendation as the 8 GiB reference laptop,
+and Balanced at 4K. FPS-02 measured that laptop holding Quality at 100 FPS and
+Ultra at 75 FPS at 2560x1440, so a card in a larger memory class, which is at
+least as fast, now takes the profile above. Each resolution class above 1440p
+costs one profile:
+
+| Verified dedicated memory | Up to 1440p | Up to 4K | Above 4K |
+|---|---|---|---|
+| 8 GiB class (7680 MiB) | Enhanced | Balanced | Performance |
+| 12 GiB class (11520 MiB) | Quality | Enhanced | Balanced |
+| 16 GiB class (15360 MiB) | Ultra | Quality | Enhanced |
+| 24 GiB class (23040 MiB) | Ultra | Ultra | Quality |
+
+Each floor is 15/16 of the nominal size, as the 8 GiB floor already was. The
+8 GiB row is the previous behaviour. Quality and Ultra shadow-map every light,
+so they also require eight logical CPUs, 15360 MiB of system RAM and the
+modern effects. Maximum has no frame-rate target and is still never detected.
+Dedicated memory remains a capacity class and not a benchmark: an old
+workstation card with a large frame buffer is slower than its class suggests,
+and the owner lowers the profile.
+
+### Resolution classes assumed 16:9
+
+Class limits were the exact 16:9 pixel counts, so a 1920x1200 laptop with
+shared-memory graphics fell out of the 1080p class into Performance at 85%, and
+a 1080p display on a 720p budget rendered 960x540 because 75% missed the
+budget by one percent. `PerformancePresetClassPixels(h)` is now 2.25 h^2
+(shapes up to 20.25:9): 1920x1200, 2256x1504 at 75%, 2560x1600 and 20:9 phones
+sit in the class of their 16:9 sibling, and the next 16:9 class up fits at 75%.
+The same classes bound the tier ceilings and the scene budgets. A discrete card
+between 2 and 8 GiB at 4K therefore renders a 2880x1620 scene instead of
+1920x1080.
+
+### Phones and other power-limited devices
+
+Android kept the Performance ceiling but every phone rendered a 720p-class
+scene, which gave the Galaxy S25 (Adreno 830, 2340x1080) a 50% scale although
+the AND-02 runs hold 60 FPS there at native resolution with 4x MSAA in five of
+six campaign scenes. A phone reporting at least 10240 MiB (the 12 GB class)
+now keeps the 1080p class and renders 85%; smaller phones keep the 720p class;
+one with at most 4 GiB selects Low Power instead of Low. A detected frame cap
+followed the display on every device, which raised a 120 Hz phone and a 90 Hz
+handheld from Performance's 60 to the panel rate. A power-limited device
+(phone, Steam Deck, Raspberry Pi, explicit request) now keeps the lower of its
+profile's cap and the display rate.
+
+### Active-device names
+
+`RendererClassifyGLDevice` compared raw driver strings, so the same GPU
+classified differently by driver spelling. It now matches lower-case text with
+`(R)`/`(TM)` removed and spaces collapsed, which fixes `AMD Radeon(TM) 780M`
+and `Radeon (TM) RX 480 Graphics`, and it recognizes Mesa's
+`Intel(R) Xe Graphics`, Radeon 8040S/8050S/8060S, Intel Arc B390/B370
+(integrated, unlike the discrete B5xx/B7xx), NVIDIA TITAN, Immortalis and
+Xclipse names and the Steam Deck's `AMD Custom GPU`. Vulkan still reports its
+own device class and is unaffected.
+
+### Not changed
+
+Shared-memory GPUs have no capacity signal, so Apple Silicon and x86
+integrated graphics still share Balanced at the 1080p class; a fast Apple or
+AMD integrated GPU starts lower than it could. OpenGL on AMD and Intel
+discrete cards still has no dedicated-memory query and starts at Performance;
+fresh desktop configurations use Vulkan, which reports it. iOS is not an
+integrated target (IOS-03).
+
+### Validation
+
+Evidence is under `.tmp/preset-scrutiny/`.
+
+- `ui_performance_presets.py --mutations` passes: 143,760 model and transaction
+  checks, the real SYSTEM host and Common bodies, the Android observer, and 29
+  rejected mutations. Seven are new: the shadowless floor, a phone keeping
+  shadows, the top tiers without the CPU requirement, a capacity class, a
+  resolution step, the power-limited cap and the phone scene budget.
+- The three Meson preset suites pass, including the Runtime/RmlUi SYSTEM page
+  with nine options in twelve locales. `settings_menu_coverage.py`,
+  `presentation_hf_contract.py` and `ui_system_presets.py` pass.
+- After a Windows build and stage, `performance_presets_smoke.py` passes on
+  Vulkan (`vk/`) and OpenGL (`gl/`): all nine profiles in live windowed
+  `game/airdefense1`, Maximum first and then down the ladder with a device
+  restart for each, the self-test (`presets=9`), the four stock quality
+  commands (Low now applies `low` at 75%), and first-launch plus explicit
+  detection, which select Enhanced on the RTX 4060 Laptop on both backends.
+  `vk-intel/` selects Balanced on the Intel Iris Xe. The Low Power and Low
+  captures were inspected: the trench shadow is absent in the first and present
+  in the second.
+
+Limits:
+
+- **What dropping shadows saves is measured on one integrated GPU only.** See
+  [the shadow saving](#the-shadow-saving-on-integrated-graphics) below. A
+  weaker or tile-based GPU (Raspberry Pi, a phone) may differ and has not run
+  it.
+- The 12, 16 and 24 GiB recommendations, the phone rules, Raspberry Pi and
+  macOS are covered by the model suite only. No such device ran this build.
+- Today's shadow-map commits changed what Quality, Ultra and Maximum cost; the
+  FPS-02 budgets the capacity table leans on have not been re-measured since.
+
+### The shadow saving on integrated graphics
+
+Measured later on 10 November with `performance_suite.py`, fullscreen 1920x1080
+on the Intel Iris Xe through Vulkan (`low+r_vkDevice=2`, a 1440x810 scene, frame
+cap and VSync off). Each launch is a ladder of six-second windows: Low, Low
+with `r_shadows 0`, Low, Low at 50% scene scale, Low. A toggle is compared with
+the mean of the Low windows on either side of it, using the frame time from
+`profileFrameWork`.
+
+| Launch (`shadow-ladder-1/`) | Low | No shadows | 50% scene |
+|---|---:|---:|---:|
+| `combat_airdefense1`, round 1 | 16.4 ms | 13.8 ms (-15.5%) | 13.1 ms (-21.6%) |
+| `indoor_hub2`, round 2 | 11.4 ms | 9.8 ms (-14.1%) | 9.1 ms (-19.5%) |
+| `combat_airdefense1`, round 2 | 16.4 ms | 14.5 ms (-12.4%) | 14.9 ms (-8.3%) |
+
+Dropping stencil shadows removes 12 to 16 percent of the frame, about what the
+step from a 75% to a 50% scene removes (8 to 22 percent). The Low windows of a
+launch agree within 4 to 6 percent. That supports the shadowless floor: the two
+profiles below the minimum requirements now shed about as much again as their
+resolution step, and Low keeps the shadows for a PC that can afford them.
+
+Only these three launches count. The other three of that run (both
+`indoor_storage2` launches and one `indoor_hub2`) lost the foreground and were
+held at the 60 Hz background cap, which shows as `bound=presentation-cap` in
+the pacing snapshot; their GPU was never saturated, so they price CPU work
+only (under 1 ms either way). A second run (`shadow-ladder-2/`) overlapped
+another session's build and is not counted. The earlier windowed attempts
+(`low-ladder/`, `shadow-cost/`) ran during builds, ranged from 20 to 95 Hz at
+identical settings and were discarded. The suite's idle-GPU check reads the
+NVIDIA adapter, so on an Intel run read `bound` instead.

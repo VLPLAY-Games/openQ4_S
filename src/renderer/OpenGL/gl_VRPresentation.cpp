@@ -12,6 +12,7 @@
 
 #include "../tr_local.h"
 #include "../TemporalPresentation.h"
+#include "../SavePreviewCapture.h"
 
 #if defined( OPENQ4_RENDERER_GL_MODULE ) && defined( __linux__ )
 #include <dlfcn.h>
@@ -237,6 +238,9 @@ void RB_VR_BeginBackEnd( void ) {
 		idRenderTexture *target = tr.vrTargets[rb_vrTarget + 1];
 		R_SetDefaultRenderTarget( target );
 		if ( R_GetDefaultRenderTarget() == target ) {
+			// setting the target forgot that the virtual screen blends
+			// premultiplied; the rest of its 2D still needs that
+			R_SetDefaultRenderTargetPremultiplied( rb_vrTarget < 0 );
 			return;
 		}
 	}
@@ -434,11 +438,19 @@ static void RB_VR_DrawMirror( void ) {
 RB_VR_PresentFrame
 
 Runs in place of the window's back-buffer passes at swap time. False when
-the frame was not a VR frame.
+the frame was not a VR frame. The frame result says what reached the
+runtime's images, which the engine submits as layers: an image this frame did
+not write is never submitted, as on Vulkan.
 ====================
 */
 bool RB_VR_PresentFrame( void ) {
-	if ( rb_vrTarget == -2 || !tr.vrFrame.active ) {
+	if ( !tr.vrFrame.active ) {
+		return false;
+	}
+	if ( rb_vrTarget == -2 ) {
+		// nothing reached the targets: submit no layers
+		tr.vrFrameResult.presented = false;
+		tr.vrFrameResult.eyeRendered[0] = tr.vrFrameResult.eyeRendered[1] = false;
 		return false;
 	}
 
@@ -454,13 +466,25 @@ bool RB_VR_PresentFrame( void ) {
 	RB_VR_FinishBoundTarget();
 	R_SetDefaultRenderTarget( NULL );
 
-	RB_VR_BlitToImage( tr.vrTargets[0], tr.vrFrame.screenImage, tr.vrFrame.screenWidth, tr.vrFrame.screenHeight );
+	// the virtual screen reaches its image only if the frame drew it and the
+	// copy went through; otherwise the engine submits no layer this frame, the
+	// eyes' projection included, rather than an image left as it was
+	if ( !rb_vrCleared[0] || !RB_VR_BlitToImage( tr.vrTargets[0], tr.vrFrame.screenImage, tr.vrFrame.screenWidth, tr.vrFrame.screenHeight ) ) {
+		tr.vrFrameResult.presented = false;
+	}
 	for ( int eye = 0; eye < 2; eye++ ) {
 		if ( tr.vrFrameResult.eyeRendered[eye] && rb_vrCleared[eye + 1] ) {
 			if ( !RB_VR_BlitToImage( tr.vrTargets[eye + 1], tr.vrFrame.eyeImages[eye], tr.vrFrame.eyeWidth, tr.vrFrame.eyeHeight ) ) {
 				tr.vrFrameResult.eyeRendered[eye] = false;
 			}
 		}
+	}
+
+	// a checkpoint's preview is the left eye, whatever the desktop mirror
+	// shows (vr_mirror 0 leaves the window black, 2 shows only the HUD); a
+	// frame without one (a menu) leaves it to the window's swap
+	if ( tr.vrFrameResult.eyeRendered[0] && rb_vrCleared[1] && tr.vrTargets[1] != NULL ) {
+		RB_QueueSavePreviewFromFramebuffer( tr.vrTargets[1]->GetDeviceHandle(), tr.vrFrame.eyeWidth, tr.vrFrame.eyeHeight );
 	}
 
 	RB_VR_DrawMirror();

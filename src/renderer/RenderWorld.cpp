@@ -128,6 +128,7 @@ idRenderWorldLocal::idRenderWorldLocal() {
 	ClearBoundsAreasMemo();
 	mapName.Clear();
 	mapTimeStamp = FILE_NOT_FOUND_TIMESTAMP;
+	worldFromGeneratedCache = false;
 	mapFileCRC = 0u;
 
 	generateAllInteractionsCalled = false;
@@ -827,6 +828,20 @@ void idRenderWorldLocal::UpdateLightDef( qhandle_t lightHandle, const renderLigh
 		} else {
 			// if we are updating shadows, the prelight model is no longer valid
 			light->lightHasMoved = true;
+			// Whether the light is moving is asked of its geometry alone. The
+			// test above also fails for another shader or prelight model, and
+			// a light that has moved once has its prelight model dropped, so
+			// it fails on every later update of a light that now holds still.
+			if ( !( rlight->origin == light->parms.origin && rlight->axis == light->parms.axis
+					&& rlight->lightRadius == light->parms.lightRadius
+					&& rlight->lightCenter == light->parms.lightCenter
+					&& rlight->target == light->parms.target && rlight->up == light->parms.up
+					&& rlight->right == light->parms.right && rlight->start == light->parms.start
+					&& rlight->end == light->parms.end
+					&& rlight->pointLight == light->parms.pointLight
+					&& rlight->parallel == light->parms.parallel ) ) {
+				light->lastMovedFrameNum = tr.frameCount;
+			}
 			R_FreeLightDefDerivedData( light );
 		}
 	} else {
@@ -1260,8 +1275,10 @@ void idRenderWorldLocal::RenderScene( const renderView_t *renderView, int render
 	}
 
 	// now write delete commands for any modified-but-not-visible entities, and
-	// add the renderView command to the demo
-	if ( session->writeDemo && !independent ) {
+	// add the renderView command to the demo. A demo recorded in VR plays the
+	// left eye, as the desktop mirror shows it: playback renders a frame's last
+	// view, which would otherwise be the right eye's
+	if ( session->writeDemo && !independent && R_VR_FrontEndEye() != 1 ) {
 		WriteRenderView( renderView );
 	}
 

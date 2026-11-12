@@ -445,11 +445,15 @@ void rvStatManager::WeaponFired( const idPlayer* player, int weapon, int num ) {
 	
 	comboKillState_t cks = comboKillState[ player->entityNumber ];
 	comboKillState[ player->entityNumber ] = CKS_NONE;
-	if ( player->GetWeaponIndex( "weapon_rocketlauncher" ) == weapon ) {
+	// openQ4: ask what this weapon is, once. Each shot used to search every
+	// weapon slot by name, twice - up to 32 formatted dictionary lookups - and
+	// the search answers slot 0 for a name the player's def does not have.
+	const char *weaponClass = player->spawnArgs.GetString( va( "def_weapon%d", weapon ), "" );
+	if ( !idStr::Icmp( weaponClass, "weapon_rocketlauncher" ) ) {
 		if ( cks == CKS_NONE ) {
 			comboKillState[ player->entityNumber ] = CKS_ROCKET_FIRED;
 		}
-	} else if ( player->GetWeaponIndex( "weapon_railgun" ) == weapon ) {
+	} else if ( !idStr::Icmp( weaponClass, "weapon_railgun" ) ) {
 		// apparently it processes hits before it does the fire....
 		if ( cks == CKS_RAIL_HIT ) {
 			comboKillState[ player->entityNumber ] = CKS_RAIL_FIRED;
@@ -588,6 +592,13 @@ void rvStatManager::ReceiveInGameAward( const idBitMsg& msg ) {
 
 	inGameAward_t award = (inGameAward_t)msg.ReadByte();
 	int client = msg.ReadByte();
+
+	// openQ4: both bytes index fixed tables below - the award counts and names,
+	// and the per-client icon rows
+	if ( award < 0 || award >= IGA_NUM_AWARDS || client < 0 || client >= MAX_CLIENTS ) {
+		common->Warning( "Ignoring in-game award %d for client %d", (int)award, client );
+		return;
+	}
 
 	// display award on hud		
 	idPlayer* player = gameLocal.GetLocalPlayer();

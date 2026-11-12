@@ -167,7 +167,9 @@ static inline bool OpenQ4_SaveGameHasInterpolatorCacheFlag( int layoutBuild ) {
 	A GUI's saved state follows the structure of the .gui file that built it,
 	so an edit to a GUI that saves leaves older payloads with records in the
 	previous structure. Each such file keeps its previous revision under
-	guis/savecompat/. A record from a payload whose layout build predates the
+	guis/savecompat/ (a GUI openQ4 reads from its own definition in place of a
+	game's file names that file itself, which is parsed as written). A record
+	from a payload whose layout build predates the
 	edit, and whose blob does not name a window only the current revision has
 	(a build of uncommitted work may already carry the edit), is read into a
 	copy built from that revision, and its state carries over to the current
@@ -183,17 +185,41 @@ struct openQ4SaveGameGuiRevision_t {
 	const char *	currentWindow;		// a window only the current revision has
 };
 
+// A GUI edited more than once lists its revisions oldest first: a record is
+// read through the first revision whose build its payload predates.
 static const openQ4SaveGameGuiRevision_t OPENQ4_SAVEGAME_GUI_REVISIONS[] = {
 	// 38bdc6872: reduced flashing gave the hit indicator a second window and new scripts
 	{ "guis/hud.gui",			1562,	"guis/savecompat/hud_r1.gui",			"hit_indicator_reduced" },
 	{ "guis/hud_strogg.gui",	1562,	"guis/savecompat/hud_strogg_r1.gui",	"hit_indicator_reduced" },
+	// The stock interface's Remastered layout: pickup lines, layout wrappers and the vehicle prompt
+	{ "guis/hud.gui",			2280,	"guis/savecompat/hud_r2.gui",			"p_pickup0" },
+	{ "guis/hud_strogg.gui",	2280,	"guis/savecompat/hud_strogg_r2.gui",	"p_pickup0" },
+	{ "guis/vehicles/hud.gui",	2280,	"guis/savecompat/vehicle_hud_r1.gui",	"oq4_prompt" },
+	// The stock interface's HUD refinements: the damage direction's mark, the prompt's lock, and
+	// the sizes, offsets, scale anchors and notice stacking that changed these GUIs' expressions
+	{ "guis/hud.gui",			2323,	"guis/savecompat/hud_r3.gui",			"hit_chevron" },
+	{ "guis/hud_strogg.gui",	2323,	"guis/savecompat/hud_strogg_r3.gui",	"hit_chevron" },
+	{ "guis/vehicles/hud.gui",	2323,	"guis/savecompat/vehicle_hud_r2.gui",	"oq4_prompt_padlock" },
+	// The Awakening's on-foot HUD is read from openQ4's laid-out definition of it
+	// (idLegacyHudLayout::DefinitionFor); earlier records follow the expansion's own file
+	{ "guis/q4xhud.gui",		2330,	"guis/q4xhud.gui",						"p_pickup0" },
+	// The Awakening's dropship gun, MCC gun and speeder bike HUDs, read from openQ4's definitions likewise
+	{ "guis/vehicles/airassault/turretplayerhud.gui",	2334,	"guis/vehicles/airassault/turretplayerhud.gui",	"oq4_prompt" },
+	{ "guis/vehicles/mcc/cannonplayerhud.gui",	2334,	"guis/vehicles/mcc/cannonplayerhud.gui",	"oq4_prompt" },
+	{ "guis/vehicles/speederplayerhud.gui",	2334,	"guis/vehicles/speederplayerhud.gui",	"oq4_prompt" },
+	// The stock vehicle HUD's prompt and exit line follow the game's vehicle_locked, and with it
+	// the Awakening definitions generated from that HUD
+	{ "guis/vehicles/hud.gui",	2342,	"guis/savecompat/vehicle_hud_r3.gui",	"lock_state_msg" },
+	{ "guis/vehicles/airassault/turretplayerhud.gui",	2342,	"guis/savecompat/q4x_turretplayerhud_r1.gui",	"lock_state_msg" },
+	{ "guis/vehicles/mcc/cannonplayerhud.gui",	2342,	"guis/savecompat/q4x_cannonplayerhud_r1.gui",	"lock_state_msg" },
+	{ "guis/vehicles/speederplayerhud.gui",	2342,	"guis/savecompat/q4x_speederplayerhud_r1.gui",	"lock_state_msg" },
 };
 
 static inline const openQ4SaveGameGuiRevision_t *OpenQ4_FindSaveGameGuiRevision( const char *guiName, int layoutBuild ) {
 	for ( int i = 0; i < static_cast<int>( sizeof( OPENQ4_SAVEGAME_GUI_REVISIONS ) / sizeof( OPENQ4_SAVEGAME_GUI_REVISIONS[0] ) ); i++ ) {
 		const openQ4SaveGameGuiRevision_t &revision = OPENQ4_SAVEGAME_GUI_REVISIONS[i];
-		if ( idStr::Icmp( guiName, revision.name ) == 0 ) {
-			return layoutBuild < revision.build ? &revision : NULL;
+		if ( idStr::Icmp( guiName, revision.name ) == 0 && layoutBuild < revision.build ) {
+			return &revision;
 		}
 	}
 	return NULL;

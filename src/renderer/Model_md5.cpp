@@ -894,6 +894,13 @@ void idMD5Mesh::ParseMesh( idLexer &parser, int numJoints, const idJointMat *joi
 			parser.Error( "Vertex with negative first weight index." );
 		}
 
+		// openQ4: vertices can share weights, so the total is the file's to
+		// choose and wrapped in int: 65536 vertices of 65537 weights each sized
+		// the tables below for 65536 entries and then filled four billion.
+		if ( numWeightsForVertex[i] > 0x7fffffff / 32 - numWeights ||
+				firstWeightForVertex[i] > 0x7fffffff - numWeightsForVertex[i] ) {
+			parser.Error( "Too many joint weights." );
+		}
 		numWeights += numWeightsForVertex[i];
 		if ( numWeightsForVertex[i] + firstWeightForVertex[i] > maxweight ) {
 			maxweight = numWeightsForVertex[i] + firstWeightForVertex[i];
@@ -1596,6 +1603,10 @@ void idRenderModelMD5::LoadModel() {
 	// parse num joints
 	parser.ExpectTokenString( "numJoints" );
 	num  = parser.ParseInt();
+	// openQ4: the count sizes a stack allocation below
+	if ( num < 0 || num > 4096 ) {
+		parser.Error( "Invalid number of joints: %d", num );
+	}
 	joints.SetGranularity( 1 );
 	joints.SetNum( num );
 	defaultPose.SetGranularity( 1 );
@@ -2160,6 +2171,7 @@ void idRenderModelMD5::PurgeModel() {
 	skinSpaceToLocalMats.Clear();
 	meshes.Clear();
 	viewEnt = NULL;
+	generatedCacheContent = false;
 }
 
 /*

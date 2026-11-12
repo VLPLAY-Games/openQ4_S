@@ -2454,8 +2454,9 @@ static void Cmd_TestVehicle_f( const idCmdArgs &args ) {
 	const bool selecting = args.Argc() == 4 && !idStr::Icmp( args.Argv( 2 ), "select" ) && idStr::IsNumeric( args.Argv( 3 ) );
 	if ( !selecting && ( args.Argc() < 2 || args.Argc() > 3 || ( args.Argc() == 3
 			&& idStr::Icmp( args.Argv( 2 ), "fire" ) != 0
-			&& idStr::Icmp( args.Argv( 2 ), "exit" ) != 0 ) ) ) {
-		gameLocal.Printf( "usage: testVehicle <entity name> [fire|exit|select <index>] (omit action for status)\n" );
+			&& idStr::Icmp( args.Argv( 2 ), "exit" ) != 0
+			&& idStr::Icmp( args.Argv( 2 ), "enter" ) != 0 ) ) ) {
+		gameLocal.Printf( "usage: testVehicle <entity name> [enter|fire|exit|select <index>] (omit action for status)\n" );
 		return;
 	}
 	idEntity *entity = gameLocal.FindEntity( args.Argv( 1 ) );
@@ -2465,7 +2466,12 @@ static void Cmd_TestVehicle_f( const idCmdArgs &args ) {
 	}
 	rvVehicle *vehicle = static_cast<rvVehicle *>( entity );
 	int seat = player->GetVehicleController().GetVehicle() == vehicle ? player->GetVehicleController().GetPosition() : -1;
-	if ( args.Argc() >= 3 ) {
+	if ( args.Argc() == 3 && idStr::Icmp( args.Argv( 2 ), "enter" ) == 0 ) {
+		// boards as a map script would, without compiling a console script:
+		// that leaves a thread behind which a save then cannot load
+		const bool entered = !player->IsInVehicle() && player->EnterVehicle( vehicle );
+		gameLocal.Printf( "testVehicle: action=enter name=%s success=%d\n", vehicle->name.c_str(), entered );
+	} else if ( args.Argc() >= 3 ) {
 		if ( seat < 0 || seat >= vehicle->GetNumPositions() || vehicle->GetPosition( seat )->GetDriver() != player ) {
 			gameLocal.Printf( "testVehicle: action requires the local player in this vehicle\n" );
 			return;
@@ -2494,6 +2500,14 @@ static void Cmd_TestVehicle_f( const idCmdArgs &args ) {
 		vehicle->name.c_str(), vehicle->GetClassname(), gameLocal.time, vehicle->GetPhysics()->GetOrigin().ToString( 3 ),
 		vehicle->GetNumPositions(), vehicle->GetNumDrivers(), seat, vehicle->IsLocked(), vehicle->IsHidden(),
 		vehicle->IsMovementEnabled(), vehicle->IsShootingEnabled(), vehicle->health );
+	if ( seat >= 0 && seat < vehicle->GetNumPositions() ) {
+		// where the seat's eye looks, which a VR seat faces when boarded or loaded
+		idVec3 eyeOrigin;
+		idMat3 eyeAxis;
+		vehicle->GetPosition( seat )->GetEyePosition( eyeOrigin, eyeAxis );
+		gameLocal.Printf( "testVehicleSeat: name=%s seat=%d eye=(%s) eyeYaw=%.1f vehicleYaw=%.1f\n", vehicle->name.c_str(), seat,
+			eyeOrigin.ToString( 1 ), eyeAxis[ 0 ].ToYaw(), vehicle->GetAxis()[ 0 ].ToYaw() );
+	}
 	if ( vehicle->GetHud() != NULL ) {
 		gameLocal.Printf( "testVehicleHud: name=%s health=%g shield=%g\n", vehicle->name.c_str(),
 			vehicle->GetHud()->State().GetFloat( "vehicle_health" ), vehicle->GetHud()->State().GetFloat( "vehicle_shield" ) );
@@ -3742,6 +3756,21 @@ static void Cmd_TestHitMarker_f( const idCmdArgs &args ) {
 
 /*
 ==================
+Cmd_TestCrosshair_f
+
+Holds the animated crosshair in a state - a design, a charge, a reload, a lock -
+so it can be looked at and captured without a weapon in that state.
+==================
+*/
+static void Cmd_TestCrosshair_f( const idCmdArgs &args ) {
+	if ( gameLocal.GetLocalPlayer() == NULL || !gameLocal.CheatsOk() ) {
+		return;
+	}
+	rvAnimatedCrosshair::Test( args );
+}
+
+/*
+==================
 Cmd_WeaponSplat_f
 ==================
 */
@@ -4808,6 +4837,7 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "testClassicLight",	Cmd_TestClassicLight_f,		CMD_FL_GAME|CMD_FL_CHEAT,	"raises the classic dynamic lights in front of the player" );
 	cmdSystem->AddCommand( "testDeath",				Cmd_TestDeath_f,			CMD_FL_GAME|CMD_FL_CHEAT,	"tests death" );
 	cmdSystem->AddCommand( "testHitMarker",		Cmd_TestHitMarker_f,		CMD_FL_GAME|CMD_FL_CHEAT,	"tests the crosshair hit marker" );
+	cmdSystem->AddCommand( "testCrosshair",		Cmd_TestCrosshair_f,		CMD_FL_GAME|CMD_FL_CHEAT,	"holds the animated crosshair in a state" );
 	cmdSystem->AddCommand( "testHitMaterials", Cmd_TestHitMaterials_f, CMD_FL_GAME|CMD_FL_CHEAT, "sample a posed entity's material types and hitscan effects", idGameLocal::ArgCompletion_EntityName );
 	cmdSystem->AddCommand( "testWeaponScope", Cmd_TestWeaponScope_f, CMD_FL_GAME|CMD_FL_CHEAT, "report the current scope and optionally set its zoom state", idCmdSystem::ArgCompletion_Boolean );
 	cmdSystem->AddCommand( "testSave",				Cmd_TestSave_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"writes out a test savegame" );

@@ -1027,7 +1027,8 @@ void rvWeapon::InitLights ( void ) {
 // dluetscher: added detail levels to render lights
 		light->detailLevel = DEFAULT_LIGHT_DETAIL_LEVEL;
 // dluetscher: changed lights to no shadow for performance reasons
-		light->noShadows = !G_DynamicLightShadowsEnabled();
+// openQ4: the flashlight casts on every preset that draws shadows
+		light->noShadows = !G_FlashlightShadowsEnabled();
 // RAVEN END
 		light->pointLight = spawnArgs.GetBool( "flashlightPointLight", "1" );
 		if ( !light->pointLight ) {
@@ -2125,6 +2126,11 @@ void rvWeapon::Restore ( idRestoreGame *savefile ) {
 		int savedLightHandle;
 		savefile->ReadInt( savedLightHandle );
 		savefile->ReadRenderLight( lights[i] );
+		if ( i == WPLIGHT_FLASHLIGHT || i == WPLIGHT_FLASHLIGHT_WORLD ) {
+			// openQ4: a save written under an older gate keeps a shadowless
+			// flashlight; follow the current setting instead
+			lights[i].noShadows = !G_FlashlightShadowsEnabled();
+		}
 		if ( savedLightHandle != -1 ) {
 			//get the handle again as it's out of date after a restore!
 			rvNormalizeProjectedRenderLight( lights[i], owner ? owner->GetName() : weaponDef->GetName(), "weapon-restored-light" );
@@ -2888,10 +2894,35 @@ void rvWeapon::UpdateCrosshairGUI( idUserInterface* gui ) const {
 // Original Block
 	//gui->SetStateString ( "crossImage", spawnArgs.GetString ( "mtr_crosshair" ) );
 // RAVEN END
-	gui->SetStateString( "crossColor", g_crosshairColor.GetString() );
+	// openQ4: the animated crosshair draws the design itself, so the GUI's
+	// copy of it goes transparent while its windows keep choosing the cursor
+	gui->SetStateString( "crossColor", rvAnimatedCrosshair::CursorColor( g_crosshairCustom.GetBool() ? g_crosshairCustomFile.GetString() : spawnArgs.GetString( "mtr_crosshair" ) ) );
 	gui->SetStateInt( "crossOffsetX", spawnArgs.GetInt( "crosshairOffsetX", "0" ) );
 	gui->SetStateInt( "crossOffsetY", spawnArgs.GetInt( "crosshairOffsetY", "0" ) );
  	gui->StateChanged( gameLocal.time );
+}
+
+/*
+================
+rvWeapon::GetCrosshairSignals
+
+openQ4: presentation only.  Read on drawn frames by the animated crosshair;
+nothing here is saved, sent or fed back into the weapon.
+================
+*/
+void rvWeapon::GetCrosshairSignals( crosshairSignals_t &signals ) const {
+	signals.design = g_crosshairCustom.GetBool() ? g_crosshairCustomFile.GetString() : spawnArgs.GetString( "mtr_crosshair" );
+	signals.weaponKey = ( owner != NULL ) ? owner->GetCurrentWeapon() + 1 : 0;
+	signals.raised = !wfl.hide && ( status == WP_READY || status == WP_OUTOFAMMO || status == WP_RELOAD || status == WP_FLASHLIGHT );
+	signals.rising = !wfl.hide && status == WP_RISING;
+	signals.firing = wsfl.attack && status == WP_READY;
+	signals.reloading = ( status == WP_RELOAD );
+	signals.empty = ( status == WP_OUTOFAMMO );
+	signals.zoomed = ( owner != NULL ) && owner->IsZoomed();
+	signals.nextAttackTime = nextAttackTime;
+	signals.clip = ( clipSize > 0 ) ? ammoClip : -1;
+	signals.clipSize = clipSize;
+	GetCrosshairDetail( signals );
 }
 
 /*

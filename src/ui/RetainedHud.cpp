@@ -5,6 +5,7 @@
 #include <chrono>
 #include "DeviceContext.h"
 #include "Window.h"
+#include "SimpleWindow.h"
 #include "UserInterfaceLocal.h"
 #include "RetainedUI.h"
 extern idUserInterfaceManagerLocal uiManagerLocal;
@@ -22,7 +23,7 @@ extern idCVar r_skipGuiShaders;
 #include <unordered_map>
 
 namespace {
-constexpr const char* Artwork="guis/hud/artwork.q4ui";
+constexpr const char* Artwork="guis/hud/artwork.rui";
 constexpr const char* Registry="guis/hud/coverage.json";
 bool Read(const char* path,std::string& result) {
 	void* data=nullptr; const int size=fileSystem->ReadFile(path,&data);
@@ -39,6 +40,11 @@ struct idRetainedHud::Impl {
 	std::map<std::string,std::string> materials;
 	std::map<std::string,std::string> imageAliases;
 	std::set<std::string> images,reported;
+	// How each material this HUD has drawn maps (its artwork, an image alias
+	// or itself), by the name pointer the capture hands over, so a frame folds
+	// and looks up a name once per material rather than once per primitive.
+	struct Mapping { std::string artwork,alias; bool image=false; };
+	std::unordered_map<std::string,Mapping> mappings;
 	bool attempted=false,announced=false,drawn=false;
 	~Impl() { RetainedUI_DestroyView(view); }
 	void Failure(const char* source,const std::string& error) {
@@ -49,6 +55,7 @@ idRetainedHud::idRetainedHud() : impl(std::make_unique<Impl>()) {}
 idRetainedHud::~idRetainedHud() = default;
 void idRetainedHud::Reset() { impl=std::make_unique<Impl>(); }
 bool idRetainedHud::DrawSucceeded() const { return impl->drawn; }
+bool idRetainedHud::Usable() const { return !impl->attempted || impl->view!=nullptr; }
 void idRetainedHud::Precache() {
 	if (!cvarSystem->GetCVarBool("ui_retained")) return;
 	// Game-owned damage numbers use the console atlas outside the GUI font
@@ -93,29 +100,27 @@ void idRetainedHud::Precache() {
 	}
 }
 bool idRetainedHud::Eligible(const char* source) {
-	if (!source || !cvarSystem->GetCVarBool("ui_retained")) return false;
+	return source && cvarSystem->GetCVarBool("ui_retained") && Covers(source);
+}
+bool idRetainedHud::Covers(const char* source) {
+	if (!source) return false;
 	static const std::set<std::string> roots={
 		"guis/hud.gui","guis/hud_strogg.gui","guis/cursor.gui","guis/mphud.gui",
 		"guis/wristcomm.gui","guis/wristcomm_strogg.gui","guis/scoreboard.gui","guis/summary.gui","guis/mpmsgmode.gui",
 		"guis/cinematic.gui","guis/e3cinematic.gui","guis/vehicles/hud.gui","guis/vehicles/airdef_cannon.gui",
 		"guis/vehicles/medchange.gui","guis/vehicles/mdisp.gui","guis/vehicles/strogg_noise.gui","guis/vehicles/blank.gui",
 		"guis/q4xhud.gui","guis/q4xhud_strogg.gui","guis/q4x_cannon_hud.gui","guis/dropshiphealth.gui","guis/mcchealth.gui","guis/introcinematic.gui",
-		"guis/vehicles/speederplayerhud.gui","guis/vehicles/gev_hud.gui","guis/vehicles/mcc/cannonplayerhud.gui","guis/vehicles/airassault/turretplayerhud.gui"};
-	if (!roots.contains(Key(source))) return false;
-	return true;
+		"guis/vehicles/speederplayerhud.gui","guis/vehicles/gev_hud.gui","guis/vehicles/mcc/cannonplayerhud.gui","guis/vehicles/airassault/turretplayerhud.gui",
+		"guis/vehicles/turret_hud.gui"};
+	return roots.contains(Key(source));
 }
-bool idRetainedHud::Draw(const char* source,const std::vector<openq4::ui::HudPrimitive>& captured) {
+bool idRetainedHud::Draw(const char* source,std::vector<openq4::ui::HudPrimitive>&& captured) {
 	using namespace openq4::ui;
 	impl->drawn=false;
 	if (!impl->attempted) {
 		impl->attempted=true;
 		// A mod's replacement owns its artwork and scripts, even at a stock name.
-		for (const char* cvar:{"fs_game","fs_game_base"}) {
-			const char* mod=cvarSystem->GetCVarString(cvar);
-			if (!mod[0] || !idStr::Icmp(mod,"baseoq4") || !idStr::Icmp(mod,"q4base") || !idStr::Icmp(mod,"q4xbase")) continue;
-			idFile* file=fileSystem->OpenFileRead(source,false,mod);
-			if (file) { fileSystem->CloseFile(file); return false; }
-		}
+		if (idLegacyHudLayout::ModOwns(source)) return false;
 		std::string registry,artwork,error;
 		if (!Read(Registry,registry) || !Read(Artwork,artwork)) { impl->Failure(source,"missing retained artwork catalog"); return false; }
 		Json::Value data; Json::CharReaderBuilder builder; std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -141,18 +146,26 @@ bool idRetainedHud::Draw(const char* source,const std::vector<openq4::ui::HudPri
 	}
 	if (!impl->view || !RetainedUI_PrepareView(impl->view)) return false;
 	Viewport viewport; if (!RetainedUI_DefaultViewport(viewport)) return false;
-	auto items=captured;
+	auto items=std::move(captured);
 	int vectors=0,glyphs=0,images=0;
 	for (auto& item:items) {
-		const auto name=Key(item.material);
 		if (item.glyph) { ++glyphs; continue; }
-		const auto found=impl->materials.find(name);
-		if (found!=impl->materials.end()) { item.artwork=found->second; ++vectors; }
-		else if (impl->images.contains(name) || name.starts_with("gfx/objectives/") || name.starts_with("levelshots/")) {
-			++images; const auto alias=impl->imageAliases.find(name);
-			if (alias!=impl->imageAliases.end()) item.material=alias->second;
+		auto mapped=impl->mappings.find(item.material);
+		if (mapped==impl->mappings.end()) {
+			const auto name=Key(item.material);
+			Impl::Mapping mapping;
+			const auto found=impl->materials.find(name);
+			if (found!=impl->materials.end()) mapping.artwork=found->second;
+			else if (impl->images.contains(name) || name.starts_with("gfx/objectives/") || name.starts_with("levelshots/")) {
+				mapping.image=true; const auto alias=impl->imageAliases.find(name);
+				if (alias!=impl->imageAliases.end()) mapping.alias=alias->second;
+			}
+			else { impl->Failure(source,"unmapped material "+name); return false; }
+			mapped=impl->mappings.emplace(item.material,std::move(mapping)).first;
 		}
-		else { impl->Failure(source,"unmapped material "+name); return false; }
+		const Impl::Mapping& mapping=mapped->second;
+		if (mapping.image) { ++images; if (!mapping.alias.empty()) item.material=mapping.alias; }
+		else { item.artwork=mapping.artwork; ++vectors; }
 	}
 	std::string error;
 	if (!RetainedUI_ViewRuntime(impl->view)->SetHudPresentation(items,viewport,error)) { impl->Failure(source,error); return false; }
@@ -186,46 +199,37 @@ idCVar ui_reducedFlashing("ui_reducedFlashing","0",CVAR_GUI|CVAR_BOOL|CVAR_ARCHI
 idCVar ui_cinematicShake("ui_cinematicShake","1",CVAR_GUI|CVAR_FLOAT|CVAR_ARCHIVE,
 	"added cinematic camera movement: 0 disables, 1 full; disabled in VR",0.0f,1.0f);
 
-bool idRetainedHud::UsesClassicCanvas(const char* source) {
-	if (ui_hudLayout.GetInteger()!=0 || !cvarSystem->GetCVarBool("ui_retained") ||
-		!idRemasteredHud::DocumentFor(source)) return false;
-	// External mods retain ownership of their stock-named GUI layouts.
-	for (const char* cvar:{"fs_game","fs_game_base"}) {
-		const char* mod=cvarSystem->GetCVarString(cvar);
-		if (mod[0] && idStr::Icmp(mod,"baseoq4") && idStr::Icmp(mod,"q4base") && idStr::Icmp(mod,"q4xbase")) return false;
-	}
-	return true;
-}
-
 namespace {
 struct RemasteredRoute { const char* source; const char* document; };
 // Awakening's on-foot HUDs carry the stock groups plus their own expansion
 // panels, which their documents cover behind the Marine/Strogg family.
 constexpr RemasteredRoute RemasteredRoutes[]={
-	{"guis/hud.gui","guis/hud/remastered_marine.q4ui"},
-	{"guis/q4xhud.gui","guis/hud/remastered_marine_awakening.q4ui"},
-	{"guis/hud_strogg.gui","guis/hud/remastered_strogg.q4ui"},
-	{"guis/q4xhud_strogg.gui","guis/hud/remastered_strogg_awakening.q4ui"},
-	{"guis/mphud.gui","guis/hud/remastered_mp.q4ui"},
+	{"guis/hud.gui","guis/hud/remastered_marine.rui"},
+	{"guis/q4xhud.gui","guis/hud/remastered_marine_awakening.rui"},
+	{"guis/hud_strogg.gui","guis/hud/remastered_strogg.rui"},
+	{"guis/q4xhud_strogg.gui","guis/hud/remastered_strogg_awakening.rui"},
+	{"guis/mphud.gui","guis/hud/remastered_mp.rui"},
 	// The walker's and the hover tank's shared vehicle HUD (14.12).
-	{"guis/vehicles/hud.gui","guis/hud/remastered_vehicle.q4ui"},
+	{"guis/vehicles/hud.gui","guis/hud/remastered_vehicle.rui"},
 	// The air-defence cannon's optic, transmission display and HUD prompt (14.12).
-	{"guis/vehicles/airdef_cannon.gui","guis/hud/remastered_airdef.q4ui"},
+	{"guis/vehicles/airdef_cannon.gui","guis/hud/remastered_airdef.rui"},
 	// The Awakening's space cannon with its ship-status panel (14.12).
-	{"guis/vehicles/airassault/turretplayerhud.gui","guis/hud/remastered_turret.q4ui"},
+	{"guis/vehicles/airassault/turretplayerhud.gui","guis/hud/remastered_turret.rui"},
 	// The Awakening's MCC cannon with the MCC's hull readout (14.12).
-	{"guis/vehicles/mcc/cannonplayerhud.gui","guis/hud/remastered_mcc.q4ui"},
+	{"guis/vehicles/mcc/cannonplayerhud.gui","guis/hud/remastered_mcc.rui"},
+	// openQ4's HUD for the Awakening's chaingun turret: the gunner's gauges and the barrel heat (14.12).
+	{"guis/vehicles/turret_hud.gui","guis/hud/remastered_chaingun_turret.rui"},
 	// The Awakening's speeder bike with the m07 race display (14.12).
-	{"guis/vehicles/speederplayerhud.gui","guis/hud/remastered_speeder.q4ui"},
+	{"guis/vehicles/speederplayerhud.gui","guis/hud/remastered_speeder.rui"},
 	// The Awakening's GEV, drawn from scratch since its art never shipped (14.12).
-	{"guis/vehicles/gev_hud.gui","guis/hud/remastered_gev.q4ui"},
+	{"guis/vehicles/gev_hud.gui","guis/hud/remastered_gev.rui"},
 	// Medical Labs' implant activation at the end of stroggification (14.19).
-	{"guis/vehicles/medchange.gui","guis/hud/remastered_medchange.q4ui"},
+	{"guis/vehicles/medchange.gui","guis/hud/remastered_medchange.rui"},
 	// The objectives display and its notices (14.11).
-	{"guis/wristcomm.gui","guis/hud/remastered_objectives.q4ui"},
-	{"guis/wristcomm_strogg.gui","guis/hud/remastered_objectives_strogg.q4ui"},
+	{"guis/wristcomm.gui","guis/hud/remastered_objectives.rui"},
+	{"guis/wristcomm_strogg.gui","guis/hud/remastered_objectives_strogg.rui"},
 	// The scoreboard (14.14), Tourney's bracket tree included.
-	{"guis/scoreboard.gui","guis/hud/remastered_scoreboard.q4ui"},
+	{"guis/scoreboard.gui","guis/hud/remastered_scoreboard.rui"},
 };
 constexpr int AudioColumns=40;   // the playback graph's 650 ms history (section 14.8)
 // ui_hudProfile N: where a Remastered HUD's frame goes, averaged over N frames
@@ -269,6 +273,12 @@ struct idRemasteredHud::Impl {
 	// The stock dictionary joins the document on its first draw; until then
 	// forwarded writes are covered by that join, and events wait for it.
 	bool joined=false;
+	// The multiplayer document, whose chat box stands in for the stock one.
+	bool chat=false;
+	// The playback graphs' key names ("radio.peak.0" ...), built once, and
+	// whether each graph last published flat.
+	struct AudioGraph { std::vector<std::string> keys; bool declared=false,resolved=false,flat=false; };
+	AudioGraph audioGraphs[3];
 	int failures=0;
 	// Named events sent before the document loads (a vehicle's boarding
 	// events precede its HUD's first frame), replayed in order after the join.
@@ -343,12 +353,7 @@ struct idRemasteredHud::Impl {
 	// and scripts; the loaded model supplies the declared state types and the
 	// generator's join events and readbacks, so the source parses once.
 	bool Load(const char* source) {
-		for (const char* cvar:{"fs_game","fs_game_base"}) {
-			const char* mod=cvarSystem->GetCVarString(cvar);
-			if (!mod[0] || !idStr::Icmp(mod,"baseoq4") || !idStr::Icmp(mod,"q4base") || !idStr::Icmp(mod,"q4xbase")) continue;
-			idFile* file=fileSystem->OpenFileRead(source,false,mod);
-			if (file) { fileSystem->CloseFile(file); failed=true; return false; }
-		}
+		if (idLegacyHudLayout::ModOwns(source)) { failed=true; return false; }
 		if (fileSystem->ReadFile(document.c_str(),nullptr)<0) { Fail("the document is not installed"); return false; }
 		gui=uiManager->FindGui(document.c_str(),true,true);
 		if (!gui) { Fail("the document did not load"); return false; }
@@ -407,26 +412,49 @@ struct idRemasteredHud::Impl {
 	void Fail(const char* reason) {
 		failed=true;
 		if (!reported) { common->Warning("Remastered HUD %s: %s; using the stock layout",document.c_str(),reason); reported=true; }
+		// The stock layout draws from here on: stop feeding the document.
+		if (gui) { uiManager->DeAlloc(gui); gui=nullptr; }
+		pending.clear();
 	}
 	// Decoded peaks of a playing channel, oldest first, from its emitter's
 	// own history. Missing, stopped and finished audio stays flat.
-	void PublishAudio(const idDict& state,const char* source,const char* target) {
+	void PublishAudio(const idDict& state,int graph,const char* emitterKey,const char* channelKey,const char* target) {
 		// Preset graphs declare no peak fields. Avoid decoding/copying history
 		// and forwarding forty unused state writes for those documents.
-		if (!types.contains(std::string(target)+".0")) return;
+		AudioGraph& audio=audioGraphs[graph];
+		if (!audio.resolved) {
+			audio.resolved=true;
+			audio.declared=types.contains(std::string(target)+".0");
+			if (audio.declared) for (int i=0;i<AudioColumns;++i) audio.keys.push_back(std::string(target)+"."+std::to_string(i));
+		}
+		if (!audio.declared) return;
 		float peaks[AudioColumns]={};
-		const int emitterIndex=state.GetInt(va("%s_emitter",source));
-		const int channel=state.GetInt(va("%s_channel",source));
+		const int emitterIndex=state.GetInt(emitterKey);
+		const int channel=state.GetInt(channelKey);
 		idSoundWorld* world=soundSystem->GetSoundWorldFromId(SOUNDWORLD_GAME);
 		idSoundEmitter* emitter=world && emitterIndex>0 ? world->EmitterForIndex(emitterIndex) : nullptr;
 		if (emitter && channel>SCHANNEL_ANY) emitter->AmplitudeHistory(channel,peaks,AudioColumns);
 		// Reduced motion keeps the instrument's level without horizontal travel.
-		if (cvarSystem->GetCVarBool("ui_retainedReducedMotion")) for (int i=0;i<AudioColumns-1;++i) peaks[i]=peaks[AudioColumns-1];
-		for (int i=0;i<AudioColumns;++i) gui->SetStateFloat(va("%s.%d",target,i),idMath::ClampFloat(0,1,peaks[i]));
+		static idCVar* const reduced=cvarSystem->Find("ui_retainedReducedMotion");
+		if (reduced && reduced->GetBool()) for (int i=0;i<AudioColumns-1;++i) peaks[i]=peaks[AudioColumns-1];
+		// A silent graph stays as published: forty unchanged writes a frame
+		// for each of three graphs bought nothing.
+		bool flat=true;
+		for (int i=0;i<AudioColumns && flat;++i) flat=!(peaks[i]>0);
+		if (flat && audio.flat) return;
+		audio.flat=flat;
+		for (int i=0;i<AudioColumns;++i) gui->SetStateFloat(audio.keys[i].c_str(),idMath::ClampFloat(0,1,peaks[i]));
 	}
 };
 
-idRemasteredHud::idRemasteredHud(const char* document) : impl(std::make_unique<Impl>()) { impl->document=document; }
+namespace {
+// When the multiplayer document last presented, in presentation time.
+int chatPresentedTime=-100000;
+}
+idRemasteredHud::idRemasteredHud(const char* document) : impl(std::make_unique<Impl>()) {
+	impl->document=document;
+	impl->chat=!idStr::Icmp(document,"guis/hud/remastered_mp.rui");
+}
 idRemasteredHud::~idRemasteredHud() = default;
 bool idRemasteredHud::Failed() const { return impl->failed; }
 const char* idRemasteredHud::Document() const { return impl->document.c_str(); }
@@ -437,13 +465,26 @@ const char* idRemasteredHud::DocumentFor(const char* source) {
 	return nullptr;
 }
 bool idRemasteredHud::Enabled() {
-	return cvarSystem->GetCVarBool("ui_retained") && ui_hudLayout.GetInteger()!=0;
+	static idCVar* const retained=cvarSystem->Find("ui_retained");
+	return retained && retained->GetBool() && ui_hudLayout.GetInteger()!=0;
+}
+bool idRemasteredHud::PresentsChat() {
+	// A second without a frame of it (a load, a failed document, a mod's own
+	// HUD) hands chat back to the stock surfaces.
+	return Enabled() && common->GetPresentationTime()-chatPresentedTime<1000;
+}
+void idRemasteredHud::Rejoin() {
+	impl->joined=false;
+	impl->pending.clear();
+	impl->ammoReadout=openq4::ui::HudAmmoReadout();
+	impl->readbackValues.clear();
+	for (auto& audio:impl->audioGraphs) audio.flat=false;
 }
 const char* idRemasteredHud::AirDocumentFor(const char* source) {
 	if (!source) return nullptr;
 	const auto key=Key(source);
-	if (key=="guis/hud.gui" || key=="guis/q4xhud.gui") return "guis/hud/air_marine.q4ui";
-	if (key=="guis/hud_strogg.gui" || key=="guis/q4xhud_strogg.gui") return "guis/hud/air_strogg.q4ui";
+	if (key=="guis/hud.gui" || key=="guis/q4xhud.gui") return "guis/hud/air_marine.rui";
+	if (key=="guis/hud_strogg.gui" || key=="guis/q4xhud_strogg.gui") return "guis/hud/air_strogg.rui";
 	return nullptr;
 }
 void idRemasteredHud::Preload(const char* source) {
@@ -451,20 +492,24 @@ void idRemasteredHud::Preload(const char* source) {
 	impl->Load(source);
 }
 void idRemasteredHud::ForwardState(const char* name,const char* value) {
-	if (!impl->gui || !impl->joined) return;
+	if (!impl->gui || !impl->joined || impl->failed) return;
 	if (!ui_hudProfile.GetInteger()) { impl->Forward(name,value); return; }
 	const double started=ProfileNow();
 	impl->Forward(name,value);
 	impl->forwardMs+=ProfileNow()-started; ++impl->forwards;
 }
 void idRemasteredHud::ForwardDelete(const char* name) {
-	if (!impl->gui || !impl->joined) return;
+	if (!impl->gui || !impl->joined || impl->failed) return;
 	if (idStr::Icmp(name,"weapicon")==0) impl->gui->DeleteStateVar("oq4.weaponImage");
 	if (impl->types.count(name)) impl->gui->DeleteStateVar(name);
 }
 void idRemasteredHud::ForwardEvent(const char* name) {
+	if (impl->failed) return;
 	if (!impl->gui || !impl->joined) {
-		if (!impl->failed && impl->pending.size()<32) impl->pending.emplace_back(name);
+		// The newest 32: a HUD left undrawn for a stretch replays its latest
+		// events at the join, not its oldest.
+		if (impl->pending.size()>=32) impl->pending.erase(impl->pending.begin());
+		impl->pending.emplace_back(name);
 		return;
 	}
 	if (!ui_hudProfile.GetInteger()) { impl->gui->HandleNamedEvent(name); return; }
@@ -513,9 +558,11 @@ bool idRemasteredHud::Draw(const idUserInterfaceLocal& legacy,int time) {
 	viewport.canvasHeight=720; viewport.canvasMinWidth=960; viewport.fitScale=1;
 	const float ratio=viewport.DpRatio();
 	if (!(ratio>0)) return false;
+	static idCVar* const safeInset=cvarSystem->Find("ui_hudSafeInset");
+	static idCVar* const hudScale=cvarSystem->Find("ui_hudScale");
 	const auto layout=openq4::ui::HudLayoutFor(float(viewport.width),float(viewport.height),ratio,
 		{viewport.safeLeft,viewport.safeTop,viewport.safeRight,viewport.safeBottom},ui_hudWidth.GetInteger(),
-		cvarSystem->GetCVarFloat("ui_hudSafeInset"),cvarSystem->GetCVarFloat("ui_hudScale"));
+		safeInset ? safeInset->GetFloat() : 0.f,hudScale ? hudScale->GetFloat() : 1.f);
 	float top=layout.top,bottom=layout.bottom;
 	impl->gui->SetStateFloat("hud.width",layout.width);
 	impl->gui->SetStateFloat("hud.height",layout.height);
@@ -529,7 +576,13 @@ bool idRemasteredHud::Draw(const idUserInterfaceLocal& legacy,int time) {
 	if (impl->types.contains("player_totalammo")) {
 		using namespace openq4::ui;
 		HudAmmoReadout current;
-		current.weapon=std::string(state.GetString("weapicon"))+":"+state.GetString("player_weapon");
+		// Rebuilt only when the weapon changes: the readout compares every frame.
+		const char* icon=state.GetString("weapicon"); const char* weapon=state.GetString("player_weapon");
+		const size_t iconLength=strlen(icon);
+		const std::string& last=impl->ammoReadout.weapon;
+		if (last.size()==iconLength+1+strlen(weapon) && !last.compare(0,iconLength,icon) && last[iconLength]==':' &&
+			!last.compare(iconLength+1,std::string::npos,weapon)) current.weapon=last;
+		else current.weapon=std::string(icon)+":"+weapon;
 		current.clip=state.GetInt("player_ammo","-1");
 		current.total=state.GetInt("player_totalammo","-1");
 		current.clipped=!state.GetBool("mp") && state.GetInt("player_clip_size")>=2 && current.clip>=0;
@@ -539,9 +592,9 @@ bool idRemasteredHud::Draw(const idUserInterfaceLocal& legacy,int time) {
 		if (gains & HudAmmoGainReserve) impl->gui->HandleNamedEvent("ammoReserveGain");
 		if (gains & HudAmmoGainTotal) impl->gui->HandleNamedEvent("ammoTotalGain");
 	}
-	if (state.FindKey("radio_audio_emitter")) impl->PublishAudio(state,"radio_audio","radio.peak");
-	if (state.FindKey("voice_self_audio_emitter")) impl->PublishAudio(state,"voice_self_audio","voice.self.peak");
-	if (state.FindKey("voice_audio_emitter")) impl->PublishAudio(state,"voice_audio","voice.other.peak");
+	if (state.FindKey("radio_audio_emitter")) impl->PublishAudio(state,0,"radio_audio_emitter","radio_audio_channel","radio.peak");
+	if (state.FindKey("voice_self_audio_emitter")) impl->PublishAudio(state,1,"voice_self_audio_emitter","voice_self_audio_channel","voice.self.peak");
+	if (state.FindKey("voice_audio_emitter")) impl->PublishAudio(state,2,"voice_audio_emitter","voice_audio_channel","voice.other.peak");
 	const double stateStarted=profiling ? ProfileNow() : 0;
 	impl->gui->StateChanged(time,false);
 	const double drawStarted=profiling ? ProfileNow() : 0;
@@ -555,6 +608,7 @@ bool idRemasteredHud::Draw(const idUserInterfaceLocal& legacy,int time) {
 	idStr drawn;
 	if (impl->gui->GetPresentationValue("__retained::drawSucceeded",drawn) && drawn=="1") {
 		impl->failures=0;
+		if (impl->chat) chatPresentedTime=common->GetPresentationTime();
 		// Width/height/visibility readbacks only change when presentation
 		// relays out. A scrolling bitmap alone cannot change these metrics.
 		idStr layoutChanged;
@@ -617,14 +671,17 @@ void idRetainedHud::Reset() {}
 bool idRetainedHud::DrawSucceeded() const { return false; }
 void idRetainedHud::Precache() {}
 bool idRetainedHud::Eligible(const char*) { return false; }
-bool idRetainedHud::UsesClassicCanvas(const char*) { return false; }
-bool idRetainedHud::Draw(const char*,const std::vector<openq4::ui::HudPrimitive>&) { return false; }
+bool idRetainedHud::Covers(const char*) { return false; }
+bool idRetainedHud::Usable() const { return false; }
+bool idRetainedHud::Draw(const char*,std::vector<openq4::ui::HudPrimitive>&&) { return false; }
 struct idRemasteredHud::Impl {};
 idRemasteredHud::idRemasteredHud(const char*) {}
 idRemasteredHud::~idRemasteredHud() = default;
 const char* idRemasteredHud::DocumentFor(const char*) { return nullptr; }
 const char* idRemasteredHud::AirDocumentFor(const char*) { return nullptr; }
 bool idRemasteredHud::Enabled() { return false; }
+bool idRemasteredHud::PresentsChat() { return false; }
+void idRemasteredHud::Rejoin() {}
 bool idRemasteredHud::Draw(const idUserInterfaceLocal&,int) { return false; }
 void idRemasteredHud::Preload(const char*) {}
 void idRemasteredHud::ForwardState(const char*,const char*) {}
@@ -635,8 +692,243 @@ bool idRemasteredHud::Failed() const { return true; }
 const char* idRemasteredHud::Document() const { return ""; }
 #endif
 
+// The stock interface's Remastered layout (idLegacyHudLayout). The cvars are
+// found by name, once: the dedicated server compiles none of the HUD's own.
+namespace {
+struct NamedCVar {
+	const char* name; idCVar* cvar=nullptr; bool sought=false;
+	idCVar* Get() { if (!sought) { sought=true; cvar=cvarSystem->Find(name); } return cvar; }
+	int Integer(int fallback=0) { idCVar* found=Get(); return found ? found->GetInteger() : fallback; }
+	float Float(float fallback=0) { idCVar* found=Get(); return found ? found->GetFloat() : fallback; }
+	bool Bool(bool fallback=false) { idCVar* found=Get(); return found ? found->GetBool() : fallback; }
+};
+NamedCVar hudLayoutVar{"ui_hudLayout"},hudWidthVar{"ui_hudWidth"},hudInsetVar{"ui_hudSafeInset"},hudScaleVar{"ui_hudScale"},
+	hudOpacityVar{"ui_hudOpacity"},hudPickupsVar{"ui_hudPickups"},hudStripVar{"ui_hudWeaponStrip"},
+	hudDamageVar{"ui_hudDamageDirection"},hudReducedVar{"ui_retainedReducedMotion"},retainedVar{"ui_retained"};
+bool SourceIs(const char* source,std::initializer_list<const char*> names) {
+	if (!source) return false;
+	idStr key=source; key.BackSlashesToSlashes();
+	for (const char* name:names) if (!key.Icmp(name)) return true;
+	return false;
+}
+}
+
+bool idLegacyHudLayout::Covers(const char* source) {
+	return idRemasteredHud::DocumentFor(source)!=nullptr;
+}
+
+bool idLegacyHudLayout::Fades(const char* source) {
+	return Covers(source) && !SourceIs(source,{"guis/wristcomm.gui","guis/wristcomm_strogg.gui","guis/scoreboard.gui"});
+}
+
+namespace {
+// The Awakening's HUDs and openQ4's definitions of them (tools/ui/build_awakening_legacy_hud.py):
+// on foot, the dropship's guns, the MCC's side gun and the speeder bike.
+struct HudDefinition { const char* source; const char* definition; };
+constexpr HudDefinition AwakeningDefinitions[]={
+	{"guis/q4xhud.gui","guis/openq4/awakening/q4xhud.gui"},
+	{"guis/vehicles/airassault/turretplayerhud.gui","guis/openq4/awakening/turretplayerhud.gui"},
+	{"guis/vehicles/mcc/cannonplayerhud.gui","guis/openq4/awakening/cannonplayerhud.gui"},
+	{"guis/vehicles/speederplayerhud.gui","guis/openq4/awakening/speederplayerhud.gui"},
+};
+}
+
+bool idLegacyHudLayout::Scales(const char* source) {
+	if (SourceIs(source,{"guis/hud.gui","guis/hud_strogg.gui","guis/mphud.gui","guis/vehicles/hud.gui"})) return true;
+	// By definition: the expansion's own scripts name no scale anchors.
+	for (const HudDefinition& entry:AwakeningDefinitions) if (SourceIs(source,{entry.definition})) return true;
+	return false;
+}
+
+const char* idLegacyHudLayout::DefinitionFor(const char* source) {
+	for (const HudDefinition& entry:AwakeningDefinitions) {
+		if (!SourceIs(source,{entry.source})) continue;
+		// Only beside the expansion's own HUD, whose content the definition draws.
+		if (ModOwns(source) || fileSystem->ReadFile(source,nullptr)<0 || fileSystem->ReadFile(entry.definition,nullptr)<0) return source;
+		return entry.definition;
+	}
+	return source;
+}
+
+bool idLegacyHudLayout::ModOwns(const char* source) {
+	if (!source || !source[0]) return false;
+	for (const char* cvar:{"fs_game","fs_game_base"}) {
+		const char* mod=cvarSystem->GetCVarString(cvar);
+		if (!mod[0] || !idStr::Icmp(mod,"baseoq4") || !idStr::Icmp(mod,"q4base") || !idStr::Icmp(mod,"q4xbase")) continue;
+		idFile* file=fileSystem->OpenFileRead(source,false,mod);
+		if (file) { fileSystem->CloseFile(file); return true; }
+	}
+	return false;
+}
+
+int idLegacyHudLayout::Layout() {
+	return idMath::ClampInt(0,3,hudLayoutVar.Integer(1));
+}
+
+idLegacyHudLayout::Settings idLegacyHudLayout::Read(int layout) {
+	Settings settings;
+	settings.layout=layout;
+	if (layout==0) return settings;
+	const bool minimal=layout==2;
+	// The HUD settings (13.9) and Minimal trim Remastered's groups.
+	settings.pickups=!minimal && hudPickupsVar.Bool(true);
+	settings.strip=!minimal && hudStripVar.Bool(true);
+	settings.damage=!minimal && hudDamageVar.Bool(true);
+	settings.reducedMotion=hudReducedVar.Bool(false);
+	settings.scale=idMath::ClampFloat(0.5f,2.0f,hudScaleVar.Float(1.0f));
+	settings.opacity=idMath::ClampFloat(0.25f,1.0f,hudOpacityVar.Float(1.0f));
+	return settings;
+}
+
+void idLegacyHudLayout::Publish(idUserInterfaceLocal& gui,const Settings& settings) {
+	const bool remastered=settings.layout!=0,minimal=settings.layout==2;
+	gui.SetStateInt("oq4_hudLayout",settings.layout);
+	gui.SetStateBool("oq4_hudRemastered",remastered);
+	gui.SetStateBool("oq4_hudMinimal",minimal);
+	// Classic keeps every stock group.
+	gui.SetStateBool("oq4_hudShowExtras",!minimal);
+	gui.SetStateBool("oq4_hudShowPickups",settings.pickups);
+	gui.SetStateBool("oq4_hudShowStrip",settings.strip);
+	gui.SetStateBool("oq4_hudShowDamage",settings.damage);
+	// Reduced motion (13.10) holds the looping motion a script starts itself.
+	gui.SetStateBool("oq4_hudReducedMotion",settings.reducedMotion);
+	gui.SetStateFloat("oq4_hudScale",settings.scale);
+}
+
+void idLegacyHudLayout::Edges(float xExpand,float yExpand,float edges[4],float scale,float* centerScale) {
+	// The view as the Remastered documents' dp (1.5 dp a unit on the 720 dp
+	// high, at least 960 dp wide canvas), so both interfaces share one rule.
+	const auto layout=openq4::ui::HudLayoutFor((640+2*xExpand)*1.5f,(480+2*yExpand)*1.5f,1.f,{0,0,0,0},
+		hudWidthVar.Integer(1),hudInsetVar.Float(0),scale);
+	edges[0]=xExpand-layout.left/1.5f;
+	edges[1]=yExpand-layout.top/1.5f;
+	edges[2]=xExpand-layout.right/1.5f;
+	edges[3]=yExpand-layout.bottom/1.5f;
+	if (centerScale) *centerScale=layout.centerScale;
+}
+
+const idUserInterfaceLocal::HudRoute& idUserInterfaceLocal::ResolveHudRoute() {
+	if (!hudRoute.resolved) {
+		hudRoute=HudRoute();
+		hudRoute.resolved=true;
+		hudRoute.document=idRemasteredHud::DocumentFor(source.c_str());
+		hudRoute.air=idRemasteredHud::AirDocumentFor(source.c_str());
+		hudRoute.coverage=idRetainedHud::Covers(source.c_str());
+		if (hudRoute.document || hudRoute.coverage) hudRoute.modOwned=idLegacyHudLayout::ModOwns(source.c_str());
+		hudRoute.fades=hudRoute.document && idLegacyHudLayout::Fades(source.c_str());
+		hudRoute.scales=hudRoute.document && idLegacyHudLayout::Scales(definition.c_str());
+	}
+	return hudRoute;
+}
+
+void idUserInterfaceLocal::PublishLegacyHud(float xExpand,float yExpand) {
+	const HudRoute& route=ResolveHudRoute();
+	legacyEdges=false; classicCanvas=false; legacyScale=legacyCenterScale=legacyOpacity=1.0f;
+	if (!route.document) return;
+	// A mod's own copy keeps its layout: Classic, on the stock anchors.
+	const idLegacyHudLayout::Settings settings=idLegacyHudLayout::Read(route.modOwned ? 0 : idLegacyHudLayout::Layout());
+	// The retained interface's Classic keeps the centered 4:3 canvas.
+	classicCanvas=settings.layout==0 && !route.modOwned && retainedVar.Bool(false);
+	float edges[4]={0,0,0,0},centerScale=1.0f;
+	// Classic keeps the stock anchors (the retained Classic its 4:3 canvas).
+	if (settings.layout>0) {
+		idLegacyHudLayout::Edges(xExpand,yExpand,edges,settings.scale,&centerScale);
+		for (int i=0;i<4;++i) legacyEdge[i]=edges[i];
+		legacyEdges=true;
+		if (route.scales) { legacyScale=settings.scale; legacyCenterScale=centerScale; }
+		if (route.fades) legacyOpacity=settings.opacity;
+	}
+	// The stock windows read these every frame; the dictionary takes them
+	// only when one changes (each was eleven lookups and forwards a frame).
+	const float published[11]={float(settings.layout),float(settings.pickups),float(settings.strip),float(settings.damage),
+		float(settings.reducedMotion),settings.scale,settings.opacity,edges[0],edges[1],edges[2],edges[3]};
+	if (legacyPublishedValid && !memcmp(published,legacyPublished,sizeof(published))) return;
+	legacyPublishedValid=true;
+	memcpy(legacyPublished,published,sizeof(published));
+	idLegacyHudLayout::Publish(*this,settings);
+	// The same edges for windows the stock anchors at the centre, which
+	// Remastered moves to an edge (a vehicle's prompt and status bar).
+	static const char* const EdgeKeys[4]={"oq4_hudEdgeLeft","oq4_hudEdgeTop","oq4_hudEdgeRight","oq4_hudEdgeBottom"};
+	for (int i=0;i<4;++i) SetStateFloat(EdgeKeys[i],edges[i]);
+}
+
+void idUserInterfaceLocal::ApplyLegacyGroup(idDeviceContext& dc) const {
+	// "hudanchorx none": a layer outside the HUD's groups keeps its size.
+	if (legacyGroupX==3 || legacyGroupY==3) { dc.SetGroupScale(0.0f,0.0f,1.0f); return; }
+	const float x=legacyGroupX==1 ? -legacyEdge[0] : legacyGroupX==2 ? 640.0f+legacyEdge[2] : 320.0f;
+	const float y=legacyGroupY==1 ? -legacyEdge[1] : legacyGroupY==2 ? 480.0f+legacyEdge[3] : 240.0f;
+	// The centre column on the bottom edge (the status bar, the strip and the
+	// pickup lines) takes the scale a narrow view leaves room for.
+	dc.SetGroupScale(x,y,legacyGroupX==0 && legacyGroupY==2 ? legacyCenterScale : legacyScale);
+}
+
+idLegacyHudGroup::idLegacyHudGroup(idUserInterfaceLocal* gui,idDeviceContext* dc,int anchorX,int anchorY)
+	: gui(gui),dc(dc),active(gui!=nullptr && dc!=nullptr && gui->legacyScale!=1.0f) {
+	if (!active) return;
+	oldX=gui->legacyGroupX; oldY=gui->legacyGroupY;
+	dc->GetGroupScale(oldAnchorX,oldAnchorY,oldScale);
+	if (anchorX>=0) gui->legacyGroupX=anchorX;
+	if (anchorY>=0) gui->legacyGroupY=anchorY;
+	gui->ApplyLegacyGroup(*dc);
+}
+
+idLegacyHudGroup::~idLegacyHudGroup() {
+	if (!active) return;
+	gui->legacyGroupX=oldX; gui->legacyGroupY=oldY;
+	dc->SetGroupScale(oldAnchorX,oldAnchorY,oldScale);
+}
+
+bool idUserInterfaceLocal::LegacyEdges(float edges[4]) const {
+	if (!legacyEdges) return false;
+	for (int i=0;i<4;++i) edges[i]=legacyEdge[i];
+	return true;
+}
+
+float idUserInterfaceLocal::MeasureWindowText(const char* windowName,const char* text) const {
+	if (!desktop || !text || !text[0]) return 0;
+	drawWin_t* found=desktop->FindChildByName(windowName);
+	if (!found) return 0;
+	int font=0; float scale=0;
+	if (found->win) { font=found->win->fontNum; scale=found->win->textScale; }
+	else if (found->simp) { font=found->simp->fontNum; scale=found->simp->textScale; }
+	else return 0;
+	uiManagerLocal.dc.SetFont(font);
+	return static_cast<float>(uiManagerLocal.dc.TextWidth(text,scale,0));
+}
+
+// itemPickup in the Remastered layout (14.8): up to two lines, the newest
+// nearest the gauges, and a repeat of the newest line's item while it shows
+// merged into it with a count. The scripts show and time the lines; the
+// engine compares the names and measures each line for its fitted plate.
+void idUserInterfaceLocal::PublishLegacyPickup() {
+	if (!ResolveHudRoute().document) return;
+	const idStr text=state.GetString("itemtext");
+	const idStr icon=state.GetString("itemicon");
+	const auto live=[&](const LegacyPickupLine& line) {
+		return line.used && time>=line.start && time-line.start<idLegacyHudLayout::PickupLife;
+	};
+	int slot=legacyPickupNewest;
+	if (live(legacyPickups[slot]) && legacyPickups[slot].text==text) {
+		++legacyPickups[slot].count;
+	} else {
+		slot=1-slot;
+		legacyPickupNewest=slot;
+		legacyPickups[slot].text=text;
+		legacyPickups[slot].count=1;
+		legacyPickups[slot].used=true;
+	}
+	LegacyPickupLine& line=legacyPickups[slot];
+	line.start=time;
+	idStr shown=line.text;
+	if (line.count>1) shown+=va(" %s%d",common->GetLanguageDict()->GetString("#str_231060"),line.count);
+	SetStateString(va("oq4_pick%d_text",slot),shown.c_str());
+	SetStateString(va("oq4_pick%d_icon",slot),icon.c_str());
+	SetStateFloat(va("oq4_pick%d_width",slot),MeasureWindowText(va("pickup%d_text",slot),shown.c_str()));
+	SetStateInt("oq4_pick_newest",slot);
+}
+
 bool idUserInterfaceLocal::DrawRemasteredHud(int drawTime) {
-	const char* document=idRemasteredHud::DocumentFor(source.c_str());
+	const char* document=ResolveHudRoute().document;
 	if (!document || !idRemasteredHud::Enabled()) { delete remastered; remastered=nullptr; return false; }
 	delete essentialHud; essentialHud=nullptr;
 	if (!remastered) remastered=new idRemasteredHud(document);
@@ -646,7 +938,8 @@ bool idUserInterfaceLocal::DrawRemasteredHud(int drawTime) {
 	// RunTimeEvents visits every child and updates expressions/transitions.
 	// Layout and paint belong to the replacement; Classic recomputes them on
 	// its next Redraw if the gate changes or the replacement fails.
-	const bool profiling=cvarSystem->GetCVarInteger("ui_hudProfile")>0;
+	static idCVar* const profile=cvarSystem->Find("ui_hudProfile");
+	const bool profiling=profile && profile->GetInteger()>0;
 	const auto started=profiling ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 	if (r_skipGuiShaders.GetInteger()!=1 && r_skipGuiShaders.GetInteger()!=3) RunTimeEvents(drawTime);
 	remastered->ProfileUnseen(profiling ? std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count() : 0);
@@ -654,7 +947,7 @@ bool idUserInterfaceLocal::DrawRemasteredHud(int drawTime) {
 }
 
 void idUserInterfaceLocal::DrawEssentialHud(int drawTime) {
-	const char* document=idRemasteredHud::AirDocumentFor(source.c_str());
+	const char* document=ResolveHudRoute().air;
 	if (!document || idRemasteredHud::Enabled()) { delete essentialHud; essentialHud=nullptr; return; }
 	if (state.GetInt("player_air","100")>=100 || state.GetInt("player_health")<=0) return;
 	if (!essentialHud) essentialHud=new idRemasteredHud(document);
@@ -665,14 +958,18 @@ void idUserInterfaceLocal::DrawEssentialHud(int drawTime) {
 bool idUserInterfaceLocal::RemasteredActive() const {
 	// Answers before the first draw too, so a caller never pairs the stock
 	// gauges with the Remastered layout for a frame.
-	return idRemasteredHud::Enabled() && idRemasteredHud::DocumentFor(source.c_str()) && !(remastered && remastered->Failed());
+	if (!idRemasteredHud::Enabled() || (remastered && remastered->Failed())) return false;
+	return hudRoute.resolved ? hudRoute.document!=nullptr : idRemasteredHud::DocumentFor(source.c_str())!=nullptr;
 }
 
 bool idUserInterfaceLocal::DrawRetainedHud() {
-	if (!idRetainedHud::Eligible(source.c_str())) {
+	if (!ResolveHudRoute().coverage || !retainedVar.Bool(false)) {
 		delete retainedHud; retainedHud=nullptr; return false;
 	}
 	if (!retainedHud) retainedHud=new idRetainedHud;
+	// A mod's own GUI, or a missing catalog, never draws through the bridge:
+	// capturing its whole frame only to discard it doubled the HUD's draw.
+	if (!retainedHud->Usable()) return false;
 	std::vector<openq4::ui::HudPrimitive> items;
 	uiManagerLocal.dc.BeginHudCapture(items);
 	uiManagerLocal.dc.PushClipRect(uiManagerLocal.screenRect);
@@ -680,7 +977,7 @@ bool idUserInterfaceLocal::DrawRetainedHud() {
 	uiManagerLocal.dc.PopClipRect();
 	uiManagerLocal.dc.EndHudCapture();
 	// RunTimeEvents is time-guarded: fallback redraw cannot replay script actions.
-	return retainedHud->Draw(source.c_str(),items);
+	return retainedHud->Draw(source.c_str(),std::move(items));
 }
 
 void idUserInterfaceManagerLocal::ClearHudPrimitives() {
@@ -722,7 +1019,7 @@ bool idUserInterfaceManagerLocal::DrawHudPrimitives(const char* source,const idL
 		}
 		items.push_back(std::move(item));
 	}
-	return generatedHuds[index]->Draw(source,items);
+	return generatedHuds[index]->Draw(source,std::move(items));
 }
 
 void idUserInterfaceManagerLocal::HudTest(const idCmdArgs& args) {
@@ -742,7 +1039,10 @@ void idUserInterfaceManagerLocal::HudTest(const idCmdArgs& args) {
 		else if (args.Argc()==5 && !idStr::Icmp(args.Argv(2),"presentation")) {
 			if (!gui->SetPresentationValue(args.Argv(3),args.Argv(4))) common->Warning("HUD probe: unknown presentation alias %s",args.Argv(3));
 		} else continue;
-		gui->StateChanged(common->GetPresentationTime()); ++count;
+		// The GUI's own clock: a stock HUD runs on game time, and the
+		// presentation clock would start its timelines far from it.
+		const auto* local=dynamic_cast<idUserInterfaceLocal*>(gui);
+		gui->StateChanged(local ? local->GetTime() : common->GetPresentationTime()); ++count;
 	}
 	if (!count) common->Warning("HUD probe: no matching GUI or operation: %s",args.Argv(1));
 }

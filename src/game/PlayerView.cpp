@@ -1031,8 +1031,8 @@ void idPlayerView::VRView( idUserInterface *hud, const renderView_t *view, const
 	eyeOrigin.z += player->VRCrouchLift( vrFrame );
 
 	// the listener follows the tracked head
+	idVec3 headOrigin = eyeOrigin;
 	if ( vrFrame.head.valid ) {
-		idVec3 headOrigin;
 		idMat3 headAxis;
 		vrPose_t head = vrFrame.head;
 		head.origin += VR_HeadOffsetCorrection( vrFrame );
@@ -1046,13 +1046,18 @@ void idPlayerView::VRView( idUserInterface *hud, const renderView_t *view, const
 	const idMaterial *aimMaterial = drawAimMarker ? declManager->FindMaterial( "_white" ) : NULL;
 	// a weapon's zoom magnifies each eye by its own ratio, eased like the flat
 	// screen's field of view; the headset's own field of view cannot narrow
-	const float zoomScale = VR_ZoomTangentScale( player->CalcFov( true ), player->CalcFov( false ) );
+	const float zoomScale = player->VRZoomScale();
 	// zoomed, the dot alone marks the shot: a beam from the hidden gun would
 	// cut across the magnified view
 	const int aimLaser = ( zoomScale < 1.0f && vrFrame.aimLaser == VR_AIM_LASER_BEAM ) ? VR_AIM_LASER_DOT : vrFrame.aimLaser;
 	// the edges of each eye darken while the stick moves or turns the player
 	const float vignette = VRComfortVignette( vrFrame, trackingYaw );
 	const idMaterial *vignetteMaterial = vignette > 0.01f ? declManager->FindMaterial( "_white" ) : NULL;
+	// vr_debug 2 logs every frame: where the drawn head stands in the world,
+	// which a room-scale walk must not move, and the vignette over it
+	if ( vrFrame.head.valid && cvarSystem->GetCVarInteger( "vr_debug" ) >= 2 ) {
+		common->Printf( "VR drawn head %d (%s) vignette %.3f\n", vrFrame.frameNumber, headOrigin.ToString( 2 ), vignette );
+	}
 
 	for ( int eye = 0; eye < VR_NUM_EYES; eye++ ) {
 		if ( !renderSystem->SetVRRenderTarget( eye ) ) {

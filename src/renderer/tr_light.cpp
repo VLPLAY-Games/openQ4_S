@@ -961,6 +961,25 @@ viewLight_t *R_SetLightDefViewLight( idRenderLightLocal *light ) {
 	}
 	light->viewCount = tr.viewCount;
 
+	// A light whose map failed builds its stencil volumes again so that it has
+	// a fallback. It still tries its map in every view, and once it has been
+	// through enough views with nothing asking for the fallback (a failed pass
+	// in either renderer, or a caster its map cannot hold) it stops building
+	// them. Kept for good, one bad frame cost the light its volume elision for
+	// the rest of the level. Decided here, before any of the light's
+	// interactions are looked at for this view, so that a view never has some
+	// volumes and not others.
+	if ( light->shadowMapStencilFallbackSticky ) {
+		const int holdViews = r_shadowMapStencilFallbackViews.GetInteger();
+		if ( holdViews > 0
+				&& ++light->shadowMapStencilFallbackCleanViews > holdViews ) {
+			light->shadowMapStencilFallbackSticky = false;
+			light->shadowMapStencilFallbackCleanViews = 0;
+			common->DPrintf( "shadow map light %d left the stencil fallback after %d views without a failure\n",
+				light->index, holdViews );
+		}
+	}
+
 	// add to the view light chain
 	vLight = (viewLight_t *)R_ClearedFrameAlloc( sizeof( *vLight ) );
 	vLight->lightDef = light;
@@ -1279,6 +1298,12 @@ typedef struct drawSurfAreaMemo_s {
 } drawSurfAreaMemo_t;
 
 static const int DRAWSURF_AREA_MEMO_MAX = 65536;
+// idList grows by its granularity, 16 entries by default, so warming the memo
+// up recopied every entry each 16 inserts, megabytes per resize near the cap;
+// 1024 hash heads also left long chains there. Neither size changes which
+// entry a lookup finds.
+static const int DRAWSURF_AREA_MEMO_GRANULARITY = 4096;
+static const int DRAWSURF_AREA_MEMO_HASH_SIZE = 16384;
 static idList<drawSurfAreaMemo_t>	s_drawSurfAreaMemo;
 static idHashIndex					s_drawSurfAreaMemoHash;
 static idHashIndex					s_drawSurfAreaMemoEntityHash;
@@ -1295,6 +1320,14 @@ void R_ClearDrawSurfAreaMemo( void ) {
 	s_drawSurfAreaMemo.Clear();
 	s_drawSurfAreaMemoHash.Free();
 	s_drawSurfAreaMemoEntityHash.Free();
+}
+
+// The size cap only needs the contents dropped, so keep the storage rather
+// than regrowing it from nothing.
+static void R_ResetDrawSurfAreaMemo( void ) {
+	s_drawSurfAreaMemo.SetNum( 0, false );
+	s_drawSurfAreaMemoHash.Clear();
+	s_drawSurfAreaMemoEntityHash.Clear();
 }
 
 void R_InvalidateDrawSurfAreaMemoForEntity( const idRenderEntityLocal *entityDef ) {
@@ -1346,7 +1379,18 @@ static const portalArea_t *R_ResolveDrawSurfArea( const srfTriangles_t *tri, con
 
 	if ( entryIndex == -1 ) {
 		if ( s_drawSurfAreaMemo.Num() >= DRAWSURF_AREA_MEMO_MAX ) {
-			R_ClearDrawSurfAreaMemo();
+			R_ResetDrawSurfAreaMemo();
+		}
+		if ( s_drawSurfAreaMemo.GetGranularity() != DRAWSURF_AREA_MEMO_GRANULARITY ) {
+			// First insertion: size the list and both hashes once. SetGranularity
+			// would shrink a live list to its count, so it runs only here.
+			s_drawSurfAreaMemo.SetGranularity( DRAWSURF_AREA_MEMO_GRANULARITY );
+			if ( s_drawSurfAreaMemo.Num() == 0 ) {
+				s_drawSurfAreaMemoHash.Clear( DRAWSURF_AREA_MEMO_HASH_SIZE, DRAWSURF_AREA_MEMO_GRANULARITY );
+				s_drawSurfAreaMemoEntityHash.Clear( DRAWSURF_AREA_MEMO_HASH_SIZE, DRAWSURF_AREA_MEMO_GRANULARITY );
+			}
+			s_drawSurfAreaMemoHash.SetGranularity( DRAWSURF_AREA_MEMO_GRANULARITY );
+			s_drawSurfAreaMemoEntityHash.SetGranularity( DRAWSURF_AREA_MEMO_GRANULARITY );
 		}
 		entryIndex = s_drawSurfAreaMemo.Num();
 		drawSurfAreaMemo_t &newEntry = s_drawSurfAreaMemo.Alloc();
@@ -1559,6 +1603,358 @@ static idRenderModel *R_ViewLightPrelightModel( viewLight_t *vLight ) {
 	return prelightModel;
 }
 
+#ifdef OPENQ4_RENDERER_VK_MODULE
+// whether any surface with geometry of a model, drawn with an entity's skin
+// and custom shader, uses authored GLSL lighting
+static bool R_ModelReceiverNeedsStencil( const idRenderModel *model, const renderEntity_t &parms ) {
+	for ( int i = 0; i < model->NumSurfaces(); ++i ) {
+		const modelSurface_t *surf = model->Surface( i );
+		if ( surf == NULL || surf->geometry == NULL ) {
+			continue;
+		}
+		if ( VK_MaterialPrograms_NeedsStencil(
+				R_RemapShaderBySkin( surf->shader, parms.customSkin, parms.customShader ), NULL ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+=================
+R_EntityReceiverVerdict
+
+The same verdict for every surface of the model an entity last drew. An
+animating entity's interactions are freed on every update, so until its turn
+comes in R_AddModelSurfaces each of its lights has an unbuilt interaction
+again, every frame. This remembered verdict answers for it while the entity
+still names the model, skin and custom shader it was taken from: those decide
+the material of every surface it draws.
+
+It is taken again from each model instance the entity builds interactions
+for, so a surface that the entity gains without changing any of the three (an
+overlay, a suppression mask, a LOD) is seen one view late.
+=================
+*/
+static bool R_EntityReceiverVerdict( const idRenderEntityLocal *def, const int generation, bool &needed ) {
+	if ( def->stencilReceiverGeneration != generation
+			|| def->stencilReceiverModel != def->parms.hModel
+			|| def->stencilReceiverSkin != def->parms.customSkin
+			|| def->stencilReceiverShader != def->parms.customShader ) {
+		return false;
+	}
+	needed = def->stencilReceiverNeeded;
+	return true;
+}
+
+/*
+=================
+R_InteractionReceiverNeedsStencil
+
+Whether a receiver surface of a built (or building) interaction uses
+authored GLSL lighting (VK_MaterialPrograms_NeedsStencil). A finished
+interaction counts only its filled slots: a NULL slot is a surface with no
+geometry, no shader or no contact with the light frustum, which receives
+nothing. While CreateInteraction runs, the later slots are still NULL, so
+the verdict covers every model surface with geometry instead, a superset of
+the slots it can fill. Cached for the interaction's surface set.
+=================
+*/
+static bool R_InteractionReceiverNeedsStencil( const idInteraction *inter, const int generation ) {
+	if ( inter->stencilReceiverGeneration == generation ) {
+		return inter->stencilReceiverNeeded;
+	}
+	bool needed = false;
+	if ( inter->buildModel != NULL ) {
+		needed = R_ModelReceiverNeedsStencil( inter->buildModel, inter->entityDef->parms );
+	} else {
+		for ( int i = 0; i < inter->numSurfaces && !needed; ++i ) {
+			needed = VK_MaterialPrograms_NeedsStencil( inter->surfaces[i].shader, NULL );
+		}
+	}
+	inter->stencilReceiverGeneration = generation;
+	inter->stencilReceiverNeeded = needed;
+	return needed;
+}
+
+/*
+=================
+R_ShadowMapReceiversAllowMaps
+
+Authored lighting has no engine shadow-map sampler in its shader ABI. Its
+receiver chain uses stencil, so retain volumes before any entity's
+interaction is submitted. Checking only the currently submitted surface is
+too late: earlier entities may already have discarded their volumes. An
+unbuilt interaction is conservatively unknown, never evidence that every
+receiver supports maps. This also covers newly spawned receivers.
+
+Three unbuilt interactions cannot gain receivers in this view and are skipped:
+one whose entity is not a view entity (R_AddModelSurfaces never visits it,
+and entities that become view entities later, such as through-world
+outlines, build no interactions), one that AddActiveInteraction already left
+unbuilt (it runs once per interaction per view), and one whose entity the
+view does not see. An interaction still waiting for its visible entity's turn
+is answered by that entity's model: the model itself when it is static, the
+verdict of the model it last drew when it animates (R_EntityReceiverVerdict).
+It stays unknown only for an animating entity that has drawn none; that only
+costs volumes, never a missing shadow.
+
+The verdict is asked once per surface while interactions are built and
+linked, so it is memoized on the view light and recomputed only after one of
+the light's interactions changes state (idInteraction invalidates it).
+=================
+*/
+static bool R_ShadowMapReceiversAllowMaps( const idRenderLightLocal *lightDef ) {
+	viewLight_t *vLight = lightDef->viewCount == tr.viewCount ? lightDef->viewLight : NULL;
+	if ( vLight != NULL && vLight->shadowMapReceiverScanValid ) {
+		return vLight->shadowMapReceiverScanAllowsMaps;
+	}
+	const int generation = VK_MaterialPrograms_NeedsStencilGeneration();
+	bool allowsMaps = true;
+	for ( const idInteraction *inter = lightDef->firstInteraction; inter != NULL; inter = inter->lightNext ) {
+		if ( inter->IsDeferred() ) {
+			idRenderEntityLocal *entityDef = inter->entityDef;
+			if ( entityDef->viewCount != tr.viewCount || inter->unbuiltVisitView == tr.viewCount ) {
+				continue;
+			}
+			// An entity the view does not see links no receivers, whatever its
+			// interaction goes on to build: AddActiveInteraction links light
+			// surfaces only inside the entity's scissor, which never grows.
+			// The player's own body and head are such entities in every
+			// first-person frame, and they touch every light near the camera.
+			if ( entityDef->viewEntity == NULL || entityDef->viewEntity->scissorRect.IsEmpty() ) {
+				continue;
+			}
+			// A static model is the model its interactions are built from.
+			const idRenderModel *hModel = entityDef->parms.hModel;
+			if ( hModel != NULL && hModel->IsDynamicModel() == DM_STATIC && entityDef->parms.callback == NULL ) {
+				R_ShadowMapNoteEntityModel( entityDef, hModel );
+			}
+			bool entityNeedsStencil = false;
+			if ( R_EntityReceiverVerdict( entityDef, generation, entityNeedsStencil )
+					&& !entityNeedsStencil ) {
+				continue;
+			}
+			allowsMaps = false;
+			break;
+		}
+		if ( R_InteractionReceiverNeedsStencil( inter, generation ) ) {
+			allowsMaps = false;
+			break;
+		}
+	}
+	if ( vLight != NULL ) {
+		vLight->shadowMapReceiverScanValid = true;
+		vLight->shadowMapReceiverScanAllowsMaps = allowsMaps;
+	}
+	return allowsMaps;
+}
+#endif
+
+/*
+=================
+R_ShadowMapNoteEntityModel
+
+Called for the model each interaction is built from. Takes the entity's
+receiver verdict once per model instance (R_EntityReceiverVerdict); only the
+Vulkan front end asks for it.
+=================
+*/
+void R_ShadowMapNoteEntityModel( idRenderEntityLocal *def, const idRenderModel *model ) {
+#ifdef OPENQ4_RENDERER_VK_MODULE
+	// nothing asks while no light can shed its volumes; an entity first seen
+	// then is unknown for the one view after they can
+	if ( def == NULL || model == NULL || !r_shadowMapSkipStencilShadows.GetBool()
+			|| !r_useShadowMap.GetBool() || !r_shadows.GetBool() ) {
+		return;
+	}
+	const int generation = VK_MaterialPrograms_NeedsStencilGeneration();
+	if ( def->stencilReceiverGeneration == generation
+			&& def->stencilReceiverInstance == model
+			&& def->stencilReceiverInstanceFrame == def->dynamicModelFrameCount
+			&& def->stencilReceiverModel == def->parms.hModel
+			&& def->stencilReceiverSkin == def->parms.customSkin
+			&& def->stencilReceiverShader == def->parms.customShader ) {
+		return;
+	}
+	def->stencilReceiverNeeded = R_ModelReceiverNeedsStencil( model, def->parms );
+	def->stencilReceiverGeneration = generation;
+	def->stencilReceiverInstance = model;
+	def->stencilReceiverInstanceFrame = def->dynamicModelFrameCount;
+	def->stencilReceiverModel = def->parms.hModel;
+	def->stencilReceiverSkin = def->parms.customSkin;
+	def->stencilReceiverShader = def->parms.customShader;
+#else
+	(void)def;
+	(void)model;
+#endif
+}
+
+/*
+=================
+R_ShadowMapGatherAtlasRequests
+
+The view's atlas lights: projected, parallel and distant point lights, which
+share one projected atlas that Vulkan allocates afresh for every view. Point
+lights take cubes from a pool no view exhausts and are not among them.
+
+Before the view's interactions are known every such light is counted for two
+blocks, one per receiver ownership, at the smallest tile it may be given: the
+most the finished view can ask for. Once they are known a light counts for
+the ownerships that will need a block of their own, at the tile it has alone,
+and a light with no shadowed receiver is left out.
+
+Returns the count, or -1 when the view has more atlas lights than fit the
+request list.
+=================
+*/
+static int R_ShadowMapGatherAtlasRequests( const viewDef_t *viewDef, const bool interactionsKnown,
+		const int atlasSize, shadowMapAtlasRequest_t *requests, viewLight_t **lights ) {
+	int count = 0;
+	for ( viewLight_t *vLight = viewDef->viewLights; vLight != NULL; vLight = vLight->next ) {
+		const idRenderLightLocal *lightDef = vLight->lightDef;
+		if ( lightDef == NULL || lightDef->lightShader == NULL
+				|| !lightDef->lightShader->LightCastsShadows()
+				|| !R_ShadowMapsNeedPerSurfaceStencilVolumes( lightDef ) ) {
+			continue;
+		}
+		const shadowMapLightClassification_t classification = R_ClassifyShadowMapLight( vLight );
+		if ( classification.pointLight ) {
+			continue;
+		}
+		const int atlasDiv = idMath::ClampInt( 1, 2, classification.atlasDiv );
+		const int tileSize = R_ShadowMapProjectedTileSize( NULL, atlasDiv, atlasSize );
+		if ( tileSize <= 0 ) {
+			continue;
+		}
+
+		int passes = 2;
+		if ( interactionsKnown ) {
+			// VK_ShadowMap_PrepareViewLights: GLOBAL shares the LOCAL block
+			// when the light has no local caster of any kind
+			const bool localReceivers = vLight->localInteractions != NULL;
+			const bool globalReceivers = vLight->globalInteractions != NULL
+				|| ( r_shadowMapTranslucentReceivers.GetBool() && vLight->translucentInteractions != NULL );
+			const bool localCasters = vLight->localShadowMapCasters != NULL
+				|| vLight->localShadowMapDynamicCasters != NULL
+				|| vLight->localTranslucentShadowMapCasters != NULL;
+			passes = ( localReceivers ? 1 : 0 ) + ( globalReceivers ? 1 : 0 );
+			if ( passes == 0 ) {
+				continue;
+			}
+			if ( passes == 2 && !localCasters ) {
+				passes = 1;
+			}
+		}
+		if ( count >= SHADOWMAP_ATLAS_MAX_REQUESTS ) {
+			return -1;
+		}
+
+		// What the light covers: the width of an ordinary projector's far
+		// face. Sunlight, global and distant point sources are fitted to the
+		// view or to the world and give up resolution last.
+		float extent = idMath::INFINITY;
+		if ( classification.ordinaryProjectedLight ) {
+			const renderLight_t &parms = lightDef->parms;
+			const float targetLength = parms.target.Length();
+			const float endLength = parms.end.Length();
+			extent = 2.0f * Max( parms.right.Length(), parms.up.Length() );
+			if ( targetLength > 0.0f && endLength > targetLength ) {
+				extent *= endLength / targetLength;
+			}
+		}
+
+		shadowMapAtlasRequest_t &request = requests[count];
+		request.minTileSize = R_ShadowMapAtlasMinTileSize( tileSize );
+		request.tileSize = interactionsKnown ? tileSize : request.minTileSize;
+		request.atlasDiv = atlasDiv;
+		request.passes = passes;
+		request.extent = extent;
+		if ( lights != NULL ) {
+			lights[count] = vLight;
+		}
+		count++;
+	}
+	return count;
+}
+
+// the atlas edge both back ends create (RB_ShadowMapAtlasSizeValue, VK_ShadowMap_AtlasSizeValue)
+static int R_ShadowMapAtlasSizeValue( void ) {
+	return Min( idMath::ClampInt( 2048, 16384, r_shadowMapAtlasSize.GetInteger() ),
+		glConfig.maxTextureSize > 0 ? glConfig.maxTextureSize : 4096 );
+}
+
+/*
+=================
+R_ShadowMapAtlasHoldsView
+
+On Vulkan a light that finds no block left in the atlas has only its stencil
+volumes to fall back on in that frame, so an atlas light may shed them only in
+a view whose atlas lights are certain to fit. The view's interactions are not
+known yet when this is asked, so it asks whether every atlas light of the view
+would fit with two blocks at its smallest tile: if that holds,
+R_ShadowMapAssignAtlasTiles finds sizes that fit once the view is finished.
+Lights the view drops later are counted too, which only errs towards keeping
+volumes.
+=================
+*/
+static bool R_ShadowMapAtlasHoldsView( void ) {
+	// the OpenGL back end asks too, after the front end has left the view
+	const viewDef_t *viewDef = tr.viewDef != NULL ? tr.viewDef : backEnd.viewDef;
+	if ( viewDef == NULL ) {
+		return false;
+	}
+	static const viewDef_t *cachedView = NULL;
+	static int cachedFrame = -1;
+	static bool cachedHolds = false;
+	if ( cachedView == viewDef && cachedFrame == tr.frameCount ) {
+		return cachedHolds;
+	}
+
+	const int atlasSize = R_ShadowMapAtlasSizeValue();
+	shadowMapAtlasRequest_t requests[SHADOWMAP_ATLAS_MAX_REQUESTS];
+	const int count = R_ShadowMapGatherAtlasRequests( viewDef, false, atlasSize, requests, NULL );
+
+	cachedView = viewDef;
+	cachedFrame = tr.frameCount;
+	cachedHolds = count >= 0 && R_ShadowMapFitAtlasTiles( atlasSize, requests, count );
+	return cachedHolds;
+}
+
+/*
+=================
+R_ShadowMapAssignAtlasTiles
+
+Sets the tile size of every atlas light of the finished view, so that the
+blocks both back ends cut for them fit the atlas together. A view that fits
+as it is leaves every light the tile it has alone. Four tiles are all Quality
+and Ultra cut, and a light with both receiver ownerships takes two, so a view
+of three projected lights used to leave one of them on stencil for the rest
+of the level on Vulkan and re-rendering every view on OpenGL.
+
+A light that was not assigned (a point cube light, a light with nothing to
+shadow, a view with shadow maps off) keeps 0 and the back ends use
+r_shadowMapSize.
+=================
+*/
+void R_ShadowMapAssignAtlasTiles( viewDef_t *viewDef ) {
+	if ( viewDef == NULL || !r_shadows.GetBool() || !r_useShadowMap.GetBool() ) {
+		return;
+	}
+	const int atlasSize = R_ShadowMapAtlasSizeValue();
+	shadowMapAtlasRequest_t requests[SHADOWMAP_ATLAS_MAX_REQUESTS];
+	viewLight_t *lights[SHADOWMAP_ATLAS_MAX_REQUESTS];
+	const int count = R_ShadowMapGatherAtlasRequests( viewDef, true, atlasSize, requests, lights );
+	if ( count <= 0 ) {
+		// none, or more than the list holds: every light keeps r_shadowMapSize
+		return;
+	}
+	R_ShadowMapFitAtlasTiles( atlasSize, requests, count );
+	for ( int i = 0; i < count; ++i ) {
+		lights[i]->shadowMapTileSize = requests[i].tileSize;
+	}
+}
+
 /*
 =================
 R_ShadowMapLightWillUseShadowMaps
@@ -1569,9 +1965,13 @@ shadow volumes are never drawn, so their generation and linking can be
 skipped. The mirror must stay conservative: any condition the backend could
 fail at render time is covered by the per-light sticky fallback flag and the
 backend-published resource generation.
+
+applySubviewPolicy false asks the same question for every view of the frame:
+whether surfaces built without their dynamic volumes may stay that way
+(idInteraction::AddActiveInteraction).
 =================
 */
-bool R_ShadowMapLightWillUseShadowMaps( const idRenderLightLocal *lightDef ) {
+bool R_ShadowMapLightWillUseShadowMaps( const idRenderLightLocal *lightDef, const bool applySubviewPolicy ) {
 	if ( !r_shadowMapSkipStencilShadows.GetBool() || !r_useShadowMap.GetBool() || !r_shadows.GetBool() ) {
 		return false;
 	}
@@ -1582,20 +1982,11 @@ bool R_ShadowMapLightWillUseShadowMaps( const idRenderLightLocal *lightDef ) {
 	// Subview policies 1/2 can reject a fresh map after front-end submission
 	// (reuse-or-stencil / always-stencil). Keep legacy volumes available so a
 	// cache miss or backend without subview reuse never loses the shadow.
-	if ( tr.viewDef != NULL && tr.viewDef->isSubview
+	if ( applySubviewPolicy && tr.viewDef != NULL && tr.viewDef->isSubview
 			&& r_shadowMapSubviewPolicy.GetInteger() > 0 ) {
 		return false;
 	}
 	if ( lightDef == NULL || lightDef->shadowMapStencilFallbackSticky ) {
-		return false;
-	}
-	// Optimized prelights replace every static-world per-surface volume with
-	// one combined volume.  Whether every such surface is representable in a
-	// shadow map is known only after the light's complete interaction list is
-	// walked.  Keep entity/dynamic volumes resident for these lights so a later
-	// prelight map miss can still select a complete whole-light stencil path.
-	if ( r_useOptimizedShadows.GetBool()
-			&& R_LightHasRealPrelightModel( lightDef->parms ) ) {
 		return false;
 	}
 	if ( lightDef->parms.noShadows || lightDef->parms.noDynamicShadows ) {
@@ -1618,22 +2009,17 @@ bool R_ShadowMapLightWillUseShadowMaps( const idRenderLightLocal *lightDef ) {
 		if ( !r_shadowMapPointLights.GetBool() || !glConfig.cubeMapAvailable ) {
 			return false;
 		}
+	} else if ( !R_ShadowMapAtlasHoldsView() ) {
+		// A mapped light casts from per-surface volumes even where dmap baked
+		// a prelight (R_ShadowMapsNeedPerSurfaceStencilVolumes), so a prelit
+		// light, nine in ten, has the fallback every other light has and sheds
+		// it the same way. What an atlas light cannot count on is its tile.
+		return false;
 	}
 	if ( !RB_ShadowMapResourcesKnownGood( pointLightPath ) ) { return false; }
 #ifdef OPENQ4_RENDERER_VK_MODULE
-	// Authored lighting has no engine shadow-map sampler in its shader ABI.
-	// Its receiver chain uses stencil, so retain volumes before any entity's
-	// interaction is submitted. Checking only the currently submitted surface
-	// is too late: earlier entities may already have discarded their volumes.
-	// An unbuilt interaction is conservatively unknown, never evidence that
-	// every receiver supports maps. This also covers newly spawned receivers.
-	for ( const idInteraction *inter = lightDef->firstInteraction; inter != NULL; inter = inter->lightNext ) {
-		if ( inter->numSurfaces < 0 ) { return false; }
-		for ( int i = 0; i < inter->numSurfaces; ++i ) {
-			if ( inter->surfaces[i].shader == NULL
-					|| VK_MaterialPrograms_NeedsStencil( inter->surfaces[i].shader, NULL ) ) { return false; }
-		}
-	}
+	// Lights with an authored-lighting receiver keep their stencil chain.
+	if ( !R_ShadowMapReceiversAllowMaps( lightDef ) ) { return false; }
 #endif
 	return true;
 }
@@ -2070,6 +2456,9 @@ idRenderModel *R_EntityDefDynamicModel( idRenderEntityLocal *def, bool collision
 
 	// if we don't have a snapshot of the dynamic model, generate it now
 	if ( !def->dynamicModel ) {
+		// A snapshot that replaces an earlier one is a model changing. The
+		// first one is only the model being looked at for the first time.
+		const bool replacesSnapshot = def->cachedDynamicModel != NULL;
 
 		// instantiate the snapshot of the dynamic model, possibly reusing memory from the cached snapshot
 		def->cachedDynamicModel = model->InstantiateDynamicModel( &def->parms, tr.viewDef, def->cachedDynamicModel,
@@ -2099,6 +2488,9 @@ idRenderModel *R_EntityDefDynamicModel( idRenderEntityLocal *def, bool collision
 
 		def->dynamicModel = def->cachedDynamicModel;
 		def->dynamicModelFrameCount = tr.frameCount;
+		if ( replacesSnapshot ) {
+			def->dynamicModelRegenFrame = tr.frameCount;
+		}
 
 		// record the joint-content hash this snapshot was built from so a later
 		// transform-only UpdateEntityDef can prove the snapshot is still valid
@@ -2846,7 +3238,8 @@ void R_AddEffectSurfaces(void) {
 	int dropFrustumCull = 0;
 	int dropScissor = 0;
 
-	effectSubmit_t *pending = (effectSubmit_t *)R_FrameAlloc( Max( 1, world->effectsDef.Num() ) * sizeof( effectSubmit_t ) );
+	int pendingCapacity = Max( 1, world->effectsDef.Num() );
+	effectSubmit_t *pending = (effectSubmit_t *)R_FrameAlloc( pendingCapacity * sizeof( effectSubmit_t ) );
 	int numPending = 0;
 
 	for (int i = 0; i < world->effectsDef.Num(); i++) {
@@ -3050,6 +3443,15 @@ void R_AddEffectSurfaces(void) {
 			continue;
 		}
 
+		// Servicing and rendering an effect can start others through the game
+		// (impact, timeout and child effects reach AddEffectDef), and this loop
+		// visits the defs they append, so the list can outgrow its first size.
+		if ( numPending == pendingCapacity ) {
+			effectSubmit_t *grown = (effectSubmit_t *)R_FrameAlloc( pendingCapacity * 2 * sizeof( effectSubmit_t ) );
+			memcpy( grown, pending, numPending * sizeof( pending[0] ) );
+			pending = grown;
+			pendingCapacity *= 2;
+		}
 		effectSubmit_t &submit = pending[numPending++];
 		submit.def = def;
 		submit.space = vEffect;
@@ -3500,6 +3902,8 @@ void R_AddModelSurfaces( void ) {
 			if ( model == NULL || model->NumSurfaces() <= 0 ) {
 				continue;
 			}
+			// an entity whose interactions are all culled still has a model
+			R_ShadowMapNoteEntityModel( vEntity->entityDef, model );
 
 			R_AddAmbientDrawsurfs( vEntity );
 			tr.pc.c_visibleViewEntities++;

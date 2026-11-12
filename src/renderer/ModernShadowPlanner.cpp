@@ -3122,6 +3122,14 @@ bool RendererShadowProjectedDiagnostic_RunSelfTest( void ) {
 	if ( !R_ShadowMapPointFaceBoundsSelfTest() ) {
 		return false;
 	}
+	if ( !R_ShadowMapCachePolicySelfTest() ) {
+		common->Printf( "RendererShadowProjectedDiagnostic self-test failed (cache policy)\n" );
+		return false;
+	}
+	if ( !R_ShadowMapCasterFacesSelfTest() ) {
+		common->Printf( "RendererShadowProjectedDiagnostic self-test failed (caster faces)\n" );
+		return false;
+	}
 	// pure-math stabilization pins run regardless of planner availability
 	if ( !R_ShadowMapCascadeStabilitySelfTest() ) {
 		common->Printf( "RendererShadowProjectedDiagnostic self-test failed (cascade stability)\n" );

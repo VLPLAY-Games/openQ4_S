@@ -37,6 +37,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "RendererResourceSettings.h"
 #include "RendererUpload.h"
 #include "ScenePackets.h"
+#include "ShadowMapClassification.h"
 #include "TemporalPresentation.h"
 #include "SavePreviewCapture.h"
 #include "DisplayPresentation.h"
@@ -418,7 +419,9 @@ R_RenderThread_FrameQualifies
 Only ordinary presented frames run on the render thread. Captures,
 tiled screenshots and loading screens keep the inline backend: they read the
 result back, or interleave with level loading that creates and destroys
-device resources. VR presents only on OpenGL.
+device resources. A VR frame stays inline too: the engine releases the
+headset's swapchain images as soon as EndFrame returns, and the runtime may
+composite them from then on, so the backend has to be done drawing by then.
 ====================
 */
 bool R_RenderThread_FrameQualifies( void ) {
@@ -435,6 +438,7 @@ bool R_RenderThread_FrameQualifies( void ) {
 	// tic adds to and frees. A checked image reload binds image work to the
 	// main thread.
 	return !tr.takingScreenshot
+		&& !tr.vrFrame.active
 		&& tr.tiledViewport[0] == 0
 		&& !R_LoadingScreenActive()
 		&& ( tr.specialEffectsEnabled & SPECIAL_EFFECT_AL ) == 0
@@ -1517,6 +1521,10 @@ void idRenderSystemLocal::BeginFrame( int windowWidth, int windowHeight ) {
 		}
 	}
 
+	// a changed image_ignoreHighQuality re-parses the materials that read it,
+	// here, where no draw surface of this frame references a stage yet
+	R_CheckMaterialQualityInputs();
+
 	guiModel->Clear();
 	if ( demoFrameGuiModel != NULL ) {
 		// a frame's recorded 2D starts empty, whatever the last frame drew
@@ -1638,6 +1646,9 @@ void idRenderSystemLocal::BeginFrame( int windowWidth, int windowHeight ) {
 
 	// set the time for shader effects in 2D rendering
 	SetFrameShaderTime( eventLoop->Milliseconds() );
+	// the wall clock, not the event clock: the shadow-map static/live caster
+	// split follows rendered frames even while the game is paused or scaled
+	R_ShadowMapBeginFrame( Sys_Milliseconds() );
 
 	//
 	// draw buffer stuff
@@ -2363,6 +2374,14 @@ int idRenderSystemLocal::PollSavePreview( const char *fileName ) {
 void idRenderSystemLocal::CancelSavePreview() {
 	R_RenderThread_Sync( "save preview" );
 	RB_ReleaseSavePreview();
+}
+
+bool idRenderSystemLocal::ReloadGeneratedCacheImages() {
+	// with no device no texture is resident, so nothing holds cache pixels
+	if ( !IsOpenGLRunning() || globalImages == NULL ) {
+		return true;
+	}
+	return globalImages->ReloadGeneratedCacheImages();
 }
 
 void idRenderSystemLocal::CaptureRenderToFile( const char *fileName, bool fixAlpha,

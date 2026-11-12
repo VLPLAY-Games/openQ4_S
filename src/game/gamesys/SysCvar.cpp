@@ -506,7 +506,7 @@ idCVar pm_vehicleSoundLerpScale(	"pm_vehicleSoundLerpScale",		"10",		CVAR_GAME |
 idCVar g_showPlayerShadow(			"g_showPlayerShadow",		"1",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "enables shadow of player model" );
 idCVar g_showPresentationPose(		"g_showPresentationPose",	"0",			CVAR_GAME | CVAR_BOOL, "report whether the local player's body reaches the presentation clock" );
 idCVar g_presentationClockCapture(	"g_presentationClockCapture",	"0",		CVAR_GAME | CVAR_INTEGER, "capture this many presentation-clock samples, then dump them once" );
-idCVar g_dynamicLightShadows(		"g_dynamicLightShadows",	"-1",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_INTEGER, "gun flashlight and projectile lights request shadows: -1 = auto (high machine spec, the retail behavior), 0 = never, 1 = always", -1, 1 );
+idCVar g_dynamicLightShadows(		"g_dynamicLightShadows",	"-1",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_INTEGER, "gun flashlight and projectile lights request shadows: -1 = auto (the flashlight wherever shadows are drawn, projectile lights at the highest machine spec as in retail), 0 = never, 1 = always", -1, 1 );
 
 bool G_DynamicLightShadowsEnabled( void ) {
 	const int mode = g_dynamicLightShadows.GetInteger();
@@ -518,12 +518,27 @@ bool G_DynamicLightShadowsEnabled( void ) {
 	return mode != 0;
 }
 
+// The flashlight is one projected light that follows the player, not a crowd
+// of short-lived projectile lights, so auto asks for its shadow on every
+// preset. Shadow-mapped presets draw it as a single projected map; the stencil
+// presets draw the volumes retail drew at its top machine spec. Presets that
+// draw no shadows at all (r_shadows 0) skip it in the renderer, and the flag
+// does not need refreshing when the preset changes.
+bool G_FlashlightShadowsEnabled( void ) {
+	// auto (-1) and always (1) both ask for it
+	return g_dynamicLightShadows.GetInteger() != 0;
+}
+
 // Gibs, dissolving/sinking corpses, and fading client moveables forced
 // noShadow in the stencil era: per-chunk volumes were expensive and could
 // not follow alpha-tested dissolves. The shadow-map caster path handles
-// both, so they keep casting while it is active.
+// both, so they keep casting while it is active for every light class. With
+// point lights left on stencil (r_shadowMapPointLights 0, the Enhanced
+// preset) nineteen lights in twenty would draw exactly the volumes retail
+// suppressed, so those entities stay shadowless there as in retail.
 bool G_ShadowMapCorpseShadowsEnabled( void ) {
-	return cvarSystem->GetCVarBool( "r_useShadowMap" );
+	return cvarSystem->GetCVarBool( "r_useShadowMap" )
+		&& cvarSystem->GetCVarBool( "r_shadowMapPointLights" );
 }
 
 idCVar g_skipPlayerShadowsMP(		"g_skipPlayerShadowsMP",	"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "disables all player shadows in multiplayer" );
@@ -573,6 +588,11 @@ idCVar g_crosshairCharInfoFar(		"g_crosshairCharInfoFar",	"1",			CVAR_GAME | CVA
 idCVar hud_hitMarker(				"hud_hitMarker",			"0",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "crosshair hit marker on hits you land" );
 idCVar hud_hitMarkerScale(			"hud_hitMarkerScale",		"1",			CVAR_GAME | CVAR_ARCHIVE | CVAR_FLOAT, "hit marker size multiplier, on top of g_crosshairSize", 0.25f, 4.0f );
 idCVar hud_crosshairHitFlash(		"hud_crosshairHitFlash",	"0",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "recolour the crosshair on a hit, as stock Quake 4 does; implied when hud_hitMarker is off" );
+// openQ4: the weapon's own crosshair design drawn live.  Its pieces assemble as
+// the weapon is raised, kick with each shot, close as it charges, wait while it
+// cycles and stand down while it reloads, and hit feedback docks into the design.
+// Retained interface only: the stock interface keeps the still picture.
+idCVar hud_crosshairAnimated(		"hud_crosshairAnimated",	"1",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "animated crosshair: the weapon's crosshair drawn live, answering shots, charge, reload and hits; needs ui_retained 1" );
 // openQ4 END
 // bdube: database entries
 idCVar g_showHudPopups(				"g_showHudPopups",			"1",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "displays objective and database popups on the hud" );

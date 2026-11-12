@@ -165,7 +165,7 @@ void idUserInterfaceManaged::RefreshThinking() {
 bool UI_IsRetainedPath( const char *qpath ) {
 	if ( qpath == NULL ) { return false; }
 	const int length = idStr::Length( qpath );
-	return length >= 5 && idStr::Icmp( qpath + length - 5, ".q4ui" ) == 0;
+	return length >= 4 && idStr::Icmp( qpath + length - 4, ".rui" ) == 0;
 }
 
 idUserInterfaceManaged *UI_CreateForPath( const char *qpath, bool managed ) {
@@ -790,6 +790,73 @@ bool UI_RunLegacyWindowAction( idUserInterface *gui, const char *windowName, boo
 	return legacy->RunWindowAction( windowName, back, command );
 }
 
+bool idUserInterfaceLocal::StepFocus( int direction, idStr &report ) {
+	report.Clear();
+	if ( desktop == NULL ) {
+		return false;
+	}
+	if ( direction != 0 ) {
+		// The same event a menu's arrow key delivers, raised here rather than by a device.
+		sysEvent_t event;
+		memset( &event, 0, sizeof( event ) );
+		event.evType = SE_KEY;
+		event.evValue = direction > 0 ? K_DOWNARROW : K_UPARROW;
+		event.evValue2 = 1;
+		HandleEvent( &event, time, NULL );
+		event.evValue2 = 0;
+		HandleEvent( &event, time, NULL );
+	}
+	idWindow *focus = desktop->GetFocusedChild();
+	if ( focus == NULL ) {
+		report = "focus=- ";
+		return true;
+	}
+	bool shown = true;
+	for ( idWindow *reach = focus; reach != NULL; reach = reach->GetParent() ) {
+		shown = shown && reach->visible && !reach->noEvents;
+	}
+	const idRectangle &rect = focus->drawRect;
+	report = va( "focus=%s rect=%.0f,%.0f,%.0f,%.0f shown=%d", focus->GetName(), rect.x, rect.y, rect.w, rect.h, shown ? 1 : 0 );
+	return true;
+}
+
+bool idUserInterfaceLocal::FocusWithin( const char *ancestorName, idStr &focusName, idRectangle &rect, float &viewHeight ) {
+	if ( desktop == NULL || ancestorName == NULL || ancestorName[ 0 ] == '\0' ) {
+		return false;
+	}
+	idWindow *focus = desktop->GetFocusedChild();
+	drawWin_t *found = desktop->FindChildByName( ancestorName );
+	idWindow *ancestor = found != NULL ? found->win : NULL;
+	if ( focus == NULL || ancestor == NULL || ancestor->GetParent() == NULL ) {
+		return false;
+	}
+	rect = focus->drawRect;
+	for ( idWindow *reach = focus->GetParent(); reach != ancestor; reach = reach->GetParent() ) {
+		if ( reach == NULL ) {
+			return false;
+		}
+		rect.x += reach->drawRect.x;
+		rect.y += reach->drawRect.y;
+	}
+	focusName = focus->GetName();
+	viewHeight = ancestor->GetParent()->drawRect.h;
+	return true;
+}
+
+bool UI_LegacyFocusWithin( idUserInterface *gui, const char *ancestorName, idStr &focusName, idRectangle &rect, float &viewHeight ) {
+	idUserInterfaceLocal *legacy = dynamic_cast<idUserInterfaceLocal *>( gui );
+	return legacy != NULL && legacy->FocusWithin( ancestorName, focusName, rect, viewHeight );
+}
+
+bool UI_StepLegacyFocus( idUserInterface *gui, int direction, idStr &report ) {
+	idUserInterfaceLocal *legacy = dynamic_cast<idUserInterfaceLocal *>( gui );
+	if ( legacy == NULL ) {
+		report.Clear();
+		return false;
+	}
+	return legacy->StepFocus( direction, report );
+}
+
 bool idUserInterfaceLocal::HasWindow( const char *windowName ) const {
 	return desktop != NULL && windowName != NULL && windowName[ 0 ] != '\0' && desktop->FindChildByName( windowName ) != NULL;
 }
@@ -1204,8 +1271,23 @@ void idUserInterfaceLocal::SetInteractive(bool interactive) {
 	this->interactive = interactive;
 }
 
-bool idUserInterfaceLocal::InitFromFile( const char *qpath, bool rebuild, bool cache ) { 
+// Everything the HUD presentations derive from the dictionary (what was last
+// written to it, the evaluated-state cache, the pickup lines) and, when the
+// source changes, from the source (its routes).
+void idUserInterfaceLocal::ResetHudPresentation( bool sourceChanged ) {
 	evaluatedHudValid = false;
+	legacyPublishedValid = false;
+	publishedFrameValid = false;
+	legacyPickups[0] = LegacyPickupLine();
+	legacyPickups[1] = LegacyPickupLine();
+	legacyPickupNewest = 0;
+	if ( sourceChanged ) {
+		hudRoute = HudRoute();
+	}
+}
+
+bool idUserInterfaceLocal::InitFromFile( const char *qpath, bool rebuild, bool cache ) { 
+	ResetHudPresentation( true );
 	evaluatedHudState.Clear();
 	delete retainedHud; retainedHud = NULL;
 	delete remastered;
@@ -1228,6 +1310,9 @@ bool idUserInterfaceLocal::InitFromFile( const char *qpath, bool rebuild, bool c
 	}
 
 	source = qpath;
+	// openQ4: The Awakening's HUDs are parsed from openQ4's laid-out
+	// definitions of them; a GUI keeps the name the game and its saves know.
+	definition = literalDefinition ? qpath : idLegacyHudLayout::DefinitionFor( qpath );
 	state.Set( "text", "Test Text!" );
 
 	bool parseOk = true;
@@ -1238,7 +1323,7 @@ bool idUserInterfaceLocal::InitFromFile( const char *qpath, bool rebuild, bool c
 	//Load the timestamp so reload guis will work correctly
 	fileSystem->ReadFile(qpath, NULL, &timeStamp);
 
-	if (!UI_LegacyObservationLoad(this,src,qpath)) src.LoadFile( qpath );
+	if (!UI_LegacyObservationLoad(this,src,qpath)) src.LoadFile( definition );
 
 	if ( src.IsLoaded() ) {
 		idToken token;
@@ -1340,6 +1425,13 @@ bool idUserInterfaceLocal::KeepForLevelLoad() {
         static_cast<int>(levelLoadCache->windowDefaults.size()));
     desktop->ReadFromSaveGame(&defaults);
     desktop->RefreshForLevelLoad();
+    // The windows are back at their authored defaults, as a reload leaves
+    // them. The Remastered peers were joined to the previous map's windows:
+    // they join again at their next draw, and the pickup lines start empty.
+    ResetHudPresentation( false );
+    evaluatedHudState.Clear();
+    if ( remastered ) { remastered->Rejoin(); }
+    if ( essentialHud ) { essentialHud->Rejoin(); }
     // Preserve the parsed tree, but repeat the backend initialization and
     // activation work that a map-change reload performed.
     initialized = false;
@@ -1383,11 +1475,15 @@ const char *idUserInterfaceLocal::HandleEvent( const sysEvent_t *event, int _tim
 
 void idUserInterfaceLocal::HandleNamedEvent ( const char* eventName ) {
 	evaluatedHudValid = false;
+	// The stock interface's Remastered pickup lines read their slots in the event.
+	if ( !idStr::Icmp( eventName, "itemPickup" ) ) {
+		PublishLegacyPickup();
+	}
 	desktop->RunNamedEvent( eventName );
 	// The Remastered layout answers the same events as the stock windows,
 	// including those sent before its first frame, which it replays.
 	if ( !remastered ) {
-		const char *document = idRemasteredHud::DocumentFor( source.c_str() );
+		const char *document = ResolveHudRoute().document;
 		if ( document && idRemasteredHud::Enabled() ) {
 			remastered = new idRemasteredHud( document );
 		}
@@ -1418,14 +1514,8 @@ void idUserInterfaceLocal::Redraw( int _time, bool useAspectCorrection ) {
 		float xExpand = 0.0f;
 		float yExpand = 0.0f;
 		uiManagerLocal.dc.GetVirtualScreenExpansion( desktop->forceAspectWidth, desktop->forceAspectHeight, xExpand, yExpand );
-		SetStateFloat( "virtual_screen_x_expand", xExpand );
-		SetStateFloat( "virtual_screen_y_expand", yExpand );
-		// Physical aspect of the region the authored canvas covers.  The expanded
-		// logical area always maps onto the whole 2D viewport, so this is the only
-		// value a gui needs to size cinematic framing that has to look the same on
-		// every display, and it stays correct when aspect correction is disabled
-		// and the canvas is stretched instead of expanded.
-		SetStateFloat( "virtual_screen_aspect", uiManagerLocal.dc.GetCanvasAspect() );
+		// A HUD's layout setting, which its stock windows follow (idLegacyHudLayout).
+		PublishLegacyHud( xExpand, yExpand );
 		// openQ4: the match summary's way back names the active device's key
 		// (ui-visual-design.md 14.14): Escape, or a controller's east button,
 		// which menus take as Escape.
@@ -1444,11 +1534,36 @@ void idUserInterfaceLocal::Redraw( int _time, bool useAspectCorrection ) {
 		idRectangle cinematicRightBar;
 		idRectangle cinematicVisibleArea;
 		uiManagerLocal.dc.GetCinematic16x9Bars( desktop->forceAspectWidth, desktop->forceAspectHeight, cinematicTopBar, cinematicBottomBar, cinematicLeftBar, cinematicRightBar, cinematicVisibleArea );
-		SetStateRectangleComponents( this, { "cinematic_bar_top_x", "cinematic_bar_top_y", "cinematic_bar_top_w", "cinematic_bar_top_h" }, cinematicTopBar );
-		SetStateRectangleComponents( this, { "cinematic_bar_bottom_x", "cinematic_bar_bottom_y", "cinematic_bar_bottom_w", "cinematic_bar_bottom_h" }, cinematicBottomBar );
-		SetStateRectangleComponents( this, { "cinematic_bar_left_x", "cinematic_bar_left_y", "cinematic_bar_left_w", "cinematic_bar_left_h" }, cinematicLeftBar );
-		SetStateRectangleComponents( this, { "cinematic_bar_right_x", "cinematic_bar_right_y", "cinematic_bar_right_w", "cinematic_bar_right_h" }, cinematicRightBar );
-		SetStateRectangleComponents( this, { "cinematic_visible_area_x", "cinematic_visible_area_y", "cinematic_visible_area_w", "cinematic_visible_area_h" }, cinematicVisibleArea );
+		// Physical aspect of the region the authored canvas covers.  The expanded
+		// logical area always maps onto the whole 2D viewport, so this is the only
+		// value a gui needs to size cinematic framing that has to look the same on
+		// every display, and it stays correct when aspect correction is disabled
+		// and the canvas is stretched instead of expanded.
+		const float canvasAspect = uiManagerLocal.dc.GetCanvasAspect();
+		// These follow the view's shape, which changes with a resize, not with a
+		// frame: every GUI drawn wrote all 23 of them to its dictionary every
+		// frame. They are written when one changes, or when the dictionary was
+		// replaced (ResetHudPresentation).
+		const idRectangle *const frameRects[5] = { &cinematicTopBar, &cinematicBottomBar, &cinematicLeftBar, &cinematicRightBar, &cinematicVisibleArea };
+		float frame[23] = { xExpand, yExpand, canvasAspect };
+		for ( int i = 0; i < 5; i++ ) {
+			frame[3 + 4 * i] = frameRects[i]->x;
+			frame[4 + 4 * i] = frameRects[i]->y;
+			frame[5 + 4 * i] = frameRects[i]->w;
+			frame[6 + 4 * i] = frameRects[i]->h;
+		}
+		if ( !publishedFrameValid || memcmp( frame, publishedFrame, sizeof( frame ) ) != 0 ) {
+			publishedFrameValid = true;
+			memcpy( publishedFrame, frame, sizeof( frame ) );
+			SetStateFloat( "virtual_screen_x_expand", xExpand );
+			SetStateFloat( "virtual_screen_y_expand", yExpand );
+			SetStateFloat( "virtual_screen_aspect", uiManagerLocal.dc.GetCanvasAspect() );
+			SetStateRectangleComponents( this, { "cinematic_bar_top_x", "cinematic_bar_top_y", "cinematic_bar_top_w", "cinematic_bar_top_h" }, cinematicTopBar );
+			SetStateRectangleComponents( this, { "cinematic_bar_bottom_x", "cinematic_bar_bottom_y", "cinematic_bar_bottom_w", "cinematic_bar_bottom_h" }, cinematicBottomBar );
+			SetStateRectangleComponents( this, { "cinematic_bar_left_x", "cinematic_bar_left_y", "cinematic_bar_left_w", "cinematic_bar_left_h" }, cinematicLeftBar );
+			SetStateRectangleComponents( this, { "cinematic_bar_right_x", "cinematic_bar_right_y", "cinematic_bar_right_w", "cinematic_bar_right_h" }, cinematicRightBar );
+			SetStateRectangleComponents( this, { "cinematic_visible_area_x", "cinematic_visible_area_y", "cinematic_visible_area_w", "cinematic_visible_area_h" }, cinematicVisibleArea );
+		}
 
 		if ( gui_debugScript.GetInteger() > 4 ) {
 			static int lastDebugRedrawTime = -10000;
@@ -1467,9 +1582,15 @@ void idUserInterfaceLocal::Redraw( int _time, bool useAspectCorrection ) {
 		if ( useAspectCorrection && DrawRemasteredHud( _time ) ) return;
 		evaluatedHudValid = false;
 		if ( !useAspectCorrection || !DrawRetainedHud() ) {
+			// The stock interface's HUD opacity and scale (idLegacyHudLayout):
+			// the windows start their scale groups from the centre.
+			uiManagerLocal.dc.SetDrawOpacity( useAspectCorrection ? legacyOpacity : 1.0f );
+			legacyGroupX = legacyGroupY = 0;
 			uiManagerLocal.dc.PushClipRect( uiManagerLocal.screenRect );
 			desktop->Redraw( 0, 0 );
 			uiManagerLocal.dc.PopClipRect();
+			uiManagerLocal.dc.SetDrawOpacity( 1.0f );
+			uiManagerLocal.dc.SetGroupScale( 0.0f, 0.0f, 1.0f );
 		}
 		if ( useAspectCorrection ) DrawEssentialHud( _time );
 	}
@@ -1668,7 +1789,7 @@ void idUserInterfaceLocal::Trigger(int _time) {
 }
 
 void idUserInterfaceLocal::ReadFromDemoFile( class idDemoFile *f ) {
-	evaluatedHudValid = false;
+	ResetHudPresentation( true );
 	evaluatedHudState.Clear();
 	// Restore may add legacy compatibility events beyond the parsed tree.
 	levelLoadCache.reset();
@@ -1891,7 +2012,7 @@ static bool UI_ReadSaveGameString( idFile *savefile, idStr &string, const char *
 }
 
 bool idUserInterfaceLocal::ReadFromSaveGame( idFile *savefile ) {
-	evaluatedHudValid = false;
+	ResetHudPresentation( false );
 	evaluatedHudState.Clear();
 	// Restore may add legacy compatibility events beyond the parsed tree.
 	levelLoadCache.reset();
@@ -1970,6 +2091,9 @@ bool idUserInterfaceLocal::ReadFromSaveGame( idFile *savefile ) {
 	}
 
 	state = restoredState;
+	// The pickup line a save holds as the newest stays the newest: the next
+	// pickup takes the other slot instead of overwriting the line still shown.
+	legacyPickupNewest = idMath::ClampInt( 0, 1, state.GetInt( "oq4_pick_newest" ) );
 	active = restoredActive;
 	interactive = restoredInteractive;
 	uniqued = restoredUniqued;
@@ -2004,8 +2128,14 @@ bool idUserInterfaceLocal::ReadFromSaveGameWithLayout( idFile *savefile, const c
 	// normal check, the other shows what that definition starts with. A window
 	// value that differs between them was changed while the game ran -- a boss bar
 	// a script made visible, for example -- and is what this GUI must keep.
+	// openQ4: a GUI that is still parsed from the saved definition (a mod's own
+	// q4xhud.gui, which no openQ4 definition replaces) reads its record directly.
+	if ( definition.Icmp( layoutPath ) == 0 ) {
+		return ReadFromSaveGame( savefile );
+	}
 	idUserInterfaceLocal saved( false );
 	idUserInterfaceLocal initial( false );
+	saved.literalDefinition = initial.literalDefinition = true;
 	if ( !saved.InitFromFile( layoutPath, true, false ) || !initial.InitFromFile( layoutPath, true, false ) ||
 		 saved.desktop == NULL || initial.desktop == NULL ) {
 		common->Warning( "idUserInterfaceLocal::ReadFromSaveGameWithLayout: gui '%s' could not parse its saved layout '%s'",
@@ -2117,8 +2247,11 @@ bool idUserInterfaceLocal::ReadFromSaveGameWithLayout( idFile *savefile, const c
 	// an ordinary restore.
 	delete remastered;
 	remastered = NULL;
-	evaluatedHudValid = false;
+	delete essentialHud;
+	essentialHud = nullptr;
+	ResetHudPresentation( false );
 	state = saved.state;
+	legacyPickupNewest = idMath::ClampInt( 0, 1, state.GetInt( "oq4_pick_newest" ) );
 	active = saved.active;
 	interactive = saved.interactive;
 	uniqued = saved.uniqued;

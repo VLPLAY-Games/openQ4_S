@@ -857,6 +857,15 @@ public:
 	virtual bool BeginSavePreview() = 0;
 	virtual int PollSavePreview( const char *fileName ) = 0;
 	virtual void CancelSavePreview() = 0;
+
+	// Appended slot, render API 33. Reloads from source every image whose
+	// resident pixels came from the generated image cache. The client calls it
+	// right after taking a pure lock that idFileSystem::TakePureImageCacheEviction
+	// reports, so the reload cannot read the cache again. It also purges every
+	// resident expanded loading background, which has no pure source. False
+	// when any such image still holds its pixels: the caller must then restart
+	// the engine instead.
+	virtual bool ReloadGeneratedCacheImages() = 0;
 };
 
 extern idRenderSystem *		renderSystem;
