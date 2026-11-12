@@ -184,7 +184,11 @@ static int Sys_ResolveSockaddrs( const char *s, bool doDNSResolve, int family, i
 	// and then silently drops the datagram.
 	if ( family == AF_UNSPEC ) {
 		const bool allowIPv4 = net_enableIPv4.GetBool();
+#if defined( __SWITCH__ )
+		const bool allowIPv6 = false;
+#else
 		const bool allowIPv6 = net_enableIPv6.GetBool();
+#endif
 		if ( allowIPv4 != allowIPv6 ) {
 			family = allowIPv6 ? AF_INET6 : AF_INET;
 		}
@@ -1042,7 +1046,12 @@ static bool Net_BindDualStack( const char *ipv4Text, const char *ipv6Text, int p
 	memset( &bound_to, 0, sizeof( bound_to ) );
 
 	idNetworkEndpoint::bindPlan_t plan;
+	#if defined( __SWITCH__ )
+	// The console's socket service has no IPv6 networking worth binding: IPv4 only, whatever the cvar says.
+	idNetworkEndpoint::PlanBind( ipv4Text, ipv6Text, net_enableIPv4.GetBool(), false, plan );
+#else
 	idNetworkEndpoint::PlanBind( ipv4Text, ipv6Text, net_enableIPv4.GetBool(), net_enableIPv6.GetBool(), plan );
+#endif
 	// An IPv6 literal in net_ip suppresses the IPv4 socket, so this case has to
 	// be reported before the both-families-disabled test below or the only
 	// diagnostic would name net_enableIPv4, which the admin never touched.
@@ -1239,6 +1248,21 @@ static bool Net_SendDatagram( int ipv4Socket, int ipv6Socket, const netadr_t &to
 		common->Printf( "idPort::SendPacket ERROR: to %s: %s\n", Sys_NetAdrToString( to ), strerror( errno ) );
 		return false;
 	}
+#if defined( __SWITCH__ )
+	// Some access points drop the limited broadcast (255.255.255.255) between Wi-Fi clients: the server
+	// search also goes to the network's own broadcast address, as far as the console knows its network.
+	if ( to.type == NA_BROADCAST ) {
+		Sys_SwitchRefreshInterfaceThrottled();
+		if ( num_interfaces > 0 ) {
+			struct sockaddr_in directed;
+			memset( &directed, 0, sizeof( directed ) );
+			directed.sin_family = AF_INET;
+			directed.sin_port = htons( static_cast<unsigned short>( to.port ) );
+			directed.sin_addr.s_addr = htonl( netint[0].ip | ~netint[0].mask );
+			sendto( socketFd, data, size, 0, reinterpret_cast<struct sockaddr *>( &directed ), sizeof( directed ) );
+		}
+	}
+#endif
 	return true;
 }
 
