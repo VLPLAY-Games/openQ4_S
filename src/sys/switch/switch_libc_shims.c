@@ -379,6 +379,30 @@ static void switch_prof_start( void ) {
 #endif
 }
 
+/*
+ * The console's own IPv4 address and netmask, from the network interface manager: Horizon has no
+ * SIOCGIFCONF or getifaddrs. Both are returned in network byte order (struct in_addr), 0 when there is
+ * no connection. Used to recognise the local network and to broadcast the server search.
+ */
+int Switch_GetIPv4Config( unsigned int *ip, unsigned int *mask ) {
+	static int nifmReady = 0;
+	u32 addr = 0, subnet = 0, gateway = 0, dns1 = 0, dns2 = 0;
+
+	*ip = *mask = 0;
+	if ( !nifmReady ) {
+		if ( R_FAILED( nifmInitialize( NifmServiceType_User ) ) ) {
+			return 0;
+		}
+		nifmReady = 1;
+	}
+	if ( R_FAILED( nifmGetCurrentIpConfigInfo( &addr, &subnet, &gateway, &dns1, &dns2 ) ) || addr == 0 || subnet == 0 ) {
+		return 0;
+	}
+	*ip = addr;
+	*mask = subnet;
+	return 1;
+}
+
 void userAppInit( void ) {
 	switch_mark( "userAppInit" );
 	switch_pin_current_thread( 0 );

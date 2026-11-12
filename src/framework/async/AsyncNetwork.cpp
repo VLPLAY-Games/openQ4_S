@@ -481,23 +481,6 @@ void idAsyncNetwork::AbandonDeferredDedicatedSpawn( void ) {
 	dedicatedSpawnDeferred = false;
 }
 
-#if defined( __SWITCH__ )
-/*
-==================
-Net_SwitchUnavailable
-
-Joining a server is not available in the Switch build yet. Starting a local game
-(a listen server with bots) is.
-==================
-*/
-static bool Net_SwitchUnavailable( void ) {
-	common->Printf( "Joining multiplayer servers is not available in the Switch build yet.\n" );
-	if ( session != NULL ) {
-		session->MessageBox( MSG_OK, "Joining servers is not available on Nintendo Switch yet.", "openQ4", false );
-	}
-	return true;
-}
-#endif
 
 /*
 ==================
@@ -673,12 +656,6 @@ static idStr Net_AddressArgument( const idCmdArgs &args ) {
 }
 
 void idAsyncNetwork::Connect_f( const idCmdArgs &args ) {
-#if defined( __SWITCH__ )
-	if ( Net_SwitchUnavailable() ) {
-		return;
-	}
-#endif
-
     if ( !idStr::Icmp( fileSystem->GetActiveGameDir(), "q4xbase" ) ||
          !idStr::Icmp( cvarSystem->GetCVarString( "fs_game" ), "q4xbase" ) ) {
         const idStr requestedGameType = cvarSystem->GetCVarString( "si_gameType" );

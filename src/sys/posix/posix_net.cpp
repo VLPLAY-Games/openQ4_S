@@ -95,6 +95,21 @@ net_interface	netint[MAX_INTERFACES];
 int				num_interfaces6 = 0;
 net_interface6	netint6[MAX_INTERFACES];
 
+#if defined( __SWITCH__ )
+static void Sys_SwitchRefreshInterface( void );
+
+// The console's address is asked for again, at most every two seconds, whenever it is needed.
+static void Sys_SwitchRefreshInterfaceThrottled( void ) {
+	static int lastTry = -100000;
+	const int now = Sys_Milliseconds();
+
+	if ( now - lastTry > 2000 ) {
+		lastTry = now;
+		Sys_SwitchRefreshInterface();
+	}
+}
+#endif
+
 static unsigned int Sys_SockaddrIPv4HostOrder( const struct sockaddr *address ) {
 	const struct sockaddr_in *ipv4 = reinterpret_cast<const struct sockaddr_in *>( address );
 	return ntohl( ipv4->sin_addr.s_addr );
@@ -589,6 +604,9 @@ bool Sys_IsLANAddress( const netadr_t adr ) {
 		return false;
 	}
 
+#if defined( __SWITCH__ )
+	Sys_SwitchRefreshInterfaceThrottled();
+#endif
 	if ( !num_interfaces ) {
 		return false;	// well, if there's no networking, there are no LAN addresses, right
 	}
@@ -615,6 +633,9 @@ getClientIP showed its first interface's). False when it has none.
 ==================
 */
 bool Sys_GetLocalIPAddress( netadr_t &out ) {
+#if defined( __SWITCH__ )
+	Sys_SwitchRefreshInterfaceThrottled();
+#endif
 	for ( int i = 0; i < num_interfaces; i++ ) {
 		const unsigned int ip = netint[i].ip;	// host byte order
 		if ( ip == 0 || ( ip & 0xff000000u ) == 0x7f000000u ) {
@@ -723,6 +744,35 @@ static void Sys_InitIPv6Interfaces( void ) {
 	freeifaddrs( ifap );
 }
 
+#if defined( __SWITCH__ )
+extern "C" int Switch_GetIPv4Config( unsigned int *ip, unsigned int *mask );
+
+/*
+====================
+Sys_SwitchRefreshInterface
+
+The console has one network interface (its Wi-Fi), whose address can change or appear after the
+game started, so it is read again from the network manager when it is needed.
+====================
+*/
+static void Sys_SwitchRefreshInterface( void ) {
+	unsigned int ip, mask;
+
+	if ( !Switch_GetIPv4Config( &ip, &mask ) ) {
+		num_interfaces = 0;
+		return;
+	}
+	netint[0].ip = ntohl( ip );
+	netint[0].mask = ntohl( mask );
+	if ( num_interfaces == 0 ) {
+		common->Printf( "found interface wifi - %d.%d.%d.%d/%d.%d.%d.%d\n",
+			ip & 0xff, ( ip >> 8 ) & 0xff, ( ip >> 16 ) & 0xff, ( ip >> 24 ) & 0xff,
+			mask & 0xff, ( mask >> 8 ) & 0xff, ( mask >> 16 ) & 0xff, ( mask >> 24 ) & 0xff );
+	}
+	num_interfaces = 1;
+}
+#endif
+
 /*
 ====================
 NET_InitNetworking
@@ -755,8 +805,9 @@ void Sys_InitNetworking(void)
 	if ( ioctl( s, SIOCGIFCONF, &ifc ) < 0 ) {
 		close( s );
 #if defined( __SWITCH__ )
-		// Horizon has no interface enumeration; play without local interface addresses.
+		// Horizon has no interface enumeration: the one interface is read from the network manager.
 		common->Printf( "Sys_InitNetworking: SIOCGIFCONF unsupported - %s\n", strerror( errno ) );
+		Sys_SwitchRefreshInterface();
 		return;
 #endif
 		common->FatalError( "InitNetworking: SIOCGIFCONF error - %s\n", strerror( errno ) );
