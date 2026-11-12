@@ -111,12 +111,17 @@ commits and about 300 files ahead, many of them Awakening repairs.
   not pursued.
 - **Code of other platforms, in steps.** Done on the 0.14.1 merge branch: the
   conditionals for Android, Windows, macOS, MSVC and the Vulkan module are resolved
-  away in every file (the preprocessed output of all 1461 translation units of
-  the Switch build is unchanged), the OpenXR session, the Windows input route,
-  X11 GL, ALSA and legacy Linux input files are deleted, and the source list
-  script (`tools/build/meson_sources.py`) only knows the Linux-style SDL3 build.
-  Still to do: the VR hooks that are woven into the game and the renderer
-  (`vrSystem`, `RenderSystem_vr.cpp`, `VRVibrate`), the X11 helper (`libXNVCtrl`),
-  the dedicated-server and stub sources, the `__ANDROID__`-free but Android-named
-  helpers, and `#ifdef __SWITCH__` branches that could become the only code once
-  nothing else is built (that makes later upstream merges harder, so last).
+  away in every file (the preprocessed output of all translation units of the
+  Switch build and of the Linux test build is unchanged), the OpenXR session, the
+  Windows input route, X11 GL, ALSA and legacy Linux input files are deleted, the
+  Android setup (sources, tests, the touch layout row of the controls page), the
+  macOS roq wrapper, the Linux X11 helpers (`libXNVCtrl`) and the Windows, OpenXR
+  and ANGLE variables of the meson files are gone, and the source list script
+  (`tools/build/meson_sources.py`) only knows the Linux-style SDL3 build.
+  Still to do: the VR code that is woven into the game modules and the renderer
+  (`vrSystem`, `RenderSystem_vr.cpp`, `gl_VRPresentation.cpp`, the `vr_*`
+  variables, the tracked-aim hooks of the player, the weapon and the vehicle
+  turrets). It never runs on the Switch, but it touches gameplay code and the
+  save-game stamp, so it is its own step, after the merge. The dedicated-server
+  and stub sources stay: the Linux test build uses them. `#ifdef __SWITCH__`
+  branches stay too, because the Linux test build needs the other side of them.
