@@ -5901,23 +5901,6 @@ windowDef Desktop
 				textscale	.31
 				font	"fonts/marine"
 			}
-			windowDef set_android_setup
-			{
-				rect 18,345,205,64
-				visible "gui::androidSetupAvailable"
-				noevents ( "desktop::active" != 0 )
-				background "gfx/guis/mainmenu/b2_dark"
-				matcolor 1,1,1,0.4
-				forecolor 1,1,1,0.8
-				text "#str_231400"
-				textscale .31
-				textalignx 13
-				textaligny 20
-				font "fonts/marine"
-				onMouseEnter { set "set_android_setup::forecolor" "$desktop::orange" ; }
-				onMouseExit { set "set_android_setup::forecolor" "$desktop::white_8" ; }
-				onAction { set "cmd" "openAndroidSetup" ; }
-			}
 			windowDef set_back
 			{
 				rect	532,441,109,30

@@ -50,17 +50,6 @@ If you have questions concerning this license or the applicable additional terms
 #include <SDL3/SDL.h>
 #endif
 
-static bool Session_AndroidSetupAvailable() {
-	return false;
-}
-
-// OpenQ4Activity's SETUP_PAGE_* arguments: setup's home, or the touch layout editor.
-enum { ANDROID_SETUP_HOME = 0, ANDROID_SETUP_TOUCH_LAYOUT = 1 };
-
-static void Session_OpenAndroidSetup( int page = 0 ) {
-	(void)page;
-}
-
 extern idCVar com_skipLogoVideos;
 extern glconfig_t glConfig;
 
@@ -3108,8 +3097,6 @@ void idSessionLocal::PublishRetainedControls( idUserInterface *gui ) {
 			common->GetLanguageDict()->GetString( "#str_07000" ) );
 	}
 	gui->SetStateInt( "controls.capture", retainedControlsCapture );
-	// TOUCH LAYOUT: the built-in touch controls' editor lives in the Android setup.
-	gui->SetStateBool( "controls.touchLayout", Session_AndroidSetupAvailable() );
 	gui->StateChanged( common->GetPresentationTime() );
 #endif
 }
@@ -3120,22 +3107,13 @@ idSessionLocal::HandleRetainedControlsRequest
 
 The CONTROLS page's verbs on the focused row: controlsBind waits for its new
 key (RetainedControlsKey), controlsClear clears it as the stock field's
-Delete does. BACK returns to the settings screen. controlsTouchLayout opens
-the Android setup's touch layout editor; the game waits behind it as for any
-return from setup.
+Delete does. BACK returns to the settings screen.
 ===============
 */
 void idSessionLocal::HandleRetainedControlsRequest( idUserInterface *gui, const char *request ) {
 #ifndef ID_DEDICATED
 	if ( !idStr::Icmp( request, "controlsBack" ) ) {
 		ReturnRetainedControls();
-		return;
-	}
-	if ( !idStr::Icmp( request, "controlsTouchLayout" ) ) {
-		if ( Session_AndroidSetupAvailable() ) {
-			HandleMainMenuCommands( "play main_menu_selection" );
-			Session_OpenAndroidSetup( ANDROID_SETUP_TOUCH_LAYOUT );
-		}
 		return;
 	}
 	const bool bind = !idStr::Icmp( request, "controlsBind" );
@@ -3916,7 +3894,6 @@ void idSessionLocal::SetMainMenuGuiVars( bool refreshCatalogs ) {
 	guiMainMenu->SetStateBool( "retainedAudio", RetainedAudioAvailable() );
 	guiMainMenu->SetStateBool( "retainedGame", RetainedGameAvailable() );
 	guiMainMenu->SetStateBool( "retainedControls", RetainedControlsAvailable() );
-	guiMainMenu->SetStateBool( "androidSetupAvailable", Session_AndroidSetupAvailable() );
 
 	guiMainMenu->SetStateString( "serverlist_sel_0", "-1" );
 	guiMainMenu->SetStateString( "serverlist_selid_0", "-1" ); 
@@ -4350,11 +4327,6 @@ void idSessionLocal::HandleMainMenuCommands( const char *menuCommand ) {
 
 		if ( !idStr::Cmp( cmd, ";" ) ) {
 			continue;
-		}
-
-		if ( !idStr::Icmp( cmd, "openAndroidSetup" ) ) {
-			Session_OpenAndroidSetup();
-			return;
 		}
 
 		if ( !idStr::Icmp( cmd, "openRetainedSystem" ) ) {

@@ -258,7 +258,7 @@ bool SessionMenuCommand(const std::string& command) {
         "joinSortGameType","joinSortMap","joinSortDedicated","joinSortRepeater","joinFavorite","joinModPrevious","joinModNext",
         "joinFilterFull","joinFilterEmpty","joinFilterPassword","joinGameTypePrevious","joinGameTypeNext","joinClearFilters",
         "msgLeft","msgRight","msgMid",
-        "noticeAction0","noticeAction1","noticeAction2","audioBack","gameBack","controlsBind","controlsClear","controlsBack","controlsTouchLayout",
+        "noticeAction0","noticeAction1","noticeAction2","audioBack","gameBack","controlsBind","controlsClear","controlsBack",
         "settingsBack","settingsControls","settingsGame","settingsDisplay","settingsAudio","settingsDefaults",
         "joinConnect","joinSearch","joinSearchClear","joinSortNext",
         "mpClose","mpMainMenu","mpDisconnect","mpStockPage","mpTeamAction",
