@@ -34,6 +34,16 @@ already drop well below 30 FPS), memory (the application has about 3 GB), and
 protocol compatibility with existing servers. A dedicated server cannot run on
 the Switch.
 
+## Controls
+
+- **Vibration (rumble).** The engine already has the settings (`in_joystickRumble`
+  and its strength) and sends rumble to SDL, but the Switch joystick driver
+  (`src/sys/switch/sdl3/SDL_switchjoystick.c`) answers "not supported", so nothing
+  vibrates. Plan: implement rumble in that driver with the libnx HID vibration
+  API (`HidVibrationValue`, one value per controller), with the strength scale from
+  the settings, a stop when the game pauses or the console sleeps, and handling of
+  controllers connected after the start.
+
 ## Performance
 
 - Strong frame-rate drops in heavy fights: the cost is in game logic (clip-model
