@@ -134,15 +134,9 @@ void idVertexCache::ActuallyFree( vertCache_t *block ) {
 	block->next->prev = block->prev;
 	block->prev->next = block->next;
 
-#if 1
 	// stick it on the front of the free list so it will be reused immediately
 	block->next = freeStaticHeaders.next;
 	block->prev = &freeStaticHeaders;
-#else
-	// stick it on the back of the free list so it won't be reused soon (just for debugging)
-	block->next = &freeStaticHeaders;
-	block->prev = freeStaticHeaders.prev;
-#endif
 
 	block->next->prev = block;
 	block->prev->next = block;
@@ -185,10 +179,8 @@ void *idVertexCache::Position( vertCache_t *buffer ) {
 	// addresses when both buffer-object targets are zero. Clear both here:
 	// Apple GL 2.1 deliberately uses a CPU-backed cache, r_useIndexBuffers is
 	// disabled in that mode, and another pass may still have left an EBO bound.
-#ifndef OPENQ4_RENDERER_VK_MODULE
 	BindArrayBuffer( 0 );
 	BindIndexBuffer( 0 );
-#endif
 
 	// virtual memory is a real pointer
 	return (void *)((byte *)buffer->virtMem + buffer->offset);
@@ -332,13 +324,7 @@ void idVertexCache::Init() {
 		// ARB_vertex_buffer_object.
 		BindArrayBuffer( 0 );
 		BindIndexBuffer( 0 );
-#ifdef OPENQ4_RENDERER_VK_MODULE
-		// Vulkan uploads this CPU cache through its own device-buffer rings.
-		// The OpenGL client-array fallback warning does not describe that path.
-		common->Printf( "using CPU vertex cache for Vulkan upload staging\n" );
-#else
 		common->Printf( "WARNING: vertex array range in virtual memory (SLOW)\n" );
-#endif
 	}
 
 	// initialize the cache memory blocks
@@ -758,21 +744,12 @@ void idVertexCache::EndFrame() {
 			staticCountTotal, staticAllocTotal/1024 );
 	}
 
-#if 0
-	// if our total static count is above our working memory limit, start purging things
-	while ( staticAllocTotal > r_vertexBufferMegs.GetInteger() * 1024 * 1024 ) {
-		// free the least recently used
-
-	}
-#endif
 
 	// Always finish the frame with client-memory-safe bindings. Mixed upload
 	// paths can bind a buffer even while the legacy vertex cache is virtual,
 	// and redundant-state filtering makes the zero-bind free when already set.
-#ifndef OPENQ4_RENDERER_VK_MODULE
 	BindArrayBuffer( 0 );
 	BindIndexBuffer( 0 );
-#endif
 
 
 	currentFrame = tr.frameCount;

@@ -9,9 +9,6 @@ static std::recursive_mutex rendererMetricsMutex;
 #include "RendererUpload.h"
 #include "GpuFrameTimingCore.h"
 #include <chrono>
-#ifdef OPENQ4_RENDERER_VK_MODULE
-#include "Vulkan/VulkanGpuFrameTiming.h"
-#endif
 
 typedef struct rendererMetricsFrame_s {
 	int		frameCount;
@@ -936,7 +933,6 @@ static const char *R_RendererMetrics_FormatGpuMsec( const rendererMetricsFrame_t
 	return buffer;
 }
 
-#ifndef OPENQ4_RENDERER_VK_MODULE
 static bool R_RendererMetrics_GlTimestampQueriesSupported( void ) {
 	// EXT_timer_query only provides elapsed queries. Timestamp pairs require
 	// OpenGL 3.3 or ARB_timer_query, regardless of exported loader functions.
@@ -1063,7 +1059,6 @@ static bool R_RendererMetrics_BeginGlFullFrameTiming( rendererGpuTimerFrame_t &f
 	glQueryCounter( frame.fullFrameBeginQuery, GL_TIMESTAMP );
 	return true;
 }
-#endif
 
 void R_RendererMetrics_BeginFrame( int frameCount ) {
 	std::lock_guard<std::recursive_mutex> metricsLock( rendererMetricsMutex );
@@ -2696,11 +2691,6 @@ void R_RendererMetrics_EndFrame( int frontEndMsec, int backEndMsec, int viewCoun
 
 void R_RendererMetrics_BeginGpuBackendFrame( void ) {
 	std::lock_guard<std::recursive_mutex> metricsLock( rendererMetricsMutex );
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	// Vulkan brackets its true command-buffer lifetime in vk_GuiExecutor;
-	// the shared command-dispatch hook is intentionally not used there.
-	return;
-#else
 	rg_gpuTimerQueryActive = false;
 	rg_gpuTimerActiveQuery = NULL;
 	rg_gpuTimerOverflowThisFrame = false;
@@ -2762,14 +2752,10 @@ void R_RendererMetrics_BeginGpuBackendFrame( void ) {
 		R_RendererMetrics_PollGpuTimerFrame( frame );
 		frame.numQueries = 0;
 	}
-#endif
 }
 
 void R_RendererMetrics_EndGpuBackendFrame( void ) {
 	std::lock_guard<std::recursive_mutex> metricsLock( rendererMetricsMutex );
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	return;
-#else
 	if ( rg_gpuTimerQueryActive ) {
 		R_RendererMetrics_EndGpuTimer();
 	}
@@ -2782,7 +2768,6 @@ void R_RendererMetrics_EndGpuBackendFrame( void ) {
 	if ( rg_gpuTimerOverflowThisFrame ) {
 		rg_gpuTimerLatest.droppedQueries++;
 	}
-#endif
 }
 
 void R_RendererMetrics_BeginGpuTimer( rendererGpuTimerSlot_t slot ) {
@@ -2843,11 +2828,6 @@ void R_RendererMetrics_ResumeGpuTimer( rendererGpuTimerSlot_t slot, bool resume 
 
 void R_RendererMetrics_ShutdownGpuTimers( void ) {
 	std::lock_guard<std::recursive_mutex> metricsLock( rendererMetricsMutex );
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	VK_GpuFrameTiming_Shutdown();
-	R_RendererMetrics_SetGpuFrameTimingBackend( RENDER_GPU_TIMING_BACKEND_NONE, false );
-	return;
-#else
 	if ( rg_gpuTimerQueryActive ) {
 		R_RendererMetrics_EndGpuTimer();
 	}
@@ -2880,22 +2860,14 @@ void R_RendererMetrics_ShutdownGpuTimers( void ) {
 	rg_gpuFullFrameEnableStateKnown = false;
 	rg_gpuFullFrameContextGeneration = -1;
 	R_RendererMetrics_SetGpuFrameTimingBackend( RENDER_GPU_TIMING_BACKEND_NONE, false );
-#endif
 }
 
 bool R_RendererMetrics_GpuTimersAvailable( void ) {
 	std::lock_guard<std::recursive_mutex> metricsLock( rendererMetricsMutex );
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	return VK_GpuFrameTiming_Available();
-#else
 	return R_RendererMetrics_GlFullFrameTimingAvailable();
-#endif
 }
 
 bool RendererGpuTimer_RunSelfTest( void ) {
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	return VK_GpuFrameTiming_RunSelfTest();
-#else
 	if ( !R_RendererMetrics_GpuTimersAvailable() ) {
 		common->Printf( "RendererGpuTimer self-test skipped: GL timer queries are unavailable\n" );
 		return true;
@@ -2924,7 +2896,6 @@ bool RendererGpuTimer_RunSelfTest( void ) {
 	common->Printf( "RendererGpuTimer self-test passed (timestamp pair queued, immediateReady=%d, waits=0)\n",
 		endAvailable ? 1 : 0 );
 	return true;
-#endif
 }
 
 void R_RendererMetrics_MarkBackEndFinished( void ) {

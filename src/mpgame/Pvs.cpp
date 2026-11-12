@@ -820,24 +820,6 @@ void idPVS::Init( void ) {
 
 	timer.Stop();
 
-#if 0
-	// bkreimeier20060123 - per MrE's recommendation, used this in Wolf
-	// if the PVS is not relexive for (i,j), we assume floating point errors
-	//  and assume a false positive - remove either from either
-	for ( int i=0; i<numAreas; i++ ) {
-		byte* const pvs_i = areaPVS + i * areaVisBytes;
-
-		for ( int j=0; j<numAreas; j++ ) {
-			byte* const pvs_j = areaPVS + j * areaVisBytes;
-			const bool j_in_i = (pvs_i[j>>3] & (1<<(j&7)));
-			const bool i_in_j = (pvs_j[i>>3] & (1<<(i&7)));
-			if ( i_in_j!=j_in_i ) {
-				pvs_i[j>>3] &= ~(1 << (j&7));
-				pvs_j[i>>3] &= ~(1 << (i&7));
-			}
-		}
-	}
-#endif
 
 	gameLocal.Printf( "%5.0f msec to calculate PVS\n", timer.Milliseconds() );
 	gameLocal.Printf( "%5d areas\n", numAreas );

@@ -7,9 +7,6 @@
 #include "RendererImageRecovery.h"
 #include "../idlib/CryptoHash.h"
 #include "DisplayPresentation.h"
-#ifdef OPENQ4_RENDERER_VK_MODULE
-#include "Vulkan/VulkanDevice.h"
-#endif
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -340,18 +337,8 @@ bool Preflight(Attempt& a, char* error, int errorSize) {
     renderDisplayPresentation_t current{}; R_GetDisplayPresentation(&current);
     // Failed teardown is explicitly restorable. It has no old GPU work to wait.
     if (!current.available && previous) return Check(a, error, errorSize);
-#ifdef OPENQ4_RENDERER_VK_MODULE
-    // Pending uploads from the old device must be observed before teardown;
-    // a blocked/failed old upload cannot become successful by destroying it.
-    VK_Device_FlushUploadBatch();
-    VK_Device_WaitUploadBatch();
-    if (vkCtx.presentationBlocked || vkCtx.uploadBatchOpen || vkCtx.uploadBatchInFlight ||
-        vkCtx.numUploadBatchPending || vkCtx.numUploadBatchInFlight)
-        return Error(error, errorSize, "Existing Vulkan image uploads did not complete");
-#else
     if (!GLimp_EnsureActiveContext("checked image policy preflight")) return Error(error, errorSize, "Image policy requires the current GL context");
     glFinish(); GL_CheckErrors();
-#endif
     return Check(a, error, errorSize);
 }
 bool VerifyImage(Attempt& a, const idImage* image, char* error, int errorSize) {
@@ -670,16 +657,9 @@ bool R_ImagePolicyFinish(char* error, int size) {
         const auto* material = static_cast<const idMaterial*>(declManager->DeclByIndex(DECL_MATERIAL, i, false));
         if (material && material->GetState() != DS_UNPARSED && !VerifyMaterialImages(*a, *material, error, size, true)) return false;
     }
-#ifdef OPENQ4_RENDERER_VK_MODULE
-    VK_Device_FlushUploadBatch(); VK_Device_WaitUploadBatch();
-    if (vkCtx.presentationBlocked || vkCtx.uploadBatchOpen || vkCtx.uploadBatchInFlight ||
-        vkCtx.numUploadBatchPending || vkCtx.numUploadBatchInFlight)
-        return Error(error, size, "Vulkan image upload submission or completion failed");
-#else
     if (!GLimp_EnsureActiveContext("checked image policy completion")) return Error(error, size, "GL context was lost during image policy work");
     glFinish(); GL_CheckErrors();
     if (!GLimp_EnsureActiveContext("checked image policy completed context")) return Error(error, size, "GL context changed during image completion");
-#endif
     if (!Check(*a, error, size, true)) return false;
     const int count = globalImages->images.Num();
     if (count < 0 || static_cast<size_t>(count) > MaxImages) return Error(error, size, "Final image inventory exceeds the checked budget");

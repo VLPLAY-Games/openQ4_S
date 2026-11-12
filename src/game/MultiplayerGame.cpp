@@ -5397,20 +5397,6 @@ bool idMultiplayerGame::Draw( int clientNum ) {
 
 	// allow force scoreboard to overwrite a fullscreen menu
 	if ( currentMenu ) { 
-#if 0
-		// uncomment this if you want to track when players are in a menu
-		if ( !bCurrentMenuMsg ) {
-			idBitMsg	outMsg;
-			byte		msgBuf[ 128 ];
-
-			outMsg.Init( msgBuf, sizeof( msgBuf ) );
-			outMsg.WriteByte( GAME_RELIABLE_MESSAGE_MENU );
-			outMsg.WriteBits( 1, 1 );
-			networkSystem->ClientSendReliableMessage( outMsg );
-
-			bCurrentMenuMsg = true;
-		}
-#endif
 		if ( player->wantSpectate ) {
 			mainGui->SetStateString( "spectext", common->GetLocalizedString( "#str_104249" ) );
 		} else {
@@ -5440,20 +5426,6 @@ bool idMultiplayerGame::Draw( int clientNum ) {
 // RITUAL END
 		}
 	} else {
-#if 0
-		// uncomment this if you want to track when players are in a menu
-		if ( bCurrentMenuMsg ) {
-			idBitMsg	outMsg;
-			byte		msgBuf[ 128 ];
-
-			outMsg.Init( msgBuf, sizeof( msgBuf ) );
-			outMsg.WriteByte( GAME_RELIABLE_MESSAGE_MENU );
-			outMsg.WriteBits( 0, 1 );
-			networkSystem->ClientSendReliableMessage( outMsg );
-
-			bCurrentMenuMsg = false;
-		}
-#endif
 		DrawScoreBoard( player );
 	}
 

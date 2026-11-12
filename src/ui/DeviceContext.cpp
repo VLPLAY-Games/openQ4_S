@@ -2980,18 +2980,6 @@ const idMaterial *idDeviceContext::GetScrollBarImage(int index) {
 
 // this only supports left aligned text
 idRegion *idDeviceContext::GetTextRegion(const char *text, float textScale, idRectangle rectDraw, float xStart, float yStart) {
-#if 0
-	const char	*p, *textPtr, *newLinePtr;
-	char		buff[1024];
-	int			len, textWidth, newLine, newLineWidth;
-	float		y;
-
-	float charSkip = MaxCharWidth(textScale) + 1;
-	float lineSkip = MaxCharHeight(textScale);
-
-	textWidth = 0;
-	newLinePtr = NULL;
-#endif
 	return NULL;
 /*
 	if (text == NULL) {

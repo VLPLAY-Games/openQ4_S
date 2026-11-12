@@ -813,18 +813,11 @@ static void R_FlareDeform( drawSurf_t *surf ) {
 		ac[i].st[1] = 0.5;
 	}
 
-#if 1
 	static glIndex_t	triIndexes[18*3] = {
 		0,4,5,  0,5,6, 0,6,7, 0,7,1, 1,7,8, 1,8,9, 
 		15,4,0, 15,0,3, 3,0,1, 3,1,2, 2,1,9, 2,9,10,
 		14,15,3, 14,3,13, 13,3,2, 13,2,12, 12,2,11, 11,2,10
 	};
-#else
-	newTri->numIndexes = 12;
-	static glIndex_t triIndexes[4*3] = {
-		0,1,2, 0,2,3, 0,4,5,0,5,6
-	};
-#endif
 
 	memcpy( newTri->indexes, triIndexes, sizeof( triIndexes ) );
 

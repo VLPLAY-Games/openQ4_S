@@ -92,11 +92,7 @@ static void R_ResetSpecularProbeMaterialInfo( specularProbeMaterialInfo_t &info 
 // post-processing and modern-feature surface. Vulkan implements the stock
 // material-program families natively without claiming those unrelated paths.
 static bool R_MaterialGLSLProgramsAvailable() {
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	return true;
-#else
 	return glConfig.GLSLProgramAvailable;
-#endif
 }
 
 // Like glslPrograms, fragmentPrograms is an authored material capability.
@@ -104,11 +100,7 @@ static bool R_MaterialGLSLProgramsAvailable() {
 // families, so declarations must select their programmable branch even
 // though no OpenGL ARB program capability is advertised by this backend.
 static bool R_MaterialFragmentProgramsAvailable() {
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	return true;
-#else
 	return glConfig.ARBFragmentProgramAvailable;
-#endif
 }
 
 struct q4ImplicitGuiAtlasMaterialPrefix_t {

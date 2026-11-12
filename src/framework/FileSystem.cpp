@@ -8664,21 +8664,7 @@ bool idFileSystemLocal::HasD3XP( void ) {
 		return true;
 	}
 	
-#if 0
-	// check for a d3xp directory with a pk4 file
-	// copied over from ListMods - only looks in basepath
-	ListOSFiles( fs_basepath.GetString(), "/", dirs );
-	for ( i = 0; i < dirs.Num(); i++ ) {
-		if ( dirs[i].Icmp( "d3xp" ) == 0 ) {
-			gamepath = BuildOSPath( fs_basepath.GetString(), dirs[ i ], "" );
-			ListOSFiles( gamepath, ".pk4", pk4s );
-			if ( pk4s.Num() ) {
-				d3xp = 1;
-				return true;
-			}
-		}
-	}
-#elif ID_ALLOW_D3XP
+#if ID_ALLOW_D3XP
 	// check for d3xp's d3xp/pak000.pk4 in any search path
 	// checking wether the pak is loaded by checksum wouldn't be enough:
 	// we may have a different fs_game right now but still need to reply that it's installed

@@ -435,12 +435,6 @@ static void CreateMapLight( const idMapEntity *mapEnt ) {
 		common->Error( "Light at (%f,%f,%f) didn't have a name",
 			light->def.parms.origin[0], light->def.parms.origin[1], light->def.parms.origin[2] );
 	}
-#if 0
-	// use the renderer code to get the bounding planes for the light
-	// based on all the parameters
-	R_RenderLightFrustum( light->parms, light->frustum );
-	light->lightShader = light->parms.shader;
-#endif
 
 	dmapGlobals.mapLights.Append( light );
 

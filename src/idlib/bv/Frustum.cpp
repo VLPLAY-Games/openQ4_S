@@ -1209,7 +1209,6 @@ bool idFrustum::FromProjection( const idBox &box, const idVec3 &projectionOrigin
 		}
 	}
 
-#if 1
 
 	int j, minX, minY, maxY, minZ, maxZ;
 	idVec3 points[8];
@@ -1263,78 +1262,6 @@ bool idFrustum::FromProjection( const idBox &box, const idVec3 &projectionOrigin
 	this->dUp = Max( idMath::Fabs( points[minZ].z / points[minZ].x ), idMath::Fabs( points[maxZ].z / points[maxZ].x ) ) * dFar;
 	this->invFar = 1.0f / dFar;
 
-#elif 1
-
-	int j;
-	float f, x;
-	idBounds b;
-	idVec3 points[8];
-
-	for ( j = 0; j < 2; j++ ) {
-
-		axis[0] = dir;
-		axis[1] = box.GetAxis()[bestAxis] - ( box.GetAxis()[bestAxis] * axis[0] ) * axis[0];
-		axis[1].Normalize();
-		axis[2].Cross( axis[0], axis[1] );
-
-		BoxToPoints( ( box.GetCenter() - projectionOrigin ) * axis.Transpose(), box.GetExtents(), box.GetAxis() * axis.Transpose(), points );
-
-		b.Clear();
-		for ( i = 0; i < 8; i++ ) {
-			x = points[i].x;
-			if ( x <= 1.0f ) {
-				return false;
-			}
-			f = 1.0f / x;
-			points[i].y *= f;
-			points[i].z *= f;
-			b.AddPoint( points[i] );
-		}
-
-		if ( j == 0 ) {
-			dir += idMath::Tan16( 0.5f * ( idMath::ATan16( b[1][1] ) + idMath::ATan16( b[0][1] ) ) ) * axis[1];
-			dir += idMath::Tan16( 0.5f * ( idMath::ATan16( b[1][2] ) + idMath::ATan16( b[0][2] ) ) ) * axis[2];
-			dir.Normalize();
-		}
-	}
-
-	this->origin = projectionOrigin;
-	this->dNear = b[0][0];
-	this->dFar = dFar;
-	this->dLeft = Max( idMath::Fabs( b[0][1] ), idMath::Fabs( b[1][1] ) ) * dFar;
-	this->dUp = Max( idMath::Fabs( b[0][2] ), idMath::Fabs( b[1][2] ) ) * dFar;
-	this->invFar = 1.0f / dFar;
-
-#else
-
-	float dist;
-	idVec3 org;
-
-	axis[0] = dir;
-	axis[1] = box.GetAxis()[bestAxis] - ( box.GetAxis()[bestAxis] * axis[0] ) * axis[0];
-	axis[1].Normalize();
-	axis[2].Cross( axis[0], axis[1] );
-
-	for ( i = 0; i < 3; i++ ) {
-		dist[i] = idMath::Fabs( box.GetExtents()[0] * ( axis[i] * box.GetAxis()[0] ) ) +
-					idMath::Fabs( box.GetExtents()[1] * ( axis[i] * box.GetAxis()[1] ) ) +
-						idMath::Fabs( box.GetExtents()[2] * ( axis[i] * box.GetAxis()[2] ) );
-	}
-
-	dist[0] = axis[0] * ( box.GetCenter() - projectionOrigin ) - dist[0];
-	if ( dist[0] <= 1.0f ) {
-		return false;
-	}
-	float invDist = 1.0f / dist[0];
-
-	this->origin = projectionOrigin;
-	this->dNear = dist[0];
-	this->dFar = dFar;
-	this->dLeft = dist[1] * invDist * dFar;
-	this->dUp = dist[2] * invDist * dFar;
-	this->invFar = 1.0f / dFar;
-
-#endif
 
 	return true;
 }

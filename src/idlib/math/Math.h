@@ -427,7 +427,6 @@ ID_INLINE float idMath::Sin16( float a ) {
 	if ( ( a < 0.0f ) || ( a >= TWO_PI ) ) {
 		a -= floorf( a / TWO_PI ) * TWO_PI;
 	}
-#if 1
 	if ( a < PI ) {
 		if ( a > HALF_PI ) {
 			a = PI - a;
@@ -439,12 +438,6 @@ ID_INLINE float idMath::Sin16( float a ) {
 			a = PI - a;
 		}
 	}
-#else
-	a = PI - a;
-	if ( fabs( a ) >= HALF_PI ) {
-		a = ( ( a < 0.0f ) ? -PI : PI ) - a;
-	}
-#endif
 	s = a * a;
 	return a * ( ( ( ( ( -2.39e-08f * s + 2.7526e-06f ) * s - 1.98409e-04f ) * s + 8.3333315e-03f ) * s - 1.666666664e-01f ) * s + 1.0f );
 }
@@ -463,7 +456,6 @@ ID_INLINE float idMath::Cos16( float a ) {
 	if ( ( a < 0.0f ) || ( a >= TWO_PI ) ) {
 		a -= floorf( a / TWO_PI ) * TWO_PI;
 	}
-#if 1
 	if ( a < PI ) {
 		if ( a > HALF_PI ) {
 			a = PI - a;
@@ -480,15 +472,6 @@ ID_INLINE float idMath::Cos16( float a ) {
 			d = -1.0f;
 		}
 	}
-#else
-	a = PI - a;
-	if ( fabs( a ) >= HALF_PI ) {
-		a = ( ( a < 0.0f ) ? -PI : PI ) - a;
-		d = 1.0f;
-	} else {
-		d = -1.0f;
-	}
-#endif
 	s = a * a;
 	return d * ( ( ( ( ( -2.605e-07f * s + 2.47609e-05f ) * s - 1.3888397e-03f ) * s + 4.16666418e-02f ) * s - 4.999999963e-01f ) * s + 1.0f );
 }
@@ -520,7 +503,6 @@ ID_INLINE void idMath::SinCos16( float a, float &s, float &c ) {
 	if ( ( a < 0.0f ) || ( a >= idMath::TWO_PI ) ) {
 		a -= floorf( a / idMath::TWO_PI ) * idMath::TWO_PI;
 	}
-#if 1
 	if ( a < PI ) {
 		if ( a > HALF_PI ) {
 			a = PI - a;
@@ -537,15 +519,6 @@ ID_INLINE void idMath::SinCos16( float a, float &s, float &c ) {
 			d = -1.0f;
 		}
 	}
-#else
-	a = PI - a;
-	if ( fabs( a ) >= HALF_PI ) {
-		a = ( ( a < 0.0f ) ? -PI : PI ) - a;
-		d = 1.0f;
-	} else {
-		d = -1.0f;
-	}
-#endif
 	t = a * a;
 	s = a * ( ( ( ( ( -2.39e-08f * t + 2.7526e-06f ) * t - 1.98409e-04f ) * t + 8.3333315e-03f ) * t - 1.666666664e-01f ) * t + 1.0f );
 	c = d * ( ( ( ( ( -2.605e-07f * t + 2.47609e-05f ) * t - 1.3888397e-03f ) * t + 4.16666418e-02f ) * t - 4.999999963e-01f ) * t + 1.0f );
@@ -579,7 +552,6 @@ ID_INLINE float idMath::Tan16( float a ) {
 	if ( ( a < 0.0f ) || ( a >= PI ) ) {
 		a -= floorf( a / PI ) * PI;
 	}
-#if 1
 	if ( a < HALF_PI ) {
 		if ( a > ONEFOURTH_PI ) {
 			a = HALF_PI - a;
@@ -596,15 +568,6 @@ ID_INLINE float idMath::Tan16( float a ) {
 			reciprocal = true;
 		}
 	}
-#else
-	a = HALF_PI - a;
-	if ( fabs( a ) >= ONEFOURTH_PI ) {
-		a = ( ( a < 0.0f ) ? -HALF_PI : HALF_PI ) - a;
-		reciprocal = false;
-	} else {
-		reciprocal = true;
-	}
-#endif
 	s = a * a;
 	s = a * ( ( ( ( ( ( 9.5168091e-03f * s + 2.900525e-03f ) * s + 2.45650893e-02f ) * s + 5.33740603e-02f ) * s + 1.333923995e-01f ) * s + 3.333314036e-01f ) * s + 1.0f );
 	if ( reciprocal ) {
@@ -769,18 +732,11 @@ ID_INLINE float idMath::Exp16( float f ) {
 	float x, x2, y, p, q;
 
 	x = f * 1.44269504088896340f;		// multiply with ( 1 / log( 2 ) )
-#if 1
 	i = static_cast<int>( idMath_FloatBits( x ) );
 	s = ( i >> IEEE_FLT_SIGN_BIT );
 	e = ( ( i >> IEEE_FLT_MANTISSA_BITS ) & ( ( 1 << IEEE_FLT_EXPONENT_BITS ) - 1 ) ) - IEEE_FLT_EXPONENT_BIAS;
 	m = ( i & ( ( 1 << IEEE_FLT_MANTISSA_BITS ) - 1 ) ) | ( 1 << IEEE_FLT_MANTISSA_BITS );
 	i = ( ( m >> ( IEEE_FLT_MANTISSA_BITS - e ) ) & ~( e >> 31 ) ) ^ s;
-#else
-	i = (int) x;
-	if ( x < 0.0f ) {
-		i--;
-	}
-#endif
 	exponent = ( i + IEEE_FLT_EXPONENT_BIAS ) << IEEE_FLT_MANTISSA_BITS;
 	y = idMath_FloatFromBits( static_cast<unsigned int>( exponent ) );
 	x -= (float) i;

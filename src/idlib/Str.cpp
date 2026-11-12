@@ -1673,10 +1673,6 @@ idStr::IcmpPath
 int idStr::IcmpPath( const char *s1, const char *s2 ) {
 	int c1, c2, d;
 
-#if 0
-//#if !defined( _WIN32 )
-	idLib::common->Printf( "WARNING: IcmpPath used on a case-sensitive filesystem?\n" );
-#endif
 
 	do {
 		c1 = static_cast<byte>( *s1++ );
@@ -1742,10 +1738,6 @@ idStr::IcmpnPath
 int idStr::IcmpnPath( const char *s1, const char *s2, int n ) {
 	int c1, c2, d;
 
-#if 0
-//#if !defined( _WIN32 )
-	idLib::common->Printf( "WARNING: IcmpPath used on a case-sensitive filesystem?\n" );
-#endif
 
 	assert( n >= 0 );
 

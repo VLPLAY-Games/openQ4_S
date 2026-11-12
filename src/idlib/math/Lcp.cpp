@@ -730,29 +730,6 @@ bool idLCP_Square::Solve( const idMatX &o_m, idVecX &o_x, const idVecX &o_b, con
 		}
 	}
 
-#if defined(_DEBUG) && 0
-	if ( !failed ) {
-		// test whether or not the solution satisfies the complementarity conditions
-		for ( i = 0; i < m.GetNumRows(); i++ ) {
-			a[i] = -b[i];
-			for ( j = 0; j < m.GetNumRows(); j++ ) {
-				a[i] += rowPtrs[i][j] * f[j];
-			}
-
-			if ( f[i] == lo[i] ) {
-				if ( lo[i] != hi[i] && a[i] < -LCP_ACCEL_EPSILON ) {
-					int bah1 = 1;
-				}
-			} else if ( f[i] == hi[i] ) {
-				if ( lo[i] != hi[i] && a[i] > LCP_ACCEL_EPSILON ) {
-					int bah2 = 1;
-				}
-			} else if ( f[i] < lo[i] || f[i] > hi[i] || idMath::Fabs( a[i] ) > 1.0f ) {
-				int bah3 = 1;
-			}
-		}
-	}
-#endif
 
 	// unpermute result
 	for ( i = 0; i < f.GetSize(); i++ ) {
@@ -1524,29 +1501,6 @@ bool idLCP_Symmetric::Solve( const idMatX &o_m, idVecX &o_x, const idVecX &o_b, 
 		}
 	}
 
-#if defined(_DEBUG) && 0
-	if ( !failed ) {
-		// test whether or not the solution satisfies the complementarity conditions
-		for ( i = 0; i < m.GetNumRows(); i++ ) {
-			a[i] = -b[i];
-			for ( j = 0; j < m.GetNumRows(); j++ ) {
-				a[i] += rowPtrs[i][j] * f[j];
-			}
-
-			if ( f[i] == lo[i] ) {
-				if ( lo[i] != hi[i] && a[i] < -LCP_ACCEL_EPSILON ) {
-					int bah1 = 1;
-				}
-			} else if ( f[i] == hi[i] ) {
-				if ( lo[i] != hi[i] && a[i] > LCP_ACCEL_EPSILON ) {
-					int bah2 = 1;
-				}
-			} else if ( f[i] < lo[i] || f[i] > hi[i] || idMath::Fabs( a[i] ) > 1.0f ) {
-				int bah3 = 1;
-			}
-		}
-	}
-#endif
 
 	// unpermute result
 	for ( i = 0; i < f.GetSize(); i++ ) {

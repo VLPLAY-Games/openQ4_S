@@ -498,9 +498,6 @@ void Posix_QueEvent( sysEventType_t type, int value, int value2,
 	eventDispositionTags[ev - eventQue] = {};
 	eventRetirementSerials[ev - eventQue] = 0;
 
-#if 0
-	common->Printf( "Event %d: %d %d\n", ev->evType, ev->evValue, ev->evValue2 );
-#endif
 }
 
 bool Sys_QueTrackedEvent(sysEvent_t& event, sysEventDispositionTag_t& tag) noexcept {
@@ -1231,12 +1228,6 @@ void Posix_InitConsoleInput( void ) {
 			Sys_Printf( "tcsetattr failed: %s\n", strerror( errno ) );
 			Sys_Printf( "terminal support may not work correctly. Use +set in_tty 0 to disable it\n" );
 		}
-#if 0
-		// make the output non blocking
-		if ( fcntl( STDOUT_FILENO, F_SETFL, fcntl( STDOUT_FILENO, F_GETFL, 0 ) | O_NONBLOCK ) == -1 ) {
-			Sys_Printf( "fcntl STDOUT non blocking failed: %s\n", strerror( errno ) );
-		}
-#endif
 		tty_enabled = true;
 		// check the terminal type for the supported ones
 		char *term = getenv( "TERM" );

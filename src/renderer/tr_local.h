@@ -1265,11 +1265,7 @@ window takes the offset. Ordinary frames have a zero offset.
 */
 ID_INLINE int RB_TileOffsetX( void ) { return backEnd.renderTexture == NULL ? tr.viewportOffset[0] : 0; }
 ID_INLINE int RB_TileOffsetY( void ) { return backEnd.renderTexture == NULL ? tr.viewportOffset[1] : 0; }
-#ifdef OPENQ4_RENDERER_VK_MODULE
-extern thread_local glconfig_t glConfig;
-#else
 extern glconfig_t			glConfig;		// outside of TR since it shouldn't be cleared during ref re-init
-#endif
 extern bool					tr_levelshotProjectionShiftActive;
 // true when renderView's off-axis (VR eye) tangents describe a usable frustum
 bool R_ViewFovTangentsValid( const renderView_t &renderView );
@@ -2603,14 +2599,8 @@ void RB_ShutdownDebugTools( void );
 // Vulkan module draws those tools through a fixed-function emulation
 // (Vulkan/vk_DebugTools.cpp) that has to see which image is bound; OpenGL
 // binds it as usual.
-#if defined( OPENQ4_RENDERER_VK_MODULE )
-void VK_DebugGL_BindImage( idImage *image );
-#define RB_BindDebugImage( image )	VK_DebugGL_BindImage( image )
-#define RB_BindNullDebugImage()		VK_DebugGL_BindImage( NULL )
-#else
 #define RB_BindDebugImage( image )	( image )->Bind()
 #define RB_BindNullDebugImage()		globalImages->BindNull()
-#endif
 void RB_ShutdownScenePostProcess( void );
 void RB_ApplyColorMappingsToBackBuffer( void );
 

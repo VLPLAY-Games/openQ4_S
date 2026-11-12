@@ -126,12 +126,7 @@ static bool R_TranslucentShadowMapMomentsSupportedForLight( const idRenderLightL
 		cachedApiFrame = tr.frameCount;
 	}
 	if ( cachedVulkanApi ) {
-#ifdef OPENQ4_RENDERER_VK_MODULE
-		extern bool VK_ShadowMap_TranslucentMomentsAvailable( void );
-		return VK_ShadowMap_TranslucentMomentsAvailable();
-#else
 		return false;
-#endif
 	}
 	return r_shadowMapTranslucentMoments.GetBool() &&
 		glConfig.GLSLProgramAvailable &&

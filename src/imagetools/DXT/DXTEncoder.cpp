@@ -1049,11 +1049,7 @@ int NormalDistanceDXT5( const int *vector, const int *normalized ) {
 	__asm {
 		mov			esi, vector
 		mov			edi, normalized
-#if 0	// object-space
-		pshufd		xmm0, [esi], R_SHUFFLE_PS( 0, 1, 3, 2 )
-#else
 		pshufd		xmm0, [esi], R_SHUFFLE_PS( 1, 2, 3, 0 )
-#endif
 		cvtdq2ps	xmm0, xmm0
 		mulps		xmm0, SIMD_SSE2_float_scale
 		subps		xmm0, SIMD_SSE2_float_one
@@ -1079,11 +1075,7 @@ int NormalDistanceDXT5( const int *vector, const int *normalized ) {
 		maxps		xmm0, SIMD_SSE2_float_zero
 		minps		xmm0, SIMD_SSE2_float_255
 		cvttps2dq	xmm0, xmm0
-#if 0	// object-space
-		pshufd		xmm3, [edi], R_SHUFFLE_PS( 0, 1, 3, 2 )
-#else
 		pshufd		xmm3, [edi], R_SHUFFLE_PS( 1, 2, 3, 0 )
-#endif
 		psubd		xmm0, xmm3
 		pand		xmm0, SIMD_SSE2_dword_maskWords
 		pmullw		xmm0, xmm0
@@ -1095,15 +1087,9 @@ int NormalDistanceDXT5( const int *vector, const int *normalized ) {
 	}
 	return result;
 #else
-#if 0	// object-space
-	const int c0 = 0;
-	const int c1 = 1;
-	const int c2 = 3;
-#else
 	const int c0 = 1;
 	const int c1 = 2;
 	const int c2 = 3;
-#endif
 	float floatNormal[3];
 	byte intNormal[4];
 	floatNormal[0] = vector[c0] / 255.0f * 2.0f - 1.0f;
@@ -1633,17 +1619,10 @@ int idDxtEncoder::GetMinMaxNormalsDXT5HQFast( const byte *colorBlock, byte *minC
 	const int C565_BBOX_EXPAND = 1;
 	const int ALPHA_BBOX_EXPAND = 128;
 
-#if 0 // object-space
-	bboxMin[0] = ( bboxMin[0] <= C565_BBOX_EXPAND ) ? 0 : bboxMin[0] - C565_BBOX_EXPAND;
-	bboxMax[0] = ( bboxMax[0] >= (255>>3)-C565_BBOX_EXPAND ) ? (255>>3) : bboxMax[0] + C565_BBOX_EXPAND;
-	bboxMin[2] = 0;
-	bboxMax[2] = 0;
-#else
 	bboxMin[0] = 0;
 	bboxMax[0] = 0;
 	bboxMin[2] = ( bboxMin[2] <= C565_BBOX_EXPAND ) ? 0 : bboxMin[2] - C565_BBOX_EXPAND;
 	bboxMax[2] = ( bboxMax[2] >= (255>>2)-C565_BBOX_EXPAND ) ? (255>>2) : bboxMax[2] + C565_BBOX_EXPAND;
-#endif
 
 	bboxMin[1] = ( bboxMin[1] <= C565_BBOX_EXPAND ) ? 0 : bboxMin[1] - C565_BBOX_EXPAND;
 	bboxMax[1] = ( bboxMax[1] >= (255>>2)-C565_BBOX_EXPAND ) ? (255>>2) : bboxMax[1] + C565_BBOX_EXPAND;
@@ -2830,13 +2809,8 @@ void idDxtEncoder::CompressNormalMapDXT5RenormalizeHQ( const byte *inBuf, byte *
 
 			// swizzle components
 			for ( int k = 0; k < 16; k++ ) {
-#if 0 // object-space
-				block[k*4+3] = block[k*4+2];
-				block[k*4+2] = 0;
-#else
 				block[k*4+3] = block[k*4+0];
 				block[k*4+0] = 0;
-#endif
 			}
 
 			GetMinMaxNormalsDXT5HQFast( block, col1, col2, colorIndices, alphaIndices );
@@ -3026,22 +3000,6 @@ void idDxtEncoder::SelectColorsDiagonal( const byte *colorBlock, byte *minColor,
 	byte mid1 = byte( ( (int) minColor[1] + maxColor[1] + 1 ) >> 1 );
 	byte mid2 = byte( ( (int) minColor[2] + maxColor[2] + 1 ) >> 1 );
 
-#if 0
-
-	// using the covariance is the best way to select the diagonal
-	int side0 = 0;
-	int side1 = 0;
-	for ( int i = 0; i < 16; i++ ) {
-		int b0 = colorBlock[i*4+0] - mid0;
-		int b1 = colorBlock[i*4+1] - mid1;
-		int b2 = colorBlock[i*4+2] - mid2;
-		side0 += ( b0 * b1 );
-		side1 += ( b1 * b2 );
-	}
-	byte mask0 = -( side0 < 0 );
-	byte mask1 = -( side1 < 0 );
-
-#else
 
 	// calculating the covariance of just the sign bits is much faster and gives almost the same result
 	int side0 = 0;
@@ -3056,7 +3014,6 @@ void idDxtEncoder::SelectColorsDiagonal( const byte *colorBlock, byte *minColor,
 	byte mask0 = -( side0 > 8 );
 	byte mask1 = -( side1 > 8 );
 
-#endif
 
 	byte c0 = minColor[0];
 	byte c1 = maxColor[0];
@@ -3096,7 +3053,6 @@ return: 4 byte color index block
 ========================
 */
 void idDxtEncoder::EmitColorIndices( const byte *colorBlock, const byte *minColor, const byte *maxColor ) {
-#if 1
 
 	ALIGN16( uint16_t colors[4][4] );
 	unsigned int result = 0;
@@ -3154,16 +3110,6 @@ void idDxtEncoder::EmitColorIndices( const byte *colorBlock, const byte *minColo
 		m = colors[3][2] - c2;
 		d3 += abs( m );
 
-#if 0
-		int b0 = d0 > d2;
-		int b1 = d1 > d3;
-		int b2 = d0 > d3;
-		int b3 = d1 > d2;
-		int b4 = d0 > d1;
-		int b5 = d2 > d3;
-
-		result |= ( ( !b3 & b4 ) | ( b2 & b5 ) | ( ( ( b0 & b3 ) | ( b1 & b2 ) ) << 1 ) ) << ( i << 1 );
-#else
 		bool b0 = d0 > d3;
 		bool b1 = d1 > d2;
 		bool b2 = d0 > d2;
@@ -3175,135 +3121,10 @@ void idDxtEncoder::EmitColorIndices( const byte *colorBlock, const byte *minColo
 		int x2 = b0 & b4;
 
 		result |= ( x2 | ( ( x0 | x1 ) << 1 ) ) << ( i << 1 );
-#endif
 	}
 
 	EmitUInt( result );
 
-#elif 1
-
-	byte colors[4][4];
-	unsigned int indexes[16];
-
-	colors[0][0] = ( maxColor[0] & C565_5_MASK ) | ( maxColor[0] >> 6 );
-	colors[0][1] = ( maxColor[1] & C565_6_MASK ) | ( maxColor[1] >> 5 );
-	colors[0][2] = ( maxColor[2] & C565_5_MASK ) | ( maxColor[2] >> 6 );
-	colors[0][3] = 0;
-	colors[1][0] = ( minColor[0] & C565_5_MASK ) | ( minColor[0] >> 6 );
-	colors[1][1] = ( minColor[1] & C565_6_MASK ) | ( minColor[1] >> 5 );
-	colors[1][2] = ( minColor[2] & C565_5_MASK ) | ( minColor[2] >> 6 );
-	colors[1][3] = 0;
-	colors[2][0] = ( 2 * colors[0][0] + 1 * colors[1][0] ) / 3;
-	colors[2][1] = ( 2 * colors[0][1] + 1 * colors[1][1] ) / 3;
-	colors[2][2] = ( 2 * colors[0][2] + 1 * colors[1][2] ) / 3;
-	colors[2][3] = 0;
-	colors[3][0] = ( 1 * colors[0][0] + 2 * colors[1][0] ) / 3;
-	colors[3][1] = ( 1 * colors[0][1] + 2 * colors[1][1] ) / 3;
-	colors[3][2] = ( 1 * colors[0][2] + 2 * colors[1][2] ) / 3;
-	colors[3][3] = 0;
-
-	for ( int i = 0; i < 16; i++ ) {
-		int c0, c1, c2, m, d, minDist;
-
-		c0 = colorBlock[i*4+0];
-		c1 = colorBlock[i*4+1];
-		c2 = colorBlock[i*4+2];
-
-		m = colors[0][0] - c0;
-		d = m * m;
-		m = colors[0][1] - c1;
-		d += m * m;
-		m = colors[0][2] - c2;
-		d += m * m;
-
-		minDist = d;
-		indexes[i] = 0;
-
-		m = colors[1][0] - c0;
-		d = m * m;
-		m = colors[1][1] - c1;
-		d += m * m;
-		m = colors[1][2] - c2;
-		d += m * m;
-
-		if ( d < minDist ) {
-			minDist = d;
-			indexes[i] = 1;
-		}
-
-		m = colors[2][0] - c0;
-		d = m * m;
-		m = colors[2][1] - c1;
-		d += m * m;
-		m = colors[2][2] - c2;
-		d += m * m;
-
-		if ( d < minDist ) {
-			minDist = d;
-			indexes[i] = 2;
-		}
-
-		m = colors[3][0] - c0;
-		d = m * m;
-		m = colors[3][1] - c1;
-		d += m * m;
-		m = colors[3][2] - c2;
-		d += m * m;
-
-		if ( d < minDist ) {
-			minDist = d;
-			indexes[i] = 3;
-		}
-	}
-
-	unsigned int result = 0;
-	for ( int i = 0; i < 16; i++ ) {
-		result |= ( indexes[i] << (unsigned int)( i << 1 ) );
-	}
-
-	EmitUInt( result );
-
-#else
-
-	byte colors[4][4];
-	unsigned int indexes[16];
-
-	colors[0][0] = ( maxColor[0] & C565_5_MASK ) | ( maxColor[0] >> 6 );
-	colors[0][1] = ( maxColor[1] & C565_6_MASK ) | ( maxColor[1] >> 5 );
-	colors[0][2] = ( maxColor[2] & C565_5_MASK ) | ( maxColor[2] >> 6 );
-	colors[0][3] = 0;
-	colors[1][0] = ( minColor[0] & C565_5_MASK ) | ( minColor[0] >> 6 );
-	colors[1][1] = ( minColor[1] & C565_6_MASK ) | ( minColor[1] >> 5 );
-	colors[1][2] = ( minColor[2] & C565_5_MASK ) | ( minColor[2] >> 6 );
-	colors[1][3] = 0;
-	colors[2][0] = ( 2 * colors[0][0] + 1 * colors[1][0] ) / 3;
-	colors[2][1] = ( 2 * colors[0][1] + 1 * colors[1][1] ) / 3;
-	colors[2][2] = ( 2 * colors[0][2] + 1 * colors[1][2] ) / 3;
-	colors[2][3] = 0;
-	colors[3][0] = ( 1 * colors[0][0] + 2 * colors[1][0] ) / 3;
-	colors[3][1] = ( 1 * colors[0][1] + 2 * colors[1][1] ) / 3;
-	colors[3][2] = ( 1 * colors[0][2] + 2 * colors[1][2] ) / 3;
-	colors[3][3] = 0;
-
-	for ( int i = 0; i < 16; i++ ) {
-		unsigned int minDist = (255*255)*4;
-		for ( int j = 0; j < 4; j++ ) {
-			unsigned int dist = ColorDistance( &colorBlock[i*4], &colors[j][0] );
-			if ( dist < minDist ) {
-				minDist = dist;
-				indexes[i] = j;
-			}
-		}
-	}
-
-	unsigned int result = 0;
-	for ( int i = 0; i < 16; i++ ) {
-		result |= ( indexes[i] << (unsigned int)( i << 1 ) );
-	}
-
-	EmitUInt( result );
-
-#endif
 }
 
 /*
@@ -3457,7 +3278,6 @@ void idDxtEncoder::EmitAlphaIndices( const byte *colorBlock, const int offset, c
 
 	const int ALPHA_RANGE = 7;
 
-#if 1
 
 	byte ab1, ab2, ab3, ab4, ab5, ab6, ab7;
 	ALIGN16( byte indexes[16] );
@@ -3493,100 +3313,6 @@ void idDxtEncoder::EmitAlphaIndices( const byte *colorBlock, const int offset, c
 	EmitByte( (indexes[10] >> 2) | (indexes[11] << 1) | (indexes[12] << 4) | (indexes[13] << 7) );
 	EmitByte( (indexes[13] >> 1) | (indexes[14] << 2) | (indexes[15] << 5) );
 
-#elif 0
-
-	ALIGN16( byte indexes[16] );
-	byte delta = maxAlpha - minAlpha;
-	byte half = delta >> 1;
-	byte bias = delta / ( 2 * ALPHA_RANGE );
-	byte bottom = minAlpha + bias;
-	byte top = maxAlpha - bias;
-
-	colorBlock += offset;
-
-	for ( int i = 0; i < 16; i++ ) {
-		byte a = colorBlock[i*4];
-		if ( a <= bottom ) {
-			indexes[i] = 1;
-		} else if ( a >= top ) {
-			indexes[i] = 0;
-		} else {
-			indexes[i] = (ALPHA_RANGE+1) + ( ( minAlpha - a ) * ALPHA_RANGE - half ) / delta;
-		}
-	}
-
-	EmitByte( (indexes[ 0] >> 0) | (indexes[ 1] << 3) | (indexes[ 2] << 6) );
-	EmitByte( (indexes[ 2] >> 2) | (indexes[ 3] << 1) | (indexes[ 4] << 4) | (indexes[ 5] << 7) );
-	EmitByte( (indexes[ 5] >> 1) | (indexes[ 6] << 2) | (indexes[ 7] << 5) );
-
-	EmitByte( (indexes[ 8] >> 0) | (indexes[ 9] << 3) | (indexes[10] << 6) );
-	EmitByte( (indexes[10] >> 2) | (indexes[11] << 1) | (indexes[12] << 4) | (indexes[13] << 7) );
-	EmitByte( (indexes[13] >> 1) | (indexes[14] << 2) | (indexes[15] << 5) );
-
-#elif 0
-
-	ALIGN16( byte indexes[16] );
-	byte delta = maxAlpha - minAlpha;
-	byte half = delta >> 1;
-	byte bias = delta / ( 2 * ALPHA_RANGE );
-	byte bottom = minAlpha + bias;
-	byte top = maxAlpha - bias;
-
-	colorBlock += offset;
-
-	for ( int i = 0; i < 16; i++ ) {
-		byte a = colorBlock[i*4];
-		int index = (ALPHA_RANGE+1) + ( ( minAlpha - a ) * ALPHA_RANGE - half ) / delta;
-		int c0 = a > bottom;
-		int c1 = a < top;
-		indexes[i] = ( index & -( c0 & c1 ) ) | ( c0 ^ 1 );
-	}
-
-	EmitByte( (indexes[ 0] >> 0) | (indexes[ 1] << 3) | (indexes[ 2] << 6) );
-	EmitByte( (indexes[ 2] >> 2) | (indexes[ 3] << 1) | (indexes[ 4] << 4) | (indexes[ 5] << 7) );
-	EmitByte( (indexes[ 5] >> 1) | (indexes[ 6] << 2) | (indexes[ 7] << 5) );
-
-	EmitByte( (indexes[ 8] >> 0) | (indexes[ 9] << 3) | (indexes[10] << 6) );
-	EmitByte( (indexes[10] >> 2) | (indexes[11] << 1) | (indexes[12] << 4) | (indexes[13] << 7) );
-	EmitByte( (indexes[13] >> 1) | (indexes[14] << 2) | (indexes[15] << 5) );
-
-#else
-
-	ALIGN16( byte indexes[16] );
-	ALIGN16( byte alphas[8] );
-
-	alphas[0] = maxAlpha;
-	alphas[1] = minAlpha;
-	alphas[2] = ( 6 * maxAlpha + 1 * minAlpha ) / ALPHA_RANGE;
-	alphas[3] = ( 5 * maxAlpha + 2 * minAlpha ) / ALPHA_RANGE;
-	alphas[4] = ( 4 * maxAlpha + 3 * minAlpha ) / ALPHA_RANGE;
-	alphas[5] = ( 3 * maxAlpha + 4 * minAlpha ) / ALPHA_RANGE;
-	alphas[6] = ( 2 * maxAlpha + 5 * minAlpha ) / ALPHA_RANGE;
-	alphas[7] = ( 1 * maxAlpha + 6 * minAlpha ) / ALPHA_RANGE;
-
-	colorBlock += offset;
-
-	for ( int i = 0; i < 16; i++ ) {
-		int minDist = INT_MAX;
-		byte a = colorBlock[i*4];
-		for ( int j = 0; j < 8; j++ ) {
-			int dist = abs( a - alphas[j] );
-			if ( dist < minDist ) {
-				minDist = dist;
-				indexes[i] = j;
-			}
-		}
-	}
-
-	EmitByte( (indexes[ 0] >> 0) | (indexes[ 1] << 3) | (indexes[ 2] << 6) );
-	EmitByte( (indexes[ 2] >> 2) | (indexes[ 3] << 1) | (indexes[ 4] << 4) | (indexes[ 5] << 7) );
-	EmitByte( (indexes[ 5] >> 1) | (indexes[ 6] << 2) | (indexes[ 7] << 5) );
-
-	EmitByte( (indexes[ 8] >> 0) | (indexes[ 9] << 3) | (indexes[10] << 6) );
-	EmitByte( (indexes[10] >> 2) | (indexes[11] << 1) | (indexes[12] << 4) | (indexes[13] << 7) );
-	EmitByte( (indexes[13] >> 1) | (indexes[14] << 2) | (indexes[15] << 5) );
-
-#endif
 }
 
 /*
@@ -3769,107 +3495,6 @@ idDxtEncoder::InsetYCoCgBBox
 */
 ID_INLINE void idDxtEncoder::InsetYCoCgBBox( byte *minColor, byte *maxColor ) const {
 
-#if 0
-
-	byte inset[4];
-
-	inset[0] = ( maxColor[0] - minColor[0] ) >> INSET_COLOR_SHIFT;
-	inset[1] = ( maxColor[1] - minColor[1] ) >> INSET_COLOR_SHIFT;
-	inset[3] = ( maxColor[3] - minColor[3] ) >> INSET_ALPHA_SHIFT;
-
-	minColor[0] = ( minColor[0] + inset[0] <= 255 ) ? minColor[0] + inset[0] : 255;
-	minColor[1] = ( minColor[1] + inset[1] <= 255 ) ? minColor[1] + inset[1] : 255;
-	minColor[3] = ( minColor[3] + inset[3] <= 255 ) ? minColor[3] + inset[3] : 255;
-
-	maxColor[0] = ( maxColor[0] >= inset[0] ) ? maxColor[0] - inset[0] : 0;
-	maxColor[1] = ( maxColor[1] >= inset[1] ) ? maxColor[1] - inset[1] : 0;
-	maxColor[3] = ( maxColor[3] >= inset[3] ) ? maxColor[3] - inset[3] : 0;
-
-	minColor[0] = ( minColor[0] & C565_5_MASK ) | ( minColor[0] >> 5 );
-	minColor[1] = ( minColor[1] & C565_6_MASK ) | ( minColor[1] >> 6 );
-
-	maxColor[0] = ( maxColor[0] & C565_5_MASK ) | ( maxColor[0] >> 5 );
-	maxColor[1] = ( maxColor[1] & C565_6_MASK ) | ( maxColor[1] >> 6 );
-
-#elif 0
-
-	float inset[4];
-	float minf[4];
-	float maxf[4];
-
-	for ( int i = 0; i < 4; i++ ) {
-		minf[i] = minColor[i] / 255.0f;
-		maxf[i] = maxColor[i] / 255.0f;
-	}
-
-	inset[0] = ( maxf[0] - minf[0] ) / 16.0f;
-	inset[1] = ( maxf[1] - minf[1] ) / 16.0f;
-	inset[2] = ( maxf[2] - minf[2] ) / 16.0f;
-	inset[3] = ( maxf[3] - minf[3] ) / 32.0f;
-
-	for ( int i = 0; i < 4; i++ ) {
-		minf[i] = ( minf[i] + inset[i] <= 1.0f ) ? minf[i] + inset[i] : 1.0f;
-		maxf[i] = ( maxf[i] >= inset[i] ) ? maxf[i] - inset[i] : 0;
-	}
-
-	minColor[0] = ((int)floor( minf[0] * 31 )) & ( ( 1 << 5 ) - 1 );
-	minColor[1] = ((int)floor( minf[1] * 63 )) & ( ( 1 << 6 ) - 1 );
-
-	maxColor[0] = ((int)ceil( maxf[0] * 31 )) & ( ( 1 << 5 ) - 1 );
-	maxColor[1] = ((int)ceil( maxf[1] * 63 )) & ( ( 1 << 6 ) - 1 );
-
-	minColor[0] = ( minColor[0] << 3 ) | ( minColor[0] >> 2 );
-	minColor[1] = ( minColor[1] << 2 ) | ( minColor[1] >> 4 );
-
-	maxColor[0] = ( maxColor[0] << 3 ) | ( maxColor[0] >> 2 );
-	maxColor[1] = ( maxColor[1] << 2 ) | ( maxColor[1] >> 4 );
-
-	minColor[3] = (int)floor( minf[3] * 255.0f );
-	maxColor[3] = (int)ceil( maxf[3] * 255.0f );
-
-#elif 0
-
-	int inset[4];
-	int mini[4];
-	int maxi[4];
-
-	inset[0] = ( maxColor[0] - minColor[0] );
-	inset[1] = ( maxColor[1] - minColor[1] );
-	inset[3] = ( maxColor[3] - minColor[3] );
-
-	mini[0] = ( minColor[0] << INSET_COLOR_SHIFT ) + inset[0];
-	mini[1] = ( minColor[1] << INSET_COLOR_SHIFT ) + inset[1];
-	mini[3] = ( minColor[3] << INSET_ALPHA_SHIFT ) + inset[3];
-
-	maxi[0] = ( maxColor[0] << INSET_COLOR_SHIFT ) - inset[0];
-	maxi[1] = ( maxColor[1] << INSET_COLOR_SHIFT ) - inset[1];
-	maxi[3] = ( maxColor[3] << INSET_ALPHA_SHIFT ) - inset[3];
-
-	mini[0] = ( mini[0] - ((1<<(3))-1) ) >> (INSET_COLOR_SHIFT+3);
-	mini[1] = ( mini[1] - ((1<<(3))-1) ) >> (INSET_COLOR_SHIFT+2);
-	mini[3] = ( mini[3] - ((1<<(2))-1) ) >> (INSET_ALPHA_SHIFT+0);
-
-	maxi[0] = ( maxi[0] + ((1<<(3))-1) ) >> (INSET_COLOR_SHIFT+3);
-	maxi[1] = ( maxi[1] + ((1<<(3))-1) ) >> (INSET_COLOR_SHIFT+2);
-	maxi[3] = ( maxi[3] + ((1<<(2))-1) ) >> (INSET_ALPHA_SHIFT+0);
-
-	if ( mini[0] < 0 ) mini[0] = 0;
-	if ( mini[1] < 0 ) mini[1] = 0;
-	if ( mini[3] < 0 ) mini[3] = 0;
-
-	if ( maxi[0] > 31 ) maxi[0] = 31;
-	if ( maxi[1] > 63 ) maxi[1] = 63;
-	if ( maxi[3] > 255 ) maxi[3] = 255;
-
-	minColor[0] = ( mini[0] << 3 ) | ( mini[0] >> 2 );
-	minColor[1] = ( mini[1] << 2 ) | ( mini[1] >> 4 );
-	minColor[3] = mini[3];
-
-	maxColor[0] = ( maxi[0] << 3 ) | ( maxi[0] >> 2 );
-	maxColor[1] = ( maxi[1] << 2 ) | ( maxi[1] >> 4 );
-	maxColor[3] = maxi[3];
-
-#elif 1
 
 	int inset[4];
 	int mini[4];
@@ -3903,7 +3528,6 @@ ID_INLINE void idDxtEncoder::InsetYCoCgBBox( byte *minColor, byte *maxColor ) co
 	maxColor[1] = byte( ( maxi[1] & C565_6_MASK ) | ( maxi[1] >> 6 ) );
 	maxColor[3] = byte( maxi[3] );
 
-#endif
 }
 
 /*
@@ -4165,7 +3789,6 @@ void idDxtEncoder::EmitGreenIndices( const byte *block, const int offset, const 
 
 	const int COLOR_RANGE = 3;
 
-#if 1
 
 	byte yb1 = ( 5 * maxGreen + 1 * minGreen + COLOR_RANGE ) / ( 2 * COLOR_RANGE );
 	byte yb2 = ( 3 * maxGreen + 3 * minGreen + COLOR_RANGE ) / ( 2 * COLOR_RANGE );
@@ -4188,37 +3811,6 @@ void idDxtEncoder::EmitGreenIndices( const byte *block, const int offset, const 
 
 	EmitUInt( result );
 
-#else
-
-	byte green[4];
-
-	green[0] = maxGreen;
-	green[1] = minGreen;
-	green[2] = ( 2 * green[0] + 1 * green[1] ) / 3;
-	green[3] = ( 1 * green[0] + 2 * green[1] ) / 3;
-
-	unsigned int result = 0;
-
-	block += offset;
-
-	for ( int i = 15; i >= 0; i-- ) {
-		result <<= 2;
-		byte y = block[i*4];
-		int minDist = INT_MAX;
-		int index;
-		for ( int j = 0; j < 4; j++ ) {
-			int dist = abs( y - green[j] );
-			if ( dist < minDist ) {
-				minDist = dist;
-				index = j;
-			}
-		}
-		result |= index;
-	}
-
-	EmitUInt( result );
-
-#endif
 }
 
 /*

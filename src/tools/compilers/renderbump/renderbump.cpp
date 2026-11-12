@@ -729,32 +729,10 @@ static void RasterizeTriangle( const srfTriangles_t *lowMesh, const idVec3 *lowM
 				tangents[1] += bary[k] * lowMesh->verts[ index ].tangents[1];
 			}
 
-#if 0
-			// this doesn't seem to make much difference
-			// an argument can be made that these should not be normalized, because the interpolation
-			// of the light position at rasterization time will be linear, not spherical
-			normal.Normalize();
-			tangents[0].Normalize();
-			tangents[1].Normalize();
-#endif
 
 			// find the best triangle in the high poly model for this
 			// sampledNormal will  normalized
 			if ( !SampleHighMesh( rb, point, traceNormal, sampledNormal, sampledColor ) ) {
-#if 0
-				// put bright red where all traces missed for debugging.
-				// for production use, it is better to leave it blank so
-				// the outlining fills it in
-				globalDest[0] = 255;
-				globalDest[1] = 0;
-				globalDest[2] = 0;
-				globalDest[3] = 255;
-
-				localDest[0] = 255;
-				localDest[1] = 0;
-				localDest[2] = 0;
-				localDest[3] = 255;
-#endif
 				continue;
 			}
 
@@ -958,14 +936,6 @@ static void WriteRenderBump( renderBump_t *rb, int outLinePixels ) {
 	width = rb->width;
 	height = rb->height;
 
-#if 0
-	// save the non-outlined version
-	filename = source;
-	filename.setFileExtension();
-	filename.append( "_nooutline.tga" );
-	common->Printf( "writing %s\n", filename.c_str() );
-	WriteTGA( filename, globalPic, width, height );
-#endif
 
 	// outline the image several times to help bilinear filtering across disconnected
 	// edges, and mip-mapping

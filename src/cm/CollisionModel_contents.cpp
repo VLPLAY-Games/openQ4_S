@@ -274,27 +274,10 @@ bool idCollisionModelManagerLocal::TestTrmInPolygon( cm_traceWork_t *tw, cm_poly
 		for ( j = 0; j < p->numEdges; j++ ) {
 			edgeNum = p->edges[j];
 			edge = tw->model->edges + abs(edgeNum);
-#if 1
 			CM_SetTrmEdgeSidedness( edge, tw->edges[i].pl, tw->polygonEdgePlueckerCache[j], i );
 			if ( INTSIGNBITSET(edgeNum) ^ ((edge->side >> i) & 1) ^ flip ) {
 				break;
 			}
-#else
-			d = tw->edges[i].pl.PermutedInnerProduct( tw->polygonEdgePlueckerCache[j] );
-			if ( flip ) {
-				d = -d;
-			}
-			if ( edgeNum > 0 ) {
-				if ( d <= 0.0f ) {
-					break;
-				}
-			}
-			else {
-				if ( d >= 0.0f ) {
-					break;
-				}
-			}
-#endif
 		}
 		if ( j >= p->numEdges ) {
 			tw->trace.fraction = 0.0f;
@@ -321,7 +304,6 @@ bool idCollisionModelManagerLocal::TestTrmInPolygon( cm_traceWork_t *tw, cm_poly
 		edge->checkcount = idCollisionModelManagerLocal::checkCount;
 
 		for ( j = 0; j < tw->numPolys; j++ ) {
-#if 1
 			v1 = tw->model->vertices + edge->vertexNum[0];
 			CM_SetTrmPolygonSidedness( v1, tw->polys[j].plane, j );
 			v2 = tw->model->vertices + edge->vertexNum[1];
@@ -331,48 +313,15 @@ bool idCollisionModelManagerLocal::TestTrmInPolygon( cm_traceWork_t *tw, cm_poly
 				continue;
 			}
 			flip = (v1->side >> j) & 1;
-#else
-			float d1, d2;
-
-			v1 = tw->model->vertices + edge->vertexNum[0];
-			d1 = tw->polys[j].plane.Distance( v1->p );
-			v2 = tw->model->vertices + edge->vertexNum[1];
-			d2 = tw->polys[j].plane.Distance( v2->p );
-			// if the polygon edge does not cross the trm polygon plane
-			if ( (d1 >= 0.0f && d2 >= 0.0f) || (d1 <= 0.0f && d2 <= 0.0f) ) {
-				continue;
-			}
-			flip = false;
-			if ( d1 < 0.0f ) {
-				flip = true;
-			}
-#endif
 			// test if polygon edge goes through the trm polygon between the trm polygon edges
 			for ( k = 0; k < tw->polys[j].numEdges; k++ ) {
 				trmEdgeNum = tw->polys[j].edges[k];
 				trmEdge = tw->edges + abs(trmEdgeNum);
-#if 1
 				bitNum = abs(trmEdgeNum);
 				CM_SetTrmEdgeSidedness( edge, trmEdge->pl, tw->polygonEdgePlueckerCache[i], bitNum );
 				if ( INTSIGNBITSET(trmEdgeNum) ^ ((edge->side >> bitNum) & 1) ^ flip ) {
 					break;
 				}
-#else
-				d = trmEdge->pl.PermutedInnerProduct( tw->polygonEdgePlueckerCache[i] );
-				if ( flip ) {
-					d = -d;
-				}
-				if ( trmEdgeNum > 0 ) {
-					if ( d <= 0.0f ) {
-						break;
-					}
-				}
-				else {
-					if ( d >= 0.0f ) {
-						break;
-					}
-				}
-#endif
 			}
 			if ( k >= tw->polys[j].numEdges ) {
 				tw->trace.fraction = 0.0f;

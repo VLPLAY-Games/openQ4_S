@@ -360,39 +360,19 @@ static int rg_clusteredLightingBoundGridIndex = -1;
 // it must never fall through to the GL resource owner below.
 static modernSpecularProbeAtlasReject_t R_ModernClusteredLighting_AcquireProbeAtlas(
 		const idImage *image, modernSpecularProbeAtlasPlacement_t *placement ) {
-#if defined( OPENQ4_RENDERER_VK_MODULE )
-	( void )image;
-	if ( placement != NULL ) {
-		ModernSpecularProbeAtlas_ClearPlacement( *placement );
-	}
-	return MODERN_SPECULAR_PROBE_ATLAS_REJECT_UNAVAILABLE;
-#else
 	return R_ModernSpecularProbeAtlas_Acquire( image, placement );
-#endif
 }
 
 static bool R_ModernClusteredLighting_ProbeAtlasReady( void ) {
-#if defined( OPENQ4_RENDERER_VK_MODULE )
-	return false;
-#else
 	return R_ModernSpecularProbeAtlas_Ready();
-#endif
 }
 
 static bool R_ModernClusteredLighting_ProbeAtlasFrameReady( void ) {
-#if defined( OPENQ4_RENDERER_VK_MODULE )
-	return false;
-#else
 	return R_ModernSpecularProbeAtlas_FrameReady();
-#endif
 }
 
 static std::uint64_t R_ModernClusteredLighting_ProbeAtlasFrameGeneration( void ) {
-#if defined( OPENQ4_RENDERER_VK_MODULE )
-	return 0;
-#else
 	return R_ModernSpecularProbeAtlas_Stats().frameGeneration;
-#endif
 }
 
 static void R_ModernClusteredLighting_ClearDecalStorage( modernClusterDecalFrameData_t &frame ) {

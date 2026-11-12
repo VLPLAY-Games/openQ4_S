@@ -9572,29 +9572,6 @@ void RB_SetProgramEnvironment( void ) {
 		return;
 	}
 
-#if 0
-	// screen power of two correction factor, one pixel in so we don't get a bilerp
-	// of an uncopied pixel
-	int	 w = backEnd.viewDef->viewport.x2 - backEnd.viewDef->viewport.x1 + 1;
-	pot = globalImages->currentRenderImage->GetOpts().width;
-	if ( w == pot ) {
-		parm[0] = 1.0;
-	} else {
-		parm[0] = (float)(w-1) / pot;
-	}
-
-	int	 h = backEnd.viewDef->viewport.y2 - backEnd.viewDef->viewport.y1 + 1;
-	pot = globalImages->currentRenderImage->GetOpts().height;
-	if ( h == pot ) {
-		parm[1] = 1.0;
-	} else {
-		parm[1] = (float)(h-1) / pot;
-	}
-
-	parm[2] = 0;
-	parm[3] = 1;
-	glProgramEnvParameter4fvARB( GL_VERTEX_PROGRAM_ARB, 0, parm );
-#else
 	// screen power of two correction factor, assuming the copy to _currentRender
 	// also copied an extra row and column for the bilerp
 	int	 w = backEnd.viewDef->viewport.x2 - backEnd.viewDef->viewport.x1 + 1;
@@ -9608,7 +9585,6 @@ void RB_SetProgramEnvironment( void ) {
 	parm[2] = 0.0f;
 	parm[3] = 1.0f;
 	glProgramEnvParameter4fvARB( GL_VERTEX_PROGRAM_ARB, 0, parm );
-#endif
 
 	if ( glConfig.ARBFragmentProgramAvailable ) {
 		glProgramEnvParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, 0, parm );
@@ -12866,30 +12842,6 @@ void RB_STD_FogAllLights( void ) {
 			continue;
 		}
 
-#if 0 // _D3XP disabled that
-		if ( r_ignore.GetInteger() ) {
-			// we use the stencil buffer to guarantee that no pixels will be
-			// double fogged, which happens in some areas that are thousands of
-			// units from the origin
-			backEnd.currentScissor = vLight->scissorRect;
-			if ( r_useScissor.GetBool() ) {
-				glScissor( backEnd.viewDef->viewport.x1 + backEnd.currentScissor.x1, 
-					backEnd.viewDef->viewport.y1 + backEnd.currentScissor.y1,
-					backEnd.currentScissor.x2 + 1 - backEnd.currentScissor.x1,
-					backEnd.currentScissor.y2 + 1 - backEnd.currentScissor.y1 );
-			}
-			glClear( GL_STENCIL_BUFFER_BIT );
-
-			glEnable( GL_STENCIL_TEST );
-
-			// only pass on the cleared stencil values
-			glStencilFunc( GL_EQUAL, 128, 255 );
-
-			// when we pass the stencil test and depth test and are going to draw,
-			// increment the stencil buffer so we don't ever draw on that pixel again
-			glStencilOp( GL_KEEP, GL_KEEP, GL_INCR );
-		}
-#endif
 
 		if ( vLight->lightShader->IsFogLight() ) {
 			RB_FogPass( vLight->globalInteractions, vLight->localInteractions );

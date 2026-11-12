@@ -1540,21 +1540,11 @@ void codec::VQ( const int numEntries, const int dimension, const unsigned char *
 						dist = 0.0;
 						jbase = j*dimension;
 						for( x=0; x<dimension; x+=3 ) {
-#if 0
-							r0 = (float)vectors[ibase+x];
-							r1 = (float)vectors[jbase+x];
-							g0 = (float)vectors[ibase+x+1];
-							g1 = (float)vectors[jbase+x+1];
-							b0 = (float)vectors[ibase+x+2];
-							b1 = (float)vectors[jbase+x+2];
-							dist += idMath::Sqrt16( (r0-r1)*(r0-r1) + (g0-g1)*(g0-g1) + (b0-b1)*(b0-b1) );
-#else
 							// JDC: optimization
 							int	dr = vectors[ibase+x] - vectors[jbase+x];
 							int	dg = vectors[ibase+x+1] - vectors[jbase+x+1];
 							int	db = vectors[ibase+x+2] - vectors[jbase+x+2];
 							dist += idMath::Sqrt16( dr * dr + dg * dg + db * db );
-#endif
 						}
 						simport = import[i] * import[j];
 						dist *= simport;
@@ -1626,15 +1616,6 @@ void codec::VQ( const int numEntries, const int dimension, const unsigned char *
 						simport = import[i] * import[j];
 						float	scaledBestDist = bestDist / simport;
 						for( x=0; x<dimension; x+=3 ) {
-#if 0
-							r0 = (float)vectors[ibase+x];
-							r1 = (float)vectors[jbase+x];
-							g0 = (float)vectors[ibase+x+1];
-							g1 = (float)vectors[jbase+x+1];
-							b0 = (float)vectors[ibase+x+2];
-							b1 = (float)vectors[jbase+x+2];
-							dist += idMath::Sqrt16( (r0-r1)*(r0-r1) + (g0-g1)*(g0-g1) + (b0-b1)*(b0-b1) );
-#else
 							// JDC: optimization
 							int	dr = vectors[ibase+x] - vectors[jbase+x];
 							int	dg = vectors[ibase+x+1] - vectors[jbase+x+1];
@@ -1643,7 +1624,6 @@ void codec::VQ( const int numEntries, const int dimension, const unsigned char *
 							if ( dist > scaledBestDist ) {
 								break;
 							}
-#endif
 						}
 						dist *= simport;
 						if ( dist < bestDist ) {

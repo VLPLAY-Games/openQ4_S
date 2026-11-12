@@ -901,13 +901,6 @@ void idGameLocal::ServerProcessReliableMessage( int clientNum, const idBitMsg &m
 			break;
 		}
 // RAVEN END
-#if 0
-		// uncomment this if you want to track when players are in a menu
-		case GAME_RELIABLE_MESSAGE_MENU: {
-			bool menuUp = ( msg.ReadBits( 1 ) != 0 );
-			break;
-		}
-#endif
 		case GAME_RELIABLE_MESSAGE_EVENT: {
 			entityNetEvent_t *event;
 
@@ -2513,10 +2506,6 @@ gameReturn_t idGameLocal::ClientPrediction( int clientNum, const usercmd_t *clie
 
 	// run prediction on all entities from the last snapshot
 	for ( ent = snapshotEntities.Next(); ent != NULL; ent = ent->snapshotNode.Next() ) {
-#if 0
-		ent->thinkFlags |= TH_PHYSICS;
-		ent->ClientPredictionThink();
-#else
 		// don't force TH_PHYSICS on, only call ClientPredictionThink if thinkFlags != 0
 		// it's better to synchronize TH_PHYSICS on specific entities when needed ( movers may be trouble )
 		// thinkMask is a temp thing see if there are problems with only checking for TH_PHYSICS
@@ -2530,7 +2519,6 @@ gameReturn_t idGameLocal::ClientPrediction( int clientNum, const usercmd_t *clie
 				common->Printf( "skip %d: %s %d\n", ent->entityNumber, ent->GetType()->classname, ent->thinkFlags );
 			}
 		}
-#endif
 	}
 
 // RAVEN BEGIN

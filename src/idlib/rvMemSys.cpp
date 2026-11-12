@@ -1135,20 +1135,6 @@ void rvSetAllSysHeaps( rvHeap *srcSystemHeapArray[MAX_SYSTEM_HEAPS] )
 	memcpy(systemHeapArray, srcSystemHeapArray, sizeof(systemHeapArray));
 }
 
-#if 0
-/*
-==================
-rvGetHeapContainingMemory
-
-Returns pointer to the heap containg the memory specified. If the memory specified
-is not in a heap, returns 0.
-==================
-*/
-rvHeap* rvGetHeapContainingMemory( const void* mem )
-{
-	return (currentHeapArena!=0)?currentHeapArena->GetHeap(const_cast<void*>(mem)):0;
-}
-#endif 
 
 /*
 ==================

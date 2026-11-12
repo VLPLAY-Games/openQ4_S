@@ -5115,11 +5115,6 @@ bool idAnimator::CreateFrame( int currentTime, bool force ) {
 		}
 	}
 
-#if 0
-	if ( !gameLocal.isLastPredictFrame ) {
-		return false;
-	}
-#endif
 // RAVEN END
 
 	// An active articulated figure is posed from its physics bodies once per

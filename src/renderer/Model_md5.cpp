@@ -1741,14 +1741,6 @@ transforming all the points
 ====================
 */
 idBounds idRenderModelMD5::Bounds( const renderEntity_t *ent ) const {
-#if 0
-	// we can't calculate a rational bounds without an entity,
-	// because joints could be positioned to deform it into an
-	// arbitrarily large shape
-	if ( !ent ) {
-		common->Error( "idRenderModelMD5::Bounds: called without entity" );
-	}
-#endif
 
 	if ( !ent ) {
 		// this is the bounds for the reference pose

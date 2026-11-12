@@ -4763,7 +4763,6 @@ void idSessionLocal::ShowLoadingGui() {
 	console->Close();
 
 	// introduced in D3XP code. don't think it actually fixes anything, but doesn't hurt either
-#if 1
 	// Try and prevent the while loop from being skipped over (long hitch on the main thread?)
 	const int minShowMsec = idMath::ClampInt( 0, 2000, com_minLoadingGuiMsec.GetInteger() );
 	int stop = Sys_Milliseconds() + minShowMsec;
@@ -4774,15 +4773,6 @@ void idSessionLocal::ShowLoadingGui() {
 		session->Frame();
 		session->UpdateScreen( false );
 	}
-#else
-	int stop = com_ticNumber + common->GetUserCmdTicsForMsecCeil( 1000 );
-	while ( com_ticNumber < stop ) {
-		openQ4_BeginPresentationFrame();
-		com_frameTime = common->GetUserCmdTime( com_ticNumber );
-		session->Frame();
-		session->UpdateScreen( false );
-	}
-#endif
 }
 
 
@@ -8311,19 +8301,12 @@ void idSessionLocal::TakeNotes( const char *p, bool extended ) {
 	if ( extended ) {
 		guiTakeNotes = uiManager->FindGui( "guis/takeNotes2.gui", true, false, true );
 
-#if 0
-		const char *people[] = {
-			"Nobody", "Adam", "Brandon", "David", "PHook", "Jay", "Jake",
-				"PatJ", "Brett", "Ted", "Darin", "Brian", "Sean"
-		};
-#else
 		const char *people[] = {
 			"Tim", "Kenneth", "Robert", 
 			"Matt", "Mal", "Jerry", "Steve", "Pat",
 			"Xian", "Ed", "Fred", "James", "Eric", "Andy", "Seneca", "Patrick", "Kevin",
 			"MrElusive", "Jim", "Brian", "John", "Adrian", "Nobody"
 		};
-#endif
 		const int numPeople = sizeof( people ) / sizeof( people[0] );
 
 		idListGUI * guiList_people = uiManager->AllocListGUI();
@@ -8682,21 +8665,7 @@ static idCVar com_suspendSave( "com_suspendSave", "1", CVAR_SYSTEM | CVAR_ARCHIV
 	"Android: save single player as 'Suspended' whenever the app goes to the background, so the system ending it there loses no progress" );
 
 bool idSessionLocal::SaveForSuspension( void ) {
-#if defined( __ANDROID__ ) && !defined( ID_DEDICATED )
-	if ( !com_suspendSave.GetBool() || !mapSpawned || insideExecuteMapChange || IsMultiplayer() || readDemo
-			|| IsDemoPlaybackActive() || com_editorActive || game == NULL || idAsyncNetwork::IsActive() ) {
-		return false;
-	}
-	if ( game->InCinematic() || objectiveFailed || game->GetPersistentPlayerInfo( 0 ).GetInt( "health" ) <= 0
-			|| Sys_GetDriveFreeSpace( cvarSystem->GetCVarString( "fs_savepath" ) ) < 25 ) {
-		common->Printf( "Not saving for the background: the game cannot be saved now\n" );
-		return false;
-	}
-	common->Printf( "Saving 'Suspended' as the app goes to the background\n" );
-	return SaveGame( "Suspended", ST_AUTO );
-#else
 	return false;
-#endif
 }
 
 void Session_SuspendSave( void ) {

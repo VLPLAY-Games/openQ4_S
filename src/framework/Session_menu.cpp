@@ -58,24 +58,11 @@ static bool Session_AndroidSetupAvailable() {
 enum { ANDROID_SETUP_HOME = 0, ANDROID_SETUP_TOUCH_LAYOUT = 1 };
 
 static void Session_OpenAndroidSetup( int page = 0 ) {
-#if defined( __ANDROID__ ) && !defined( OPENQ4_SIGMATOUCH )
-	// SDL posts to OpenQ4Activity's main-thread handler. The existing Android
-	// lifecycle owns input release, audio suspension and the paused SP return.
-	// Keep the engine and its storage lease alive while setup is in front.
-	if ( !SDL_SendAndroidMessage( 0x8000, page ) ) {
-		common->Warning( "Could not open Android setup: %s", SDL_GetError() );
-	}
-#else
 	(void)page;
-#endif
 }
 
 extern idCVar com_skipLogoVideos;
-#ifdef OPENQ4_RENDERER_VK_MODULE
-extern thread_local glconfig_t glConfig;
-#else
 extern glconfig_t glConfig;
-#endif
 
 idCVar	idSessionLocal::gui_configServerRate( "gui_configServerRate", "0", CVAR_GUI | CVAR_ARCHIVE | CVAR_ROM | CVAR_INTEGER, "" );
 idCVar gui_set_sys_scroll( "gui_set_sys_scroll", "0", CVAR_GUI | CVAR_INTEGER, "display menu scroll step", 0, 28 );

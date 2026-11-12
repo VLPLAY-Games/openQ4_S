@@ -1557,13 +1557,6 @@ void idGameLocal::ServerProcessReliableMessage( int clientNum, const idBitMsg &m
 			mpGame.ServerCallPackedVote( clientNum, msg );
 			break;
 		}
-#if 0
-		// uncomment this if you want to track when players are in a menu
-		case GAME_RELIABLE_MESSAGE_MENU: {
-			bool menuUp = ( msg.ReadBits( 1 ) != 0 );
-			break;
-		}
-#endif
 		case GAME_RELIABLE_MESSAGE_EVENT: {
 			entityNetEvent_t *event;
 
@@ -1777,13 +1770,6 @@ void idGameLocal::RepeaterProcessReliableMessage( int clientNum, const idBitMsg 
 			break;
 		}
 // RAVEN END
-#if 0
-		// uncomment this if you want to track when players are in a menu
-		case GAME_RELIABLE_MESSAGE_MENU: {
-			bool menuUp = ( msg.ReadBits( 1 ) != 0 );
-			break;
-		}
-#endif
 		case GAME_RELIABLE_MESSAGE_EVENT: {
 			break;
 		}
@@ -5191,17 +5177,7 @@ idGameLocal::IsDemoProtocolCompatible
 ===============
 */
 bool idGameLocal::IsDemoProtocolCompatible( int minor_ref, int minor ) const {
-#if 0
-	// 1.1 beta : 67
-	// 1.1 final: 68
-	// 1.2		: 69
-	// 1.3		: 71
-
-	// let 1.3 play 1.2 demos - keep a careful eye on snapshotting changes
-	return ( minor_ref == minor || ( minor_ref == 71 && minor == 69 ) );
-#else
 	return ( minor_ref == minor );
-#endif
 }
 
 /*

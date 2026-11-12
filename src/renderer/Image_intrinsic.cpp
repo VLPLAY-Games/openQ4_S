@@ -459,9 +459,6 @@ static void R_SpecularTableImage(idImage* image) {
 
 	for (x = 0; x < 256; x++) {
 		float f = x / 255.f;
-#if 0
-		f = pow(f, 16);
-#else
 		// this is the behavior of the hacked up fragment programs that
 		// can't really do a power function
 		f = (f - 0.75) * 4;
@@ -469,7 +466,6 @@ static void R_SpecularTableImage(idImage* image) {
 			f = 0;
 		}
 		f = f * f;
-#endif
 		int		b = (int)(f * 255);
 
 		data[x][0] =

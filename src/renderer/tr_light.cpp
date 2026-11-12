@@ -32,9 +32,6 @@ If you have questions concerning this license or the applicable additional terms
 #include "tr_local.h"
 #include "ShadowMapClassification.h"
 #include "../sound/sound.h"
-#ifdef OPENQ4_RENDERER_VK_MODULE
-#include "Vulkan/vk_MaterialPrograms.h"
-#endif
 
 static ID_INLINE idSoundEmitter *R_GetShaderSoundEmitter( int soundEmitterHandle ) {
 	if ( soundEmitterHandle == 0 || soundSystem == NULL ) {
@@ -450,38 +447,10 @@ bool R_CreateLightingCache( const idRenderEntityLocal *ent, const idRenderLightL
 	int	size = tri->ambientSurface->numVerts * sizeof( lightingCache_t );
 	lightingCache_t *cache = (lightingCache_t *)_alloca16( size );
 
-#if 1
 
 	SIMDProcessor->CreateTextureSpaceLightVectors( &cache[0].localLightVector, localLightOrigin,
 												tri->ambientSurface->verts, tri->ambientSurface->numVerts, tri->indexes, tri->numIndexes );
 
-#else
-
-	bool *used = (bool *)_alloca16( tri->ambientSurface->numVerts * sizeof( used[0] ) );
-	memset( used, 0, tri->ambientSurface->numVerts * sizeof( used[0] ) );
-
-	// because the interaction may be a very small subset of the full surface,
-	// it makes sense to only deal with the verts used
-	for ( int j = 0; j < tri->numIndexes; j++ ) {
-		int i = tri->indexes[j];
-		if ( used[i] ) {
-			continue;
-		}
-		used[i] = true;
-
-		idVec3 lightDir;
-		const idDrawVert *v;
-
-		v = &tri->ambientSurface->verts[i];
-
-		lightDir = localLightOrigin - v->xyz;
-
-		cache[i].localLightVector[0] = lightDir * v->tangents[0];
-		cache[i].localLightVector[1] = lightDir * v->tangents[1];
-		cache[i].localLightVector[2] = lightDir * v->normal;
-	}
-
-#endif
 
 	vertexCache.Alloc( cache, size, &tri->lightingCache );
 	if ( !tri->lightingCache ) {
@@ -520,7 +489,6 @@ void R_CreateVertexProgramShadowCache( srfTriangles_t *tri ) {
 
 	shadowCache_t *temp = (shadowCache_t *)_alloca16( tri->numVerts * 2 * sizeof( shadowCache_t ) );
 
-#if 1
 	if ( tri->verts != NULL ) {
 		SIMDProcessor->CreateVertexProgramShadowCache( &temp->xyz, tri->verts, tri->numVerts );
 #if defined( _MD5R_SUPPORT ) || defined( Q4SDK_MD5R )
@@ -534,23 +502,6 @@ void R_CreateVertexProgramShadowCache( srfTriangles_t *tri ) {
 		return;
 	}
 
-#else
-
-	int numVerts = tri->numVerts;
-	const idDrawVert *verts = tri->verts;
-	for ( int i = 0; i < numVerts; i++ ) {
-		const float *v = verts[i].xyz.ToFloatPtr();
-		temp[i*2+0].xyz[0] = v[0];
-		temp[i*2+1].xyz[0] = v[0];
-		temp[i*2+0].xyz[1] = v[1];
-		temp[i*2+1].xyz[1] = v[1];
-		temp[i*2+0].xyz[2] = v[2];
-		temp[i*2+1].xyz[2] = v[2];
-		temp[i*2+0].xyz[3] = 1.0f;		// on the model surface
-		temp[i*2+1].xyz[3] = 0.0f;		// will be projected to infinity
-	}
-
-#endif
 
 	vertexCache.Alloc( temp, tri->numVerts * 2 * sizeof( shadowCache_t ), &tri->shadowCache );
 }
@@ -794,51 +745,10 @@ static void R_SpecularTexGen( drawSurf_t *surf, const idVec3 &globalLightOrigin,
 	int	size = tri->numVerts * sizeof( idVec4 );
 	idVec4 *texCoords = (idVec4 *) _alloca16( size );
 
-#if 1
 
 	SIMDProcessor->CreateSpecularTextureCoords( texCoords, localLightOrigin, localViewOrigin,
 											tri->verts, tri->numVerts, tri->indexes, tri->numIndexes );
 
-#else
-
-	bool *used = (bool *)_alloca16( tri->numVerts * sizeof( used[0] ) );
-	memset( used, 0, tri->numVerts * sizeof( used[0] ) );
-
-	// because the interaction may be a very small subset of the full surface,
-	// it makes sense to only deal with the verts used
-	for ( int j = 0; j < tri->numIndexes; j++ ) {
-		int i = tri->indexes[j];
-		if ( used[i] ) {
-			continue;
-		}
-		used[i] = true;
-
-		float ilength;
-
-		const idDrawVert *v = &tri->verts[i];
-
-		idVec3 lightDir = localLightOrigin - v->xyz;
-		idVec3 viewDir = localViewOrigin - v->xyz;
-
-		ilength = idMath::RSqrt( lightDir * lightDir );
-		lightDir[0] *= ilength;
-		lightDir[1] *= ilength;
-		lightDir[2] *= ilength;
-
-		ilength = idMath::RSqrt( viewDir * viewDir );
-		viewDir[0] *= ilength;
-		viewDir[1] *= ilength;
-		viewDir[2] *= ilength;
-
-		lightDir += viewDir;
-
-		texCoords[i][0] = lightDir * v->tangents[0];
-		texCoords[i][1] = lightDir * v->tangents[1];
-		texCoords[i][2] = lightDir * v->normal;
-		texCoords[i][3] = 1;
-	}
-
-#endif
 
 	surf->dynamicTexCoords = vertexCache.AllocFrameTemp( texCoords, size );
 }
@@ -1603,153 +1513,6 @@ static idRenderModel *R_ViewLightPrelightModel( viewLight_t *vLight ) {
 	return prelightModel;
 }
 
-#ifdef OPENQ4_RENDERER_VK_MODULE
-// whether any surface with geometry of a model, drawn with an entity's skin
-// and custom shader, uses authored GLSL lighting
-static bool R_ModelReceiverNeedsStencil( const idRenderModel *model, const renderEntity_t &parms ) {
-	for ( int i = 0; i < model->NumSurfaces(); ++i ) {
-		const modelSurface_t *surf = model->Surface( i );
-		if ( surf == NULL || surf->geometry == NULL ) {
-			continue;
-		}
-		if ( VK_MaterialPrograms_NeedsStencil(
-				R_RemapShaderBySkin( surf->shader, parms.customSkin, parms.customShader ), NULL ) ) {
-			return true;
-		}
-	}
-	return false;
-}
-
-/*
-=================
-R_EntityReceiverVerdict
-
-The same verdict for every surface of the model an entity last drew. An
-animating entity's interactions are freed on every update, so until its turn
-comes in R_AddModelSurfaces each of its lights has an unbuilt interaction
-again, every frame. This remembered verdict answers for it while the entity
-still names the model, skin and custom shader it was taken from: those decide
-the material of every surface it draws.
-
-It is taken again from each model instance the entity builds interactions
-for, so a surface that the entity gains without changing any of the three (an
-overlay, a suppression mask, a LOD) is seen one view late.
-=================
-*/
-static bool R_EntityReceiverVerdict( const idRenderEntityLocal *def, const int generation, bool &needed ) {
-	if ( def->stencilReceiverGeneration != generation
-			|| def->stencilReceiverModel != def->parms.hModel
-			|| def->stencilReceiverSkin != def->parms.customSkin
-			|| def->stencilReceiverShader != def->parms.customShader ) {
-		return false;
-	}
-	needed = def->stencilReceiverNeeded;
-	return true;
-}
-
-/*
-=================
-R_InteractionReceiverNeedsStencil
-
-Whether a receiver surface of a built (or building) interaction uses
-authored GLSL lighting (VK_MaterialPrograms_NeedsStencil). A finished
-interaction counts only its filled slots: a NULL slot is a surface with no
-geometry, no shader or no contact with the light frustum, which receives
-nothing. While CreateInteraction runs, the later slots are still NULL, so
-the verdict covers every model surface with geometry instead, a superset of
-the slots it can fill. Cached for the interaction's surface set.
-=================
-*/
-static bool R_InteractionReceiverNeedsStencil( const idInteraction *inter, const int generation ) {
-	if ( inter->stencilReceiverGeneration == generation ) {
-		return inter->stencilReceiverNeeded;
-	}
-	bool needed = false;
-	if ( inter->buildModel != NULL ) {
-		needed = R_ModelReceiverNeedsStencil( inter->buildModel, inter->entityDef->parms );
-	} else {
-		for ( int i = 0; i < inter->numSurfaces && !needed; ++i ) {
-			needed = VK_MaterialPrograms_NeedsStencil( inter->surfaces[i].shader, NULL );
-		}
-	}
-	inter->stencilReceiverGeneration = generation;
-	inter->stencilReceiverNeeded = needed;
-	return needed;
-}
-
-/*
-=================
-R_ShadowMapReceiversAllowMaps
-
-Authored lighting has no engine shadow-map sampler in its shader ABI. Its
-receiver chain uses stencil, so retain volumes before any entity's
-interaction is submitted. Checking only the currently submitted surface is
-too late: earlier entities may already have discarded their volumes. An
-unbuilt interaction is conservatively unknown, never evidence that every
-receiver supports maps. This also covers newly spawned receivers.
-
-Three unbuilt interactions cannot gain receivers in this view and are skipped:
-one whose entity is not a view entity (R_AddModelSurfaces never visits it,
-and entities that become view entities later, such as through-world
-outlines, build no interactions), one that AddActiveInteraction already left
-unbuilt (it runs once per interaction per view), and one whose entity the
-view does not see. An interaction still waiting for its visible entity's turn
-is answered by that entity's model: the model itself when it is static, the
-verdict of the model it last drew when it animates (R_EntityReceiverVerdict).
-It stays unknown only for an animating entity that has drawn none; that only
-costs volumes, never a missing shadow.
-
-The verdict is asked once per surface while interactions are built and
-linked, so it is memoized on the view light and recomputed only after one of
-the light's interactions changes state (idInteraction invalidates it).
-=================
-*/
-static bool R_ShadowMapReceiversAllowMaps( const idRenderLightLocal *lightDef ) {
-	viewLight_t *vLight = lightDef->viewCount == tr.viewCount ? lightDef->viewLight : NULL;
-	if ( vLight != NULL && vLight->shadowMapReceiverScanValid ) {
-		return vLight->shadowMapReceiverScanAllowsMaps;
-	}
-	const int generation = VK_MaterialPrograms_NeedsStencilGeneration();
-	bool allowsMaps = true;
-	for ( const idInteraction *inter = lightDef->firstInteraction; inter != NULL; inter = inter->lightNext ) {
-		if ( inter->IsDeferred() ) {
-			idRenderEntityLocal *entityDef = inter->entityDef;
-			if ( entityDef->viewCount != tr.viewCount || inter->unbuiltVisitView == tr.viewCount ) {
-				continue;
-			}
-			// An entity the view does not see links no receivers, whatever its
-			// interaction goes on to build: AddActiveInteraction links light
-			// surfaces only inside the entity's scissor, which never grows.
-			// The player's own body and head are such entities in every
-			// first-person frame, and they touch every light near the camera.
-			if ( entityDef->viewEntity == NULL || entityDef->viewEntity->scissorRect.IsEmpty() ) {
-				continue;
-			}
-			// A static model is the model its interactions are built from.
-			const idRenderModel *hModel = entityDef->parms.hModel;
-			if ( hModel != NULL && hModel->IsDynamicModel() == DM_STATIC && entityDef->parms.callback == NULL ) {
-				R_ShadowMapNoteEntityModel( entityDef, hModel );
-			}
-			bool entityNeedsStencil = false;
-			if ( R_EntityReceiverVerdict( entityDef, generation, entityNeedsStencil )
-					&& !entityNeedsStencil ) {
-				continue;
-			}
-			allowsMaps = false;
-			break;
-		}
-		if ( R_InteractionReceiverNeedsStencil( inter, generation ) ) {
-			allowsMaps = false;
-			break;
-		}
-	}
-	if ( vLight != NULL ) {
-		vLight->shadowMapReceiverScanValid = true;
-		vLight->shadowMapReceiverScanAllowsMaps = allowsMaps;
-	}
-	return allowsMaps;
-}
-#endif
 
 /*
 =================
@@ -1761,33 +1524,8 @@ Vulkan front end asks for it.
 =================
 */
 void R_ShadowMapNoteEntityModel( idRenderEntityLocal *def, const idRenderModel *model ) {
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	// nothing asks while no light can shed its volumes; an entity first seen
-	// then is unknown for the one view after they can
-	if ( def == NULL || model == NULL || !r_shadowMapSkipStencilShadows.GetBool()
-			|| !r_useShadowMap.GetBool() || !r_shadows.GetBool() ) {
-		return;
-	}
-	const int generation = VK_MaterialPrograms_NeedsStencilGeneration();
-	if ( def->stencilReceiverGeneration == generation
-			&& def->stencilReceiverInstance == model
-			&& def->stencilReceiverInstanceFrame == def->dynamicModelFrameCount
-			&& def->stencilReceiverModel == def->parms.hModel
-			&& def->stencilReceiverSkin == def->parms.customSkin
-			&& def->stencilReceiverShader == def->parms.customShader ) {
-		return;
-	}
-	def->stencilReceiverNeeded = R_ModelReceiverNeedsStencil( model, def->parms );
-	def->stencilReceiverGeneration = generation;
-	def->stencilReceiverInstance = model;
-	def->stencilReceiverInstanceFrame = def->dynamicModelFrameCount;
-	def->stencilReceiverModel = def->parms.hModel;
-	def->stencilReceiverSkin = def->parms.customSkin;
-	def->stencilReceiverShader = def->parms.customShader;
-#else
 	(void)def;
 	(void)model;
-#endif
 }
 
 /*
@@ -2017,10 +1755,6 @@ bool R_ShadowMapLightWillUseShadowMaps( const idRenderLightLocal *lightDef, cons
 		return false;
 	}
 	if ( !RB_ShadowMapResourcesKnownGood( pointLightPath ) ) { return false; }
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	// Lights with an authored-lighting receiver keep their stencil chain.
-	if ( !R_ShadowMapReceiversAllowMaps( lightDef ) ) { return false; }
-#endif
 	return true;
 }
 
@@ -2280,14 +2014,6 @@ void R_AddLightSurfaces( void ) {
 			}
 		}
 
-#if 0
-		// this never happens, because CullLightByPortals() does a more precise job
-		if ( vLight->scissorRect.IsEmpty() ) {
-			// this light doesn't touch anything on screen, so remove it from the list
-			*ptr = vLight->next;
-			continue;
-		}
-#endif
 
 		// this one stays on the list
 		ptr = &vLight->next;

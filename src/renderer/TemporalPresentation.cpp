@@ -882,11 +882,9 @@ static bool R_TemporalPresentation_AutomaticTemporalAAWanted( void ) {
 #if defined( OPENQ4_RENDERER_GLES_MODULE )
 	return false;
 #else
-#if !defined( OPENQ4_RENDERER_VK_MODULE )
 	if ( !glConfig.GLSLProgramAvailable || !glConfig.GLSL130Available ) {
 		return false;
 	}
-#endif
 	// a VR frame renders native eyes without dynamic resolution
 	if ( R_TemporalPresentation_VRFrame() ) {
 		return false;
@@ -1190,10 +1188,6 @@ void R_TemporalPresentation_PrintStatus_f( const idCmdArgs &args ) {
 	if ( resolve.otherReasons > 0 ) {
 		common->Printf( "Temporal reasons beyond the table: %d\n", resolve.otherReasons );
 	}
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	extern void VK_PostProcess_PrintTemporalMotion( void );
-	VK_PostProcess_PrintTemporalMotion();
-#endif
 }
 
 void R_TemporalPresentation_SubmitFrame( void ) {

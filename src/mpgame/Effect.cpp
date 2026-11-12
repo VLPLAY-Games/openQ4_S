@@ -69,13 +69,6 @@ void rvEffect::Spawn( void ) {
     if( spawnArgs.GetBool( "start_on", loop ? "1" : "0" ) ) {
 		ProcessEvent( &EV_Activate, this );
 	}		
-#if 0
-	// If anyone ever gets around to a flood fill from the origin rather than the over generous PushVolumeIntoTree bounds,
-	// this warning will become useful. Until then, it's a bogus warning.
-	if( gameRenderWorld->PointInArea( GetPhysics()->GetOrigin() ) < 0 ) {
-		common->Warning( "Effect \'%s\' out of world", name.c_str() );
-	}
-#endif
 }
 
 /*

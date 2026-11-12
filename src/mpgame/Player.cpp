@@ -17020,17 +17020,6 @@ void idPlayer::UpdateDeathShader ( bool state_hitch ) {
 	}
 }
 
-#if 0
-/*
-===============
-idPlayer::Event_InitWeapon
-===============
-*/
-void idPlayer::InitWeapon( void ) {
-	currentWeapon = -1;
-	SetWeapon( idealWeapon );
-}
-#endif
 
 /*
 ===============

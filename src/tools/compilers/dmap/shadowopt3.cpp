@@ -173,23 +173,6 @@ static void CreateEdgesForTri( shadowTri_t *tri ) {
 static const float EDGE_EPSILON = 0.1f;
 
 static bool TriOutsideTri( const shadowTri_t *a, const shadowTri_t *b ) {
-#if 0
-	if ( a->v[0] * b->edge[0] <= EDGE_EPSILON
-		&& a->v[1] * b->edge[0] <= EDGE_EPSILON
-		&& a->v[2] * b->edge[0] <= EDGE_EPSILON ) {
-			return true;
-		}
-	if ( a->v[0] * b->edge[1] <= EDGE_EPSILON
-		&& a->v[1] * b->edge[1] <= EDGE_EPSILON
-		&& a->v[2] * b->edge[1] <= EDGE_EPSILON ) {
-			return true;
-		}
-	if ( a->v[0] * b->edge[2] <= EDGE_EPSILON
-		&& a->v[1] * b->edge[2] <= EDGE_EPSILON
-		&& a->v[2] * b->edge[2] <= EDGE_EPSILON ) {
-			return true;
-		}
-#else
 	for ( int i = 0 ; i < 3 ; i++ ) {
 		int		j;
 		for ( j = 0 ; j < 3 ; j++ ) {
@@ -202,7 +185,6 @@ static bool TriOutsideTri( const shadowTri_t *a, const shadowTri_t *b ) {
 			return true;
 		}
 	}
-#endif
 	return false;
 }
 
@@ -843,20 +825,6 @@ static void EmitFragmentedSilQuads( void ) {
 				mtri->next = gr->triList;
 				gr->triList = mtri;
 
-#if 0
-				// emit a sil quad all the way to the projection plane
-				int index = ret.totalIndexes;
-				if ( index + 6 > maxRetIndexes ) {
-					common->Error( "maxRetIndexes exceeded" );
-				}
-				ret.indexes[index+0] = f1->nearV[0];
-				ret.indexes[index+1] = f1->nearV[1];
-				ret.indexes[index+2] = f1->farV[1];
-				ret.indexes[index+3] = f1->farV[0];
-				ret.indexes[index+4] = f1->nearV[0];
-				ret.indexes[index+5] = f1->farV[1];
-				ret.totalIndexes += 6;
-#endif
 			}
 		}
 

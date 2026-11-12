@@ -3424,7 +3424,6 @@ bool idRenderModelStatic::LoadFLT( const char *fileName ) {
 			max = data[i];
 		}
 	}
-#if 1
 	// write out a gray scale height map
 	byte	*image = (byte *)R_StaticAlloc( len );
 	byte	*image_p = image;
@@ -3442,7 +3441,6 @@ bool idRenderModelStatic::LoadFLT( const char *fileName ) {
 	R_WriteTGA( tgaName.c_str(), image, size, size, false );
 	R_StaticFree( image );
 //return false;
-#endif
 
 	// find the island above sea level
 	int	minX, maxX, minY, maxY;
@@ -3522,21 +3520,12 @@ bool idRenderModelStatic::LoadFLT( const char *fileName ) {
 	for ( int i = 0 ; i < height-1 ; i++ ) {
 		for ( int j = 0; j < width-1 ; j++ ) {
 			int	v = ( i * (width-1) + j ) * 6;
-#if 0
-			tri->indexes[ v + 0 ] = i * width + j;
-			tri->indexes[ v + 1 ] = (i+1) * width + j;
-			tri->indexes[ v + 2 ] = (i+1) * width + j + 1;
-			tri->indexes[ v + 3 ] = i * width + j;
-			tri->indexes[ v + 4 ] = (i+1) * width + j + 1;
-			tri->indexes[ v + 5 ] = i * width + j + 1;
-#else
 			tri->indexes[ v + 0 ] = i * width + j;
 			tri->indexes[ v + 1 ] = i * width + j + 1;
 			tri->indexes[ v + 2 ] = (i+1) * width + j + 1;
 			tri->indexes[ v + 3 ] = i * width + j;
 			tri->indexes[ v + 4 ] = (i+1) * width + j + 1;
 			tri->indexes[ v + 5 ] = (i+1) * width + j;
-#endif
 		}
 	}
 

@@ -1142,13 +1142,11 @@ void idRenderSystemLocal::SetUseUIViewportFor2D( bool enable ) {
 		(glConfig.uiViewportX==crop.x && glConfig.vidHeight-glConfig.uiViewportY-glConfig.uiViewportHeight==crop.y &&
 		 glConfig.uiViewportWidth==crop.width && glConfig.uiViewportHeight==crop.height);
 	bool mustFlush = !sameViewport;
-#if !defined( OPENQ4_RENDERER_VK_MODULE )
 	// GL captures _currentRender at the start of the post-process range. Keep
 	// the final scene composite separate from a following legacy scope even
 	// when their rectangles match. Ordinary UI geometry can still batch.
 	// Vulkan captures just before the consuming pass and keeps its own ordering.
 	mustFlush = mustFlush || guiModel->HasSceneFeedback();
-#endif
 	if (mustFlush) FlushGui();
 
 	useUIViewportFor2D = enable;
@@ -2758,11 +2756,9 @@ static bool R_ValidateSMAALookupImage( const idImage *image, const char *imageNa
 }
 
 bool idRenderSystemLocal::ValidateSMAALookupTextures( void ) {
-#ifndef OPENQ4_RENDERER_VK_MODULE
 	if ( !glConfig.GLSLProgramAvailable || !glConfig.GLSL130Available ) {
 		return false;
 	}
-#endif
 	const idImage *areaImage = globalImages->GetImage( "_smaaArea" );
 	const idImage *searchImage = globalImages->GetImage( "_smaaSearch" );
 
@@ -3366,7 +3362,5 @@ void idRenderSystemLocal::DestroyRenderTexture( idRenderTexture* renderTexture )
 	pendingRenderTextureDeletes.Append( renderTexture );
 }
 
-#ifndef OPENQ4_RENDERER_VK_MODULE
 viewDef_t *R_SubmittedPrimaryView( void ) { return tr.primaryView; }
 bool R_SubmittedTakingScreenshot( void ) { return tr.takingScreenshot; }
-#endif

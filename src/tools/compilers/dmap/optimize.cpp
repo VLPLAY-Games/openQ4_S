@@ -771,7 +771,6 @@ Returns false if it is either front or back facing
 =================
 */
 static bool IsTriangleDegenerate( const optVertex_t *v1, const optVertex_t *v2, const optVertex_t *v3 ) {
-#if 1
 	idVec3	d1, d2, normal;
 
 	d1 = v2->pv - v1->pv;
@@ -781,9 +780,6 @@ static bool IsTriangleDegenerate( const optVertex_t *v1, const optVertex_t *v2, 
 		return true;
 	}
 	return false;
-#else
-	return (bool)!IsTriangleValid( v1, v2, v3 );
-#endif
 }
 
 
@@ -969,23 +965,6 @@ static void BuildOptTriangles( optIsland_t *island ) {
 			continue;
 		}
 
-#if 0
-if ( dmapGlobals.drawflag && ov == (optVertex_t *)0x1845a60 ) {
-for ( e1 = ov->edges ; e1 ; e1 = e1Next ) {
-	glBegin( GL_LINES );
-	glColor3f( 0,1,0 );
-	glVertex3fv( e1->v1->pv.ToFloatPtr() );
-	glVertex3fv( e1->v2->pv.ToFloatPtr() );
-	glEnd();
-	glFlush();
-	if ( e1->v1 == ov ) {
-		e1Next = e1->v1link;
-	} else if ( e1->v2 == ov ) {
-		e1Next = e1->v2link;
-	}
-}
-}
-#endif
 		for ( e1 = ov->edges ; e1 ; e1 = e1Next ) {
 			if ( e1->v1 == ov ) {
 				second = e1->v2;
@@ -1398,15 +1377,6 @@ void SplitOriginalEdgesAtCrossings( optimizeGroup_t *opt ) {
 
 				continue;
 			}
-#if 0
-if ( newVert && newVert != v1 && newVert != v2 && newVert != v3 && newVert != v4 ) {
-common->Printf( "lines %i (%i to %i) and %i (%i to %i) cross at new point %i\n", i, v1 - optVerts, v2 - optVerts, 
-		   j, v3 - optVerts, v4 - optVerts, newVert - optVerts );
-} else if ( newVert ) {
-common->Printf( "lines %i (%i to %i) and %i (%i to %i) intersect at old point %i\n", i, v1 - optVerts, v2 - optVerts, 
-		  j, v3 - optVerts, v4 - optVerts, newVert - optVerts );
-}
-#endif
 			if ( newVert != v1 && newVert != v2 ) {
 				cross = (edgeCrossing_t *)Mem_ClearedAlloc( sizeof( *cross ) );
 				cross->ov = newVert;
@@ -1598,79 +1568,6 @@ static void OptimizeIsland( optIsland_t *island ) {
 AddVertexToIsland_r
 ================
 */
-#if 0
-static void AddVertexToIsland_r( optVertex_t *vert, optIsland_t *island ) {
-	optEdge_t	*e;
-
-	// we can't just check islandLink, because the
-	// last vert will have a NULL
-	if ( vert->addedToIsland ) {
-		return;
-	}
-	vert->addedToIsland = true;
-	vert->islandLink = island->verts;
-	island->verts = vert;
-
-	for ( e = vert->edges ; e ; ) {
-		if ( !e->addedToIsland ) {
-			e->addedToIsland = true;
-
-			e->islandLink = island->edges;
-			island->edges = e;
-		}
-
-		if ( e->v1 == vert ) {
-			AddVertexToIsland_r( e->v2, island );
-			e = e->v1link;
-			continue;
-		}
-		if ( e->v2 == vert ) {
-			AddVertexToIsland_r( e->v1, island );
-			e = e->v2link;
-			continue;
-		}
-		common->Error( "AddVertexToIsland_r: mislinked vert" );
-	}
-
-}
-
-/*
-====================
-SeparateIslands
-
-While the algorithm should theoretically handle any collection
-of triangles, there are speed and stability benefits to making
-it work on as small a list as possible, so separate disconnected
-collections of edges and process separately.
-
-FIXME: we need to separate the source triangles before
-doing this, because PointInSourceTris() can give a bad answer if
-the source list has triangles not used in the optimization
-====================
-*/
-static void SeparateIslands( optimizeGroup_t *opt ) {
-	int		i;
-	optIsland_t	island;
-	int		numIslands;
-
-	DrawAllEdges();
-
-	numIslands = 0;
-	for ( i = 0 ; i < numOptVerts ; i++ ) {
-		if ( optVerts[i].addedToIsland ) {
-			continue;
-		}
-		numIslands++;
-		memset( &island, 0, sizeof( island ) );
-		island.group = opt;
-		AddVertexToIsland_r( &optVerts[i], &island );
-		OptimizeIsland( &island );
-	}
-	if ( dmapGlobals.verbose ) {
-		common->Printf( "%6i islands\n", numIslands );
-	}
-}
-#endif
 
 static void DontSeparateIslands( optimizeGroup_t *opt ) {
 	int		i;
@@ -1718,13 +1615,7 @@ static	void OptimizeOptList( optimizeGroup_t *opt ) {
 	AddOriginalEdges( opt );
 	SplitOriginalEdgesAtCrossings( opt );
 
-#if 0
-	// seperate any discontinuous areas for individual optimization
-	// to reduce the scope of the problem
-	SeparateIslands( opt );
-#else
 	DontSeparateIslands( opt );
-#endif
 
 	// now free the hash verts
 	FreeTJunctionHash();

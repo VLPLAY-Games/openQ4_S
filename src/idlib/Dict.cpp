@@ -514,12 +514,6 @@ void idDict::Delete( const char *key ) {
 		}
 	}
 
-#if 0
-	// make sure all keys can still be found in the hash index
-	for ( i = 0; i < args.Num(); i++ ) {
-		assert( FindKey( args[i].GetKey() ) != NULL );
-	}
-#endif
 }
 
 /*

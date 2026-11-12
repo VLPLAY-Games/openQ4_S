@@ -1344,11 +1344,6 @@ void idMD5Anim::GetInterpolatedFrame( const frameBlend_t &frame, idJointQuat *jo
 	// copy the baseframe
 	SIMDProcessor->Memcpy( joints, baseFrame.Ptr(), baseFrame.Num() * sizeof( baseFrame[ 0 ] ) );
 
-#if 0
-	if ( !gameLocal.isLastPredictFrame ) {
-		return;
-	}
-#endif
 
 	if ( !numAnimatedComponents ) {
 		// just use the base frame

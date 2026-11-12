@@ -5298,38 +5298,6 @@ idPhysics_AF::VerifyContactConstraints
 ================
 */
 void idPhysics_AF::VerifyContactConstraints( void ) {
-#if 0
-	int i;
-	float impulseNumerator, impulseDenominator;
-	idVec3 r, velocity, normalVelocity, normal, impulse;
-	idAFBody *body;
-
-	for ( i = 0; i < contactConstraints.Num(); i++ ) {
-		body = contactConstraints[i]->body1;
-		const contactInfo_t &contact = contactConstraints[i]->GetContact();
-
-		r = contact.point - body->GetCenterOfMass();
-
-		// calculate velocity at contact point
-		velocity = body->GetLinearVelocity() + body->GetAngularVelocity().Cross( r );
-
-		// velocity along normal vector
-		normalVelocity = ( velocity * contact.normal ) * contact.normal;
-
-		// if moving towards the surface at the contact point
-		if ( normalVelocity * contact.normal < 0.0f ) {
-			// calculate impulse
-			normal = -normalVelocity;
-			impulseNumerator = normal.Normalize();
-			impulseDenominator = body->GetInverseMass() + ( ( body->GetInverseWorldInertia() * r.Cross( normal ) ).Cross( r ) * normal );
-			impulse = (impulseNumerator / impulseDenominator) * normal * 1.0001f;
-
-			// apply impulse
-			body->SetLinearVelocity( body->GetLinearVelocity() + impulse );
-			body->SetAngularVelocity( body->GetAngularVelocity() + r.Cross( impulse ) );
-		}
-	}
-#else
 	int i;
 	idAFBody *body;
 	idVec3 normal;
@@ -5349,7 +5317,6 @@ void idPhysics_AF::VerifyContactConstraints( void ) {
 			body->next->spatialVelocity.SubVec3(0) -= 1.0001f * (normal * body->next->spatialVelocity.SubVec3(0)) * normal;
 		}
 	}
-#endif
 }
 
 /*
@@ -5687,7 +5654,6 @@ bool idPhysics_AF::EvaluateContacts( void ) {
 		numContacts = gameLocal.Contacts( self, contactInfo, 10, body->current->worldOrigin, dir.SubVec6(0), 2.0f, //CONTACT_EPSILON,
 						body->clipModel, body->current->worldAxis, body->clipMask, passEntity );
 // RAVEN END
-#if 1
 		// merge nearby contacts between the same bodies
 		// and assure there are at most three planar contacts between any pair of bodies
 		for ( j = 0; j < numContacts; j++ ) {
@@ -5714,13 +5680,6 @@ bool idPhysics_AF::EvaluateContacts( void ) {
 			}
 		}
 
-#else
-
-		for ( j = 0; j < numContacts; j++ ) {
-			contacts.Append( contactInfo[j] );
-			contactBodies.Append( i );
-		}
-#endif
 
 	}
 
@@ -5760,24 +5719,6 @@ idPhysics_AF::ApplyContactForces
 ================
 */
 void idPhysics_AF::ApplyContactForces( void ) {
-#if 0
-	int i;
-	idEntity *ent;
-	idVec3 force;
-
-	for ( i = 0; i < contactConstraints.Num(); i++ ) {
-		if ( contactConstraints[i]->body2 != NULL ) {
-			continue;
-		}
-		const contactInfo_t &contact = contactConstraints[i]->GetContact();
-		ent = gameLocal.entities[contact.entityNum];
-		if ( !ent ) {
-			continue;
-		}
-		force.Zero();
-		ent->AddForce( self, contact.id, contact.point, force );
-	}
-#endif
 }
 
 /*

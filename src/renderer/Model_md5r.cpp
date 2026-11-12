@@ -50,11 +50,7 @@ OpenGL keeps the native packed path.
 ========================
 */
 static ID_INLINE bool R_MD5R_UsePackedRuntimeSurfaces() {
-#if defined( OPENQ4_RENDERER_VK_MODULE )
-	return false;
-#else
 	return true;
-#endif
 }
 
 /*
@@ -84,11 +80,7 @@ MD5R surfaces therefore need their current-pose basis immediately.
 ========================
 */
 static ID_INLINE bool R_MD5R_DeferDynamicTangents() {
-#if defined( OPENQ4_RENDERER_VK_MODULE )
-	return false;
-#else
 	return r_useDeferredTangents.GetBool();
-#endif
 }
 
 /*

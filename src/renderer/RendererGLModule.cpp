@@ -399,25 +399,12 @@ void QGL_Shutdown( void ) {
 GetRenderAPI
 ====================
 */
-#ifdef OPENQ4_RENDERER_VK_MODULE
-// Vulkan backend tail hooks (VulkanModule.cpp / VulkanBringup.cpp); declared
-// at file scope so they keep C++ linkage even when called from inside the
-// extern-C GetRenderAPI body (block-scope externs there would take C linkage)
-void VK_ModuleBindServices( const renderModuleServices_t *services );
-const renderModuleDiagnostics_t *VK_GetModuleDiagnostics( void );
-void VK_Bringup_Shutdown( void );
-bool VK_PrepareStartupDevice( char *outReason, int reasonLength );
-bool VK_Device_QueryCatalog(renderDeviceCatalog_t*);
-#endif
 
 static void RGM_SyncConfiguration( void ) {
 	R_RenderThread_Sync( "renderer configuration" );
 }
 
 static void RGM_Shutdown( void ) {
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	VK_Bringup_Shutdown();
-#endif
 	idSIMD::Shutdown();
 	idLib::ShutDown();
 }
@@ -439,9 +426,6 @@ renderExport_t *GetRenderAPI( renderImport_t *moduleImport ) {
 	rgm_services = moduleImport->services;
 	rgm_windowServices = moduleImport->windowServices;
 
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	VK_ModuleBindServices( rgm_services );
-#endif
 
 	sys = moduleImport->sys;
 	common = moduleImport->common;
@@ -487,13 +471,6 @@ renderExport_t *GetRenderAPI( renderImport_t *moduleImport ) {
     rgm_export.PrepareColdImagePolicyRecovery=R_PrepareColdImagePolicyRecovery;
     rgm_export.CancelImagePolicyRecovery=R_CancelPreparedImagePolicyRecovery;
     rgm_export.ReleaseImagePolicyRecovery=R_ReleaseCompletedImagePolicyRecovery;
-#ifdef OPENQ4_RENDERER_VK_MODULE
-	// the Vulkan backend keeps its bring-up diagnostics surface for the
-	// on-demand rendererVkProbe flow
-	rgm_export.diagnostics = VK_GetModuleDiagnostics();
-	rgm_export.PrepareStartupDevice = VK_PrepareStartupDevice;
-	rgm_export.GetRenderingDevices = VK_Device_QueryCatalog;
-#endif
 	return &rgm_export;
 }
 

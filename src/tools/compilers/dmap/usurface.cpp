@@ -329,14 +329,7 @@ mapTri_t *TriListForSide( const side_t *s, const idWinding *w ) {
 				}
 
 				dv = tri->v + j;
-#if 0
-				// round the xyz to a given precision
-				for ( k = 0 ; k < 3 ; k++ ) {
-					dv->xyz[k] = SNAP_INT_TO_FLOAT * floor( vec[k] * SNAP_FLOAT_TO_INT + 0.5 );
-				}
-#else
 				VectorCopy( *vec, dv->xyz );
-#endif
 				
 				// calculate texture s/t from brush primitive texture matrix
 				dv->st[0] = DotProduct( dv->xyz, s->texVec.v[0] ) + s->texVec.v[0][3];
@@ -565,14 +558,6 @@ static int CheckWindingInAreas_r( const idWinding *w, node_t *node ) {
 
 	if ( node->planenum != PLANENUM_LEAF ) {
 		int		a1, a2;
-#if 0
-		if ( side->planenum == node->planenum ) {
-			return CheckWindingInAreas_r( w, node->children[0] );
-		}
-		if ( side->planenum == ( node->planenum ^ 1) ) {
-			return CheckWindingInAreas_r( w, node->children[1] );
-		}
-#endif
 		w->Split( dmapGlobals.mapPlanes[ node->planenum ], ON_EPSILON, &front, &back );
 
 		a1 = CheckWindingInAreas_r( front, node->children[0] );

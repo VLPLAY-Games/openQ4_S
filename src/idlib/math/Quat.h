@@ -139,10 +139,6 @@ ID_INLINE idQuat idQuat::operator*( const idQuat &a ) const {
 }
 
 ID_INLINE idVec3 idQuat::operator*( const idVec3 &a ) const {
-#if 0
-	// it's faster to do the conversion to a 3x3 matrix and multiply the vector by this 3x3 matrix
-	return ( ToMat3() * a );
-#else
 	// result = this->Inverse() * idQuat( a.x, a.y, a.z, 0.0f ) * (*this)
 	float xx = x * x;
 	float zz = z * z;
@@ -160,7 +156,6 @@ ID_INLINE idVec3 idQuat::operator*( const idVec3 &a ) const {
 		( xx - yy - zz + ww )	* a.x	+ ( xy2 + zw2 )			* a.y	+ ( xz2 - yw2 )			* a.z,
 		( xy2 - zw2 )			* a.x	+ ( -xx + yy - zz + ww )* a.y	+ ( yz2 + xw2 )			* a.z,
 		( xz2 + yw2 )			* a.x	+ ( yz2 - xw2 )			* a.y	+ ( -xx - yy + zz + ww )* a.z );
-#endif
 }
 
 ID_INLINE idQuat idQuat::operator*( float a ) const {

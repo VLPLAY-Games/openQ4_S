@@ -307,7 +307,6 @@ idSIMD_Generic::Dot
 */
 void VPCALL idSIMD_Generic::Dot( float &dot, const float * RESTRICT src1, const float * RESTRICT src2, const int count ) {
 	TIME_THIS_SCOPE("SIMD Dot float-float");
-#if 1
 
 	switch( count ) {
 		case 0: {
@@ -361,14 +360,6 @@ void VPCALL idSIMD_Generic::Dot( float &dot, const float * RESTRICT src1, const 
 		}
 	}
 
-#else
-
-	dot = 0.0f;
-	for ( i = 0; i < count; i++ ) {
-		dot += src1[i] * src2[i];
-	}
-
-#endif
 }
 
 /*
@@ -1760,7 +1751,6 @@ idSIMD_Generic::MatX_LowerTriangularSolve
 */
 void VPCALL idSIMD_Generic::MatX_LowerTriangularSolve( const idMatX &L, float * RESTRICT x, const float * RESTRICT b, const int n, int skip ) {
 	TIME_THIS_SCOPE("SIMD MatX_LowerTriangularSolve");
-#if 1
 
 	int nc;
 	const float * RESTRICT lptr;
@@ -1863,22 +1853,6 @@ void VPCALL idSIMD_Generic::MatX_LowerTriangularSolve( const idMatX &L, float * 
 		lptr += nc;
 	}
 
-#else
-
-	int i, j;
-	const float * RESTRICT lptr;
-	double sum;
-
-	for ( i = skip; i < n; i++ ) {
-		sum = b[i];
-		lptr = L[i];
-		for ( j = 0; j < i; j++ ) {
-			sum -= lptr[j] * x[j];
-		}
-		x[i] = sum;
-	}
-
-#endif
 }
 
 /*
@@ -1892,7 +1866,6 @@ idSIMD_Generic::MatX_LowerTriangularSolveTranspose
 */
 void VPCALL idSIMD_Generic::MatX_LowerTriangularSolveTranspose( const idMatX &L, float * RESTRICT x, const float * RESTRICT b, const int n ) {
 	TIME_THIS_SCOPE("SIMD MatX_LowerTriangularSolveTranspose");
-#if 1
 
 	int nc;
 	const float * RESTRICT lptr;
@@ -2009,23 +1982,6 @@ void VPCALL idSIMD_Generic::MatX_LowerTriangularSolveTranspose( const idMatX &L,
 		x[i] = s0;
 	}
 
-#else
-
-	int i, j, nc;
-	const float * RESTRICT ptr;
-	double sum;
-
-	nc = L.GetNumColumns();
-	for ( i = n - 1; i >= 0; i-- ) {
-		sum = b[i];
-		ptr = L[0] + i;
-		for ( j = i + 1; j < n; j++ ) {
-			sum -= ptr[j*nc] * x[j];
-		}
-		x[i] = sum;
-	}
-
-#endif
 }
 
 /*
@@ -2038,7 +1994,6 @@ idSIMD_Generic::MatX_LDLTFactor
 */
 bool VPCALL idSIMD_Generic::MatX_LDLTFactor( idMatX &mat, idVecX &invDiag, const int n ) {
 	TIME_THIS_SCOPE("SIMD MatX_LDLTFactor");
-#if 1
 
 	int i, j, k, nc;
 	float * RESTRICT v, * RESTRICT diag, * RESTRICT mptr;
@@ -2215,52 +2170,6 @@ bool VPCALL idSIMD_Generic::MatX_LDLTFactor( idMatX &mat, idVecX &invDiag, const
 
 	return true;
 
-#else
-
-	int i, j, k, nc;
-	float * RESTRICT v, * RESTRICT ptr, * RESTRICT diagPtr;
-	double d, sum;
-
-	v = (float * RESTRICT ) _alloca16( n * sizeof( float ) );
-	nc = mat.GetNumColumns();
-
-	for ( i = 0; i < n; i++ ) {
-
-		ptr = mat[i];
-		diagPtr = mat[0];
-		sum = ptr[i];
-		for ( j = 0; j < i; j++ ) {
-			d = ptr[j];
-		    v[j] = diagPtr[0] * d;
-		    sum -= v[j] * d;
-			diagPtr += nc + 1;
-		}
-
-		if ( sum == 0.0f ) {
-			return false;
-		}
-
-		diagPtr[0] = sum;
-		invDiag[i] = d = 1.0f / sum;
-
-		if ( i + 1 >= n ) {
-			continue;
-		}
-
-		ptr = mat[i+1];
-		for ( j = i + 1; j < n; j++ ) {
-			sum = ptr[i];
-			for ( k = 0; k < i; k++ ) {
-				sum -= ptr[k] * v[k];
-			}
-			ptr[i] = sum * d;
-			ptr += nc;
-		}
-	}
-
-	return true;
-
-#endif
 }
 
 /*

@@ -141,10 +141,6 @@ void Sys_ClearInputEvents( void ) {
 }
 
 int Sys_PollMouseInputEvents( void ) {
-#if 0 //moved to the Sys_End functions
-	poll_keyboard_event_count = 0;
-	poll_mouse_event_count = 0;
-#endif
 
 	// that's OS specific, implemented in macos/ and linux/
 	Posix_PollInput( );

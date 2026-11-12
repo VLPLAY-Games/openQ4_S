@@ -489,40 +489,6 @@ private:
 
 // RAVEN BEGIN
 // bdube: not using
-#if 0
-// RAVEN END
-
-/*
-===============================================================================
-
-idFuncSmoke
-
-===============================================================================
-*/
-
-class idFuncSmoke : public idEntity {
-public:
-	CLASS_PROTOTYPE( idFuncSmoke );
-
-							idFuncSmoke();
-
-	void					Spawn( void );
-
-	void					Save( idSaveGame *savefile ) const;
-	void					Restore( idRestoreGame *savefile );
-
-	virtual void			Think( void );
-	void					Event_Activate( idEntity *activator );
-
-private:
-	int						smokeTime;
-	const idDeclParticle *	smoke;
-	bool					restart;
-};
-
-// RAVEN BEGIN
-// bdube: not using
-#endif
 // RAVEN END
 
 /*

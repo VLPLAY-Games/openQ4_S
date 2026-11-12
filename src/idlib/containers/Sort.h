@@ -237,7 +237,6 @@ class idSort_Heap : public idSort< _type_ > {
 public:
 	virtual void Sort( _type_ * base, unsigned int num ) const {
 		// get all elements in heap order
-#if 1
 		// O( n )
 		for ( unsigned int i = num / 2; i > 0; i-- ) {
 			// sift down
@@ -253,20 +252,6 @@ public:
 				parent = child;
 			}
 		}
-#else
-		// O(n log n)
-		for ( unsigned int i = 1; i < num; i++ ) {
-			// sift up
-			for ( unsigned int child = i; child > 0; ) {
-				unsigned int parent = ( child - 1 ) / 2;
-				if ( static_cast< const _derived_ * >( this )->Compare( base[parent], base[child] ) > 0 ) {
-					break;
-				}
-				SwapValues( base[child], base[parent] );
-				child = parent;
-			}
-		}
-#endif
 		// get sorted elements while maintaining heap order
 		for ( unsigned int i = num - 1; i > 0; i-- ) {
 			SwapValues( base[0], base[i] );

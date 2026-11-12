@@ -379,11 +379,7 @@ rvMemoryBlock_s *rvHeap::AllocateMemorySmallBlock( uint sizeBytes )
 	smallBlockTableOffset = SIZE_TO_SMALL_TABLE_OFFSET(sizeBytes);
 	assert(smallBlockTableOffset < NUM_SMALL_BLOCK_TABLE_ENTRIES);
 
-#if 1
 	stopOffset = smallBlockTableOffset + NUM_SMALL_BLOCK_TABLE_ENTRIES;
-#else
-	stopOffset = smallBlockTableOffset << 1;
-#endif
 	if ( stopOffset > m_largestFreeSmallBlockOffset )
 	{
 		stopOffset = m_largestFreeSmallBlockOffset;

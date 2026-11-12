@@ -1080,23 +1080,7 @@ Removes a value to the list as if the list was a stack
 */
 template< class type >
 ID_INLINE void idList<type>::StackPop( void ) {
-#if 0
-	assert(num>0);
-	if (num<=0)
-	{
-		return;
-	}
-
-// RAVEN BEGIN
-// jsinger: Without this, this container will leak any dynamically allocated members from
-//          contained class instances
-// TTimo: that would cause a double destructor when the list is deleted in Clear()
-	list[num].~type();
-// RAVEN END
-	num--;
-#else
 	RemoveIndex( num - 1 );
-#endif
 }
 
 template< class type >

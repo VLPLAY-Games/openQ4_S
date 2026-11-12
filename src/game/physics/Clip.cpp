@@ -91,49 +91,11 @@ typedef enum {
 	CPT_MAX_TYPES
 } CLIP_PROFILE_TYPES;
 
-#if 0
-
-static idTimer				clipProfileTimer[ CPT_MAX_TYPES ];
-static CLIP_PROFILE_TYPES	currentProfileType = CPT_NONE;
-static int					clipProfileDepth = 0;
-
-static void BeginClipProfile( CLIP_PROFILE_TYPES type ) {
-	clipProfileDepth++;
-
-	if ( clipProfileDepth == 1 ) {
-		clipProfileTimer[ type ].Start();
-		currentProfileType = type;
-	}
-}
-
-static void EndClipProfile( CLIP_PROFILE_TYPES type ) {
-	clipProfileDepth--;
-
-	if ( clipProfileDepth == 0 ) {
-		clipProfileTimer[ currentProfileType ].Stop();
-		currentProfileType = CPT_NONE;
-	}
-}
-
-void ClearClipProfile( void ) {
-	for( int i = 0; i < CPT_MAX_TYPES; i++ ) {
-		clipProfileTimer[ i ].Clear();
-	}
-}
-
-void DisplayClipProfile( void ) {
-	for( int i = 0; i < CPT_MAX_TYPES; i++ ) {
-		common->Printf( "%d:%d  ", i, ( int )clipProfileTimer[ i ].Milliseconds() );
-	}
-	common->Printf( "\n" );
-}
-#else
 
 #define BeginClipProfile( type )
 
 #define EndClipProfile( type )
 
-#endif
 
 
 /*

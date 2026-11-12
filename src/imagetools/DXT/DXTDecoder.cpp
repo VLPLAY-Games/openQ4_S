@@ -308,7 +308,6 @@ UShortSqrt
 ========================
 */
 byte UShortSqrt( unsigned short s ) {
-#if 1
 	int t, b, r, x;
 
 	r = 0;
@@ -320,20 +319,6 @@ byte UShortSqrt( unsigned short s ) {
 		r += b & x;
 	}
 	return byte( r );
-#else
-	int t, b, r;
-
-	r = 0;
-	for ( b = 0x10000000; b != 0; b >>= 2 ) {
-		t = r + b;
-		r >>= 1;
-		if ( t <= s ) {
-			s -= t;
-			r += b;
-		}
-	}
-	return r;
-#endif
 }
 
 /*
@@ -388,7 +373,6 @@ void idDxtDecoder::DecompressNormalMapDXT1( const byte *inBuf, byte *outBuf, int
 	for ( int j = 0; j < height; j += 4 ) {
 		for ( int i = 0; i < width; i += 4 ) {
 			DecodeColorValues( block, false, true );
-#if 1
 			float normals[16*4];
 			/*
 			for ( int k = 0; k < 16; k++ ) {
@@ -409,9 +393,6 @@ void idDxtDecoder::DecompressNormalMapDXT1( const byte *inBuf, byte *outBuf, int
 				block[k*4+1] = idMath::Ftob( ( normals[k*4+1] + 1.0f ) / 2.0f * 255.0f );
 				block[k*4+2] = idMath::Ftob( ( normals[k*4+2] + 1.0f ) / 2.0f * 255.0f );
 			}
-#else
-			DeriveNormalZValues( block );
-#endif
 			EmitBlock( outBuf, i, j, block );
 		}
 	}
@@ -471,15 +452,9 @@ void idDxtDecoder::DecompressNormalMapDXT5Renormalize( const byte *inBuf, byte *
 
 			for ( int k = 0; k < 16; k++ ) {
 				float normal[3];
-#if 0 // object-space
-				normal[0] = block[k*4+0] / 255.0f * 2.0f - 1.0f;
-				normal[1] = block[k*4+1] / 255.0f * 2.0f - 1.0f;
-				normal[2] = block[k*4+3] / 255.0f * 2.0f - 1.0f;
-#else
 				normal[0] = block[k*4+3] / 255.0f * 2.0f - 1.0f;
 				normal[1] = block[k*4+1] / 255.0f * 2.0f - 1.0f;
 				normal[2] = block[k*4+2] / 255.0f * 2.0f - 1.0f;
-#endif
 				float rsq = idMath::InvSqrt( normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2] );
 				normal[0] *= rsq;
 				normal[1] *= rsq;
@@ -538,7 +513,6 @@ void idDxtDecoder::DecompressNormalMapDXT5( const byte *inBuf, byte *outBuf, int
 		for ( int i = 0; i < width; i += 4 ) {
 			DecodeAlphaValues( block, 0 );
 			DecodeNormalYValues( block, 1, c0, c1 );
-#if 1
 			float normals[16*4];
 			//BiasScaleNormals( block, normals, c0, c1 );
 			UnRotateNormals( block, normals, c0, c1 );
@@ -554,10 +528,6 @@ void idDxtDecoder::DecompressNormalMapDXT5( const byte *inBuf, byte *outBuf, int
 				block[k*4+1] = idMath::Ftob( ( normals[k*4+1] + 1.0f ) / 2.0f * 255.0f );
 				block[k*4+2] = idMath::Ftob( ( normals[k*4+2] + 1.0f ) / 2.0f * 255.0f );
 			}
-#else
-			BiasScaleNormalY( block, 1, c0, c1 );
-			DeriveNormalZValues( block );
-#endif
 
 			EmitBlock( outBuf, i, j, block );
 		}
@@ -580,7 +550,6 @@ void idDxtDecoder::DecompressNormalMapDXN2( const byte *inBuf, byte *outBuf, int
 		for ( int i = 0; i < width; i += 4 ) {
 			DecodeAlphaValues( block, 0 );
 			DecodeAlphaValues( block, 1 );
-#if 1
 			float normals[16*4];
 			for ( int k = 0; k < 16; k++ ) {
 				normals[k*4+0] = block[k*4+0] / 255.0f * 2.0f - 1.0f;
@@ -598,9 +567,6 @@ void idDxtDecoder::DecompressNormalMapDXN2( const byte *inBuf, byte *outBuf, int
 				block[k*4+1] = idMath::Ftob( ( normals[k*4+1] + 1.0f ) / 2.0f * 255.0f );
 				block[k*4+2] = idMath::Ftob( ( normals[k*4+2] + 1.0f ) / 2.0f * 255.0f );
 			}
-#else
-			DeriveNormalZValues( block );
-#endif
 			EmitBlock( outBuf, i, j, block );
 		}
 	}

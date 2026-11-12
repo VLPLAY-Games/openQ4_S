@@ -114,7 +114,6 @@ Handles user intended acceleration
 ==============
 */
 void idPhysics_Player::Accelerate( const idVec3 &wishdir, const float wishspeed, const float accel ) {
-#if 1
 	// q2 style
 	float addspeed, accelspeed, currentspeed;
 
@@ -137,24 +136,6 @@ void idPhysics_Player::Accelerate( const idVec3 &wishdir, const float wishspeed,
 	
 	current.velocity += accelspeed * wishdir;
 
-#else
-	// proper way (avoids strafe jump maxspeed bug), but feels bad
-	idVec3		wishVelocity;
-	idVec3		pushDir;
-	float		pushLen;
-	float		canPush;
-
-	wishVelocity = wishdir * wishspeed;
-	pushDir = wishVelocity - current.velocity;
-	pushLen = pushDir.Normalize();
-
-	canPush = accel * frametime * wishspeed;
-	if ( canPush > pushLen ) {
-		canPush = pushLen;
-	}
-
-	current.velocity += canPush * pushDir;
-#endif
 }
 
 /*

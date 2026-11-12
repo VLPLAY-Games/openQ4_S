@@ -158,18 +158,11 @@ idQuat &idQuat::Slerp( const idQuat &from, const idQuat &to, float t ) {
 	}
 
 	if ( ( 1.0f - cosom ) > 1e-6f ) {
-#if 0
-		omega = acos( cosom );
-		sinom = 1.0f / idMath::Sin( omega );
-		scale0 = idMath::Sin( ( 1.0f - t ) * omega ) * sinom;
-		scale1 = idMath::Sin( t * omega ) * sinom;
-#else
 		scale0 = 1.0f - cosom * cosom;
 		sinom = idMath::InvSqrt( scale0 );
 		omega = idMath::ATan16( scale0 * sinom, cosom );
 		scale0 = idMath::Sin16( ( 1.0f - t ) * omega ) * sinom;
 		scale1 = idMath::Sin16( t * omega ) * sinom;
-#endif
 	} else {
 		scale0 = 1.0f - t;
 		scale1 = t;
