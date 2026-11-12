@@ -12919,7 +12919,12 @@ void idPlayer::VRVibrate( bool weaponHand, bool otherHand, float amplitude, int 
 		// alone is lighter than a hit, which shakes both hands
 		if ( gameLocal.GetLocalPlayer() == this && gameLocal.isNewFrame && ( weaponHand || otherHand ) ) {
 			const float strength = idMath::ClampFloat( 0.0f, 1.0f, ( otherHand ? 1.0f : 0.6f ) * amplitude );
+#if defined( __SWITCH__ )
+			// the console's controllers (the engine provides this where the game is linked into it)
 			Sys_SetJoystickRumblePulse( strength, strength * 0.7f, durationMsec );
+#else
+			(void)strength;
+#endif
 		}
 		return;
 	}
