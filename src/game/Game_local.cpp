@@ -4419,6 +4419,19 @@ void idGameLocal::MenuFrame( void ) { }
 		mHz = baseCmdHz;
 	}
 
+#if defined( __SWITCH__ )
+	// Skipping a cinematic runs its game frames back to back. On the console that takes minutes and
+	// leaves the picture frozen and the system deaf to the HOME button, so the loop gives control back
+	// every 50 ms of real time and carries on with the next frame (see the end of the loop).
+	const int skipWallStart = Sys_Milliseconds();
+	bool skipYield = false;
+	static int s_skipWallBegin = 0;
+	if ( skipCinematic && s_skipWallBegin == 0 ) {
+		s_skipWallBegin = skipWallStart;
+		common->Printf( "cinematic skip: started\n" );
+	}
+#endif
+
 	if ( !isMultiplayer && g_stopTime.GetBool() ) {
 
 		// set the user commands for this frame
@@ -4978,13 +4991,32 @@ TIME_THIS_SCOPE("idGameLocal::RunFrame - gameDebug.BeginFrame()");
 		gameDebug.EndFrame( );
 		gameLogLocal.EndFrame( );
 
-	} while( ( inCinematic || ( time < cinematicStopTime ) ) && skipCinematic );
+#if defined( __SWITCH__ )
+		if ( skipCinematic && ( Sys_Milliseconds() - skipWallStart ) > 50 ) {
+			skipYield = true;
+		}
+#endif
+
+	} while( ( inCinematic || ( time < cinematicStopTime ) ) && skipCinematic
+#if defined( __SWITCH__ )
+		&& !skipYield
+#endif
+		);
 
 	ret.syncNextGameFrame = skipCinematic;
+#if defined( __SWITCH__ )
+	if ( skipCinematic && skipYield ) {
+		// not finished: the skip goes on in the next frame, still muted
+	} else
+#endif
 	if ( skipCinematic ) {
 		//soundSystem->EndCinematic();
 		soundSystem->SetMute( false );
 		skipCinematic = false;		
+#if defined( __SWITCH__ )
+		common->Printf( "cinematic skip: finished after %d ms\n", Sys_Milliseconds() - s_skipWallBegin );
+		s_skipWallBegin = 0;
+#endif
 	}
 
 	// show any debug info for this frame
