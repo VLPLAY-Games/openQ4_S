@@ -442,7 +442,7 @@ idCVar g_liquidTestVolumeSize(      "g_liquidTestVolumeSize",   "640",          
 
 // RAVEN BEGIN
 // asalmon: parameters for aim assistance on Xenon - or a non-final pc build so Caryn can edit the guis
-#if defined( _XBOX ) || !defined( _FINAL )
+#if !defined(_FINAL)
 idCVar pm_AimAssist(				"pm_AimAssist",				"2",			CVAR_GAME | CVAR_INTEGER | CVAR_ARCHIVE , "Enable Xbox aim assistance. 1 to use change player view method. 2 to use change muzzle aim method.\n");
 idCVar pm_AimAssistDistance(		"pm_AimAssistDistance",		"1000",			CVAR_GAME | CVAR_INTEGER, "The max aim assist distance.\n");
 idCVar pm_AimAssistThreshold(		"pm_AimAssistThreshold",	"1.0",			CVAR_GAME | CVAR_FLOAT, "Threshold by which the projectile is aimed at the offending target.\n");

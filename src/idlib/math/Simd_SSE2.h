@@ -21,7 +21,7 @@
 
 #include "Simd_generic.h"
 
-#if !defined( _XENON ) && ( defined( _M_X64 ) || defined( __x86_64__ ) || defined( _M_IX86 ) || defined( __i386__ ) || defined( __aarch64__ ) )
+#if !defined(_XENON) && ((defined(__x86_64__) || defined(__i386__)) || defined(__aarch64__))
 
 #define ID_SIMD_SSE2_AVAILABLE 1
 

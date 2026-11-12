@@ -28,7 +28,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "RenderDoc.h"
 
-#if defined( __linux__ ) || defined( __APPLE__ )
+#if defined(__linux__)
 #include <dlfcn.h>
 #endif
 
@@ -139,7 +139,7 @@ static void *RenderDoc_GetProcAddress( void *moduleHandle, const char *name ) {
 		return NULL;
 	}
 
-#if defined( __linux__ ) || defined( __APPLE__ )
+#if defined(__linux__)
 	return dlsym( moduleHandle, name );
 #else
 	return NULL;
@@ -161,7 +161,7 @@ static bool RenderDoc_InitAPI( void ) {
 		return false;
 	}
 
-#if defined( __linux__ ) || defined( __APPLE__ )
+#if defined(__linux__)
 	renderDocState.moduleHandleNeedsRelease = true;
 #else
 	renderDocState.moduleHandleNeedsRelease = false;
@@ -307,7 +307,7 @@ void RenderDoc_RegisterCommands( void ) {
 }
 
 void RenderDoc_Shutdown( void ) {
-#if defined( __linux__ ) || defined( __APPLE__ )
+#if defined(__linux__)
 	if ( renderDocState.moduleHandleNeedsRelease && renderDocState.moduleHandle != NULL ) {
 		dlclose( renderDocState.moduleHandle );
 	}

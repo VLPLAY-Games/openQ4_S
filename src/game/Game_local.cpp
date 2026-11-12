@@ -11142,7 +11142,7 @@ void idGameLocal::FlushBeforelevelLoad( void )
 
 // dluetscher: moved the overloaded new/delete to sys_local.cpp and Game_local.cpp (from Heap.h)
 //			   so that the tools.dll will link.
-#if !defined(_XBOX) && (defined(ID_REDIRECT_NEWDELETE) || defined(_RV_MEM_SYS_SUPPORT))
+#if (defined(ID_REDIRECT_NEWDELETE) || defined(_RV_MEM_SYS_SUPPORT))
 
 #undef new
 #undef delete

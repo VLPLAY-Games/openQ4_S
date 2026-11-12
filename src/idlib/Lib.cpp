@@ -3,7 +3,7 @@
 
 
 
-#if defined( MACOS_X ) || defined( __linux__ )
+#if defined(__linux__)
 #include <signal.h>
 #endif
 

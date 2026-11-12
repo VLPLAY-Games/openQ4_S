@@ -22,7 +22,7 @@ along with Doom 3 Source Code.  If not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
-#if defined(OPENQ4_SDL3_LINUX_HOST) || defined(OPENQ4_SDL3_DARWIN_HOST) || defined(OPENQ4_SDL3_ANDROID_HOST)
+#if defined(OPENQ4_SDL3_LINUX_HOST)
 #define OPENQ4_SDL3_POSIX_HOST 1
 #endif
 
@@ -57,14 +57,6 @@ along with Doom 3 Source Code.  If not, see <http://www.gnu.org/licenses/>.
 #include <cmath>
 #include <cstdint>
 
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-#include "../macos/macos_common.h"
-// SDL3_SetANGLEHintDefaults runs before SDL_Init, so it cannot use
-// SDL_GetBasePath to find a staged ANGLE beside the executable.
-#include <limits.h>
-#include <mach-o/dyld.h>
-#include <string.h>
-#endif
 
 #if defined(OPENQ4_SDL3_POSIX_HOST)
 struct PosixSDL3Compat_t {
@@ -416,9 +408,7 @@ static const int SDL3_LIFECYCLE_PENDING_LOW_MEMORY = 1 << 2;
 typedef enum {
 	SDL3_VIDEO_DRIVER_UNKNOWN = 0,
 	SDL3_VIDEO_DRIVER_WAYLAND,
-	SDL3_VIDEO_DRIVER_X11,
-	SDL3_VIDEO_DRIVER_WINDOWS,
-	SDL3_VIDEO_DRIVER_COCOA
+	SDL3_VIDEO_DRIVER_X11
 } sdl3VideoDriver_t;
 
 static sdl3VideoDriver_t s_sdlVideoDriver = SDL3_VIDEO_DRIVER_UNKNOWN;
@@ -526,9 +516,7 @@ static const char *SDL3_HintString(const char *name) {
 	return (value != NULL && value[0] != '\0') ? value : "<unset>";
 }
 
-// Also needed on Darwin: SDL3_SetANGLEHintDefaults uses it to leave an ANGLE
-// path the user set in the environment alone.
-#if defined(OPENQ4_SDL3_LINUX_HOST) || defined(OPENQ4_SDL3_DARWIN_HOST)
+#if defined(OPENQ4_SDL3_LINUX_HOST)
 static bool SDL3_EnvHasValue(const char *name) {
 	const char *value = getenv(name);
 	return value != NULL && value[0] != '\0';
@@ -546,194 +534,6 @@ static bool SDL3_StringEquals(const char *a, const char *b) {
 	return a != NULL && b != NULL && idStr::Icmp(a, b) == 0;
 }
 
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-static void SDL3_SetHintDefaultLogged(const char *name, const char *value, const char *context) {
-	if (name == NULL || name[0] == '\0' || value == NULL) {
-		return;
-	}
-	if (!SDL_SetHintWithPriority(name, value, SDL_HINT_DEFAULT)) {
-		// Sys_Printf instead of common->Printf: the hint defaults are also
-		// applied before engine init by the early startup splash/console path.
-		Sys_Printf("SDL3: failed to set %s hint %s=%s\n", context != NULL ? context : "default", name, value);
-	}
-}
-#endif
-
-static bool SDL3_IsMacOSMetalBridge(void) {
-#if defined(OPENQ4_SDL3_DARWIN_HOST) && defined(OPENQ4_MACOS_METAL_BRIDGE)
-	return true;
-#else
-	return false;
-#endif
-}
-
-static const char *SDL3_GraphicsBridgeDescription(void) {
-	return SDL3_IsMacOSMetalBridge()
-		? "macOS Metal bridge (SDL3/Cocoa host, OpenGL renderer compatibility path)"
-		: "OpenGL";
-}
-
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-/*
-===============
-SDL3_SetANGLEHintDefaults
-
-macOS ships no OpenGL ES, so SDL's cocoa EGL path is only usable with a
-translation layer (ANGLE, GLES-on-Metal). SDL dlopens the bare leaf names
-"libEGL.dylib" and "libGLESv2.dylib", which dyld does not resolve from the
-executable's own directory, so a staged ANGLE would be invisible without an
-absolute path. Look bundle-relative first, then beside the executable -- the
-same order the Vulkan module uses to find MoltenVK.
-
-Applied only when the selected renderer is the GLES module. SDL_HINT_OPENGL_LIBRARY
-is consulted when creating *any* GL context, not just an ES one, so setting it
-process-wide on macOS points desktop context creation at ANGLE as well: every
-core-profile candidate then fails with "Failed getting OpenGL context version"
-and the ladder silently falls back to 2.1 compatibility. That fallback still
-reaches ARB2, so a desktop smoke test stays green while core 4.1 is quietly
-unreachable -- gate on the API rather than trusting the comment that nothing
-loads until an ES context is requested.
-
-An explicit environment override always wins.
-
-The executable directory comes from _NSGetExecutablePath, not SDL_GetBasePath:
-this runs from Sys_SDL_ApplyVideoHintDefaults *before* SDL_Init, and
-SDL_GetBasePath returns NULL until the video subsystem is up. Anchoring on the
-uninitialised SDL call made the whole search bail on its first line, which is
-why a staged ANGLE was invisible without SDL_EGL_LIBRARY set by hand.
-_NSGetExecutablePath has no such ordering dependency and is what the engine's
-own macOS Sys_EXEPath is built on.
-===============
-*/
-/*
-===============
-SDL3_LoadedAngleImagePath
-
-Returns the path of an already-loaded dylib with this leaf name, or NULL.
-
-The renderer module links libGLESv2 and is loaded before the window exists, so
-by the time the ES context is created ANGLE is already in the process -- and the
-module resolved it through its own rpath list, which meson populates from the
-staged ANGLE directory ahead of @loader_path. Handing SDL a path we merely
-*guessed* (the executable directory) pointed it at a second, byte-identical copy
-at a different path. dyld keys images by resolved path, so that is two ANGLE
-images: SDL creates the context in one while the module's linked entry points
-call into the other, which then reports no current context and returns NULL for
-GL_VERSION.
-
-Asking dyld what is actually loaded removes the guess.
-===============
-*/
-static const char *SDL3_LoadedAngleImagePath(const char *leafName) {
-	const uint32_t imageCount = _dyld_image_count();
-	for (uint32_t i = 0; i < imageCount; ++i) {
-		const char *imageName = _dyld_get_image_name(i);
-		if (imageName == NULL) {
-			continue;
-		}
-		const char *slash = strrchr(imageName, '/');
-		const char *leaf = (slash != NULL) ? slash + 1 : imageName;
-		if (idStr::Icmp(leaf, leafName) == 0) {
-			return imageName;
-		}
-	}
-	return NULL;
-}
-
-static const char *SDL3_DarwinExecutableDir(void) {
-	static char exeDir[PATH_MAX];
-
-	if (exeDir[0] != '\0') {
-		return exeDir;
-	}
-
-	uint32_t bufferSize = (uint32_t)sizeof(exeDir);
-	if (_NSGetExecutablePath(exeDir, &bufferSize) != 0) {
-		exeDir[0] = '\0';
-		return exeDir;
-	}
-
-	// Trim to the directory, keeping the trailing separator so callers can
-	// concatenate a leaf name directly.
-	char *lastSlash = strrchr(exeDir, '/');
-	if (lastSlash == NULL) {
-		exeDir[0] = '\0';
-		return exeDir;
-	}
-	lastSlash[1] = '\0';
-	return exeDir;
-}
-
-static void SDL3_SetANGLEHintDefaults(void) {
-	static const struct {
-		const char *hint;
-		const char *leafName;
-	} angleLibraries[] = {
-		{ SDL_HINT_EGL_LIBRARY, "libEGL.dylib" },
-		{ SDL_HINT_OPENGL_LIBRARY, "libGLESv2.dylib" },
-	};
-
-	// Sys_SDL_ApplyVideoHintDefaults is also called from the early splash/console
-	// path, before the renderer module is booted, where the API is not yet known.
-	// SDL3_WindowServices_PrepareWindowSystem calls it again before the game
-	// window is created, which is the call that matters for the GL context.
-	const rendererModuleStatus_t &moduleStatus = R_RendererModule_GetStatus();
-	if (moduleStatus.activeApi != RENDER_MODULE_API_GLES &&
-			moduleStatus.requestedApi != RENDER_MODULE_API_GLES) {
-		return;
-	}
-
-	const char *basePath = SDL3_DarwinExecutableDir();
-	if (basePath == NULL || basePath[0] == '\0') {
-		return;
-	}
-
-	// Whatever ANGLE the renderer module already loaded wins: matching its exact
-	// path is what keeps this to a single driver instance.
-	const char *loadedGLES = SDL3_LoadedAngleImagePath("libGLESv2.dylib");
-	char loadedAngleDir[1024] = { 0 };
-	if (loadedGLES != NULL) {
-		idStr::snPrintf(loadedAngleDir, sizeof(loadedAngleDir), "%s", loadedGLES);
-		char *lastSlash = strrchr(loadedAngleDir, '/');
-		if (lastSlash != NULL) {
-			lastSlash[1] = '\0';
-		} else {
-			loadedAngleDir[0] = '\0';
-		}
-	}
-
-	for (size_t i = 0; i < sizeof(angleLibraries) / sizeof(angleLibraries[0]); ++i) {
-		if (SDL3_EnvHasValue(angleLibraries[i].hint)) {
-			continue;
-		}
-
-		if (loadedAngleDir[0] != '\0') {
-			char loadedCandidate[1024];
-			SDL_PathInfo loadedInfo;
-			idStr::snPrintf(loadedCandidate, sizeof(loadedCandidate), "%s%s", loadedAngleDir, angleLibraries[i].leafName);
-			if (SDL_GetPathInfo(loadedCandidate, &loadedInfo)) {
-				SDL3_SetHintDefaultLogged(angleLibraries[i].hint, loadedCandidate, "loaded ANGLE (GLES on Metal)");
-				continue;
-			}
-		}
-
-		const char *searchDirs[] = { "../Frameworks/", "" };
-		for (size_t d = 0; d < sizeof(searchDirs) / sizeof(searchDirs[0]); ++d) {
-			char candidate[1024];
-			SDL_PathInfo info;
-
-			idStr::snPrintf(candidate, sizeof(candidate), "%s%s%s",
-				basePath, searchDirs[d], angleLibraries[i].leafName);
-			if (!SDL_GetPathInfo(candidate, &info)) {
-				continue;
-			}
-
-			SDL3_SetHintDefaultLogged(angleLibraries[i].hint, candidate, "staged ANGLE (GLES on Metal)");
-			break;
-		}
-	}
-}
-#endif
 
 static void SDL3_SetVideoHintDefaults(void) {
 	// openQ4 consumes committed UTF-8 text but does not render composition or
@@ -758,17 +558,6 @@ static void SDL3_SetVideoHintDefaults(void) {
 	(void)SDL_SetHintWithPriority(SDL_HINT_VIDEO_WAYLAND_MODE_SCALING, "aspect", SDL_HINT_DEFAULT);
 	(void)SDL_SetHintWithPriority(SDL_HINT_VIDEO_WAYLAND_SCALE_TO_DISPLAY, "0", SDL_HINT_DEFAULT);
 #endif
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-	if (SDL3_IsMacOSMetalBridge()) {
-		SDL3_SetHintDefaultLogged(SDL_HINT_VIDEO_DRIVER, "cocoa", "macOS Metal bridge");
-		// Metal-first with graceful fallback so NULL-name SDL_CreateRenderer
-		// calls can never hard-fail when the Metal driver is unavailable.
-		SDL3_SetHintDefaultLogged(SDL_HINT_RENDER_DRIVER, "metal,gpu,software", "macOS Metal bridge");
-		SDL3_SetHintDefaultLogged(SDL_HINT_GPU_DRIVER, "metal", "macOS Metal bridge");
-		SDL3_SetHintDefaultLogged(SDL_HINT_VIDEO_METAL_AUTO_RESIZE_DRAWABLE, "1", "macOS Metal bridge");
-	}
-	SDL3_SetANGLEHintDefaults();
-#endif
 }
 
 static void SDL3_SetAppMetadataDefaults(void) {
@@ -790,8 +579,7 @@ Sys_SDL_ApplyVideoHintDefaults
 
 Called by the early startup splash/console path before its
 SDL_InitSubSystem(SDL_INIT_VIDEO)/SDL_CreateRenderer calls so application
-metadata and platform hint defaults (including the macOS Metal bridge
-render-driver selection) are in effect for the first SDL video use of the
+metadata and platform hint defaults are in effect for the first SDL video use of the
 process, not just for GLimp_Init. Safe to call repeatedly; the hints are set
 at default priority and metadata is attempted once.
 ===============
@@ -813,10 +601,6 @@ static void SDL3_UpdateVideoDriverProfile(void) {
 		s_sdlVideoDriver = SDL3_VIDEO_DRIVER_WAYLAND;
 	} else if (SDL3_StringEquals(driverName, "x11")) {
 		s_sdlVideoDriver = SDL3_VIDEO_DRIVER_X11;
-	} else if (SDL3_StringEquals(driverName, "windows")) {
-		s_sdlVideoDriver = SDL3_VIDEO_DRIVER_WINDOWS;
-	} else if (SDL3_StringEquals(driverName, "cocoa")) {
-		s_sdlVideoDriver = SDL3_VIDEO_DRIVER_COCOA;
 	} else {
 		s_sdlVideoDriver = SDL3_VIDEO_DRIVER_UNKNOWN;
 	}
@@ -924,20 +708,7 @@ static void SDL3_PrintGraphicsBridgeSummary(void) {
 		return;
 	}
 
-	common->Printf("SDL3: graphics bridge: %s\n", SDL3_GraphicsBridgeDescription());
-
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-	if (SDL3_IsMacOSMetalBridge()) {
-		common->Printf(
-			"SDL3: macOS Metal bridge keeps rendering on the existing OpenGL compatibility path; no native Metal renderer rewrite is selected.\n");
-		common->Printf(
-			"SDL3: macOS Metal bridge hints: SDL_VIDEO_DRIVER=%s SDL_RENDER_DRIVER=%s SDL_GPU_DRIVER=%s SDL_VIDEO_METAL_AUTO_RESIZE_DRAWABLE=%s\n",
-			SDL3_HintString(SDL_HINT_VIDEO_DRIVER),
-			SDL3_HintString(SDL_HINT_RENDER_DRIVER),
-			SDL3_HintString(SDL_HINT_GPU_DRIVER),
-			SDL3_HintString(SDL_HINT_VIDEO_METAL_AUTO_RESIZE_DRAWABLE));
-	}
-#endif
+	common->Printf("SDL3: graphics bridge: OpenGL\n");
 
 	s_sdlGraphicsBridgeSummaryLogged = true;
 }
@@ -1082,10 +853,6 @@ static void SDL3_SetControllerHintDefaults(void) {
 	(void)SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_LINUX_CLASSIC, "0", SDL_HINT_DEFAULT);
 	(void)SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_LINUX_DEADZONES, "0", SDL_HINT_DEFAULT);
 	(void)SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "1", SDL_HINT_DEFAULT);
-#endif
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-	(void)SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_IOKIT, "1", SDL_HINT_DEFAULT);
-	(void)SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_MFI, "1", SDL_HINT_DEFAULT);
 #endif
 #endif
 }
@@ -3004,11 +2771,6 @@ static void SDL3_ListControllers_f(const idCmdArgs &args) {
 		SDL3_HintString(SDL_HINT_JOYSTICK_LINUX_DEADZONES),
 		SDL3_HintString(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK));
 #endif
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-	common->Printf("  SDL macOS controller hints: IOKit=%s MFi=%s\n",
-		SDL3_HintString(SDL_HINT_JOYSTICK_IOKIT),
-		SDL3_HintString(SDL_HINT_JOYSTICK_MFI));
-#endif
 
 	SDL3_PrintActiveGamepadDetails();
 	SDL3_PrintActiveJoystickDetails();
@@ -3751,15 +3513,6 @@ static sdl3WindowBorders_t SDL3_GetWindowBorders(void) {
 
 	bool haveBorders = SDL_GetWindowBordersSize(
 		s_sdlWindow, &borders.top, &borders.left, &borders.bottom, &borders.right);
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-	if (!haveBorders) {
-		haveBorders = Sys_SDL_GetNativeWindowBorders(
-			s_sdlWindow, &borders.top, &borders.left, &borders.bottom, &borders.right);
-		if (haveBorders) {
-			SDL_ClearError();
-		}
-	}
-#endif
 	(void)haveBorders;
 
 	// A backend that cannot report decorations is required by SDL to return
@@ -4516,51 +4269,6 @@ static void SDL3_PrintWaylandWindowState(const char *description) {
 		displayName);
 }
 
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-/*
-===============
-SDL3_FindExactPixelFullscreenMode
-
-Selects the fullscreen mode whose PIXEL dimensions (w/h scaled by
-pixel_density) exactly match the requested size. SDL_DisplayMode w/h are in
-points, so on Retina displays the native pixel resolutions only appear as
-high-density modes that point-based matching would misinterpret (a
-1920x1080-point 2x mode is 3840x2160 pixels).
-===============
-*/
-static bool SDL3_FindExactPixelFullscreenMode(SDL_DisplayID display, int pixelWidth, int pixelHeight, float requestedRefresh, SDL_DisplayMode &outMode) {
-	int modeCount = 0;
-	SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(display, &modeCount);
-	if (modes == NULL) {
-		return false;
-	}
-
-	bool found = false;
-	float bestScore = 0.0f;
-	for (int i = 0; i < modeCount; ++i) {
-		const SDL_DisplayMode *candidate = modes[i];
-		if (candidate == NULL) {
-			continue;
-		}
-		const float density = candidate->pixel_density > 0.0f ? candidate->pixel_density : 1.0f;
-		const int candidatePixelWidth = (int)(candidate->w * density + 0.5f);
-		const int candidatePixelHeight = (int)(candidate->h * density + 0.5f);
-		if (candidatePixelWidth != pixelWidth || candidatePixelHeight != pixelHeight) {
-			continue;
-		}
-		// Nearest refresh to the request. Legacy calls this only for a nonzero
-		// rate its whole-hertz bucket lacks; Auto is decided by the shared rule.
-		const float score = -fabsf(candidate->refresh_rate - requestedRefresh);
-		if (!found || score > bestScore) {
-			found = true;
-			bestScore = score;
-			outMode = *candidate;
-		}
-	}
-	SDL_free(modes);
-	return found;
-}
-#endif
 
 static bool SDL3_LeaveFullscreenAndRestoreDesktopMode(void) {
 	if (!s_sdlWindow) {
@@ -4710,16 +4418,6 @@ static bool SDL3_ApplyScreenParms(glimpParms_t parms) {
 			// read back via SDL_GetWindowSizeInPixels.
 			bool hasClosestMode = display != 0 &&
 				SDL3_StrictFullscreenMode(display, parms.width, parms.height, parms.displayHz, mode);
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-			// A rate the exact pixel size lacks keeps that size at the nearest
-			// rate: Retina displays expose their native pixel sizes only as
-			// high-density modes whose w/h are points, which the point-size
-			// fallback below would misread.
-			if (!hasClosestMode && parms.displayHz > 0) {
-				hasClosestMode = display != 0 &&
-					SDL3_FindExactPixelFullscreenMode(display, parms.width, parms.height, requestedRefresh, mode);
-			}
-#endif
 			// Point-size matching over the standard (1x-density) mode list: the
 			// legacy tolerance for a size or rate the display does not offer.
 			if (!hasClosestMode) {
@@ -6841,53 +6539,10 @@ static bool SDL3_WindowServices_PrepareWindowSystem(void) {
 // wrong kind cannot be reused across a renderer-API switch
 static int s_sdlWindowSurfaceKind = RENDER_SURFACE_GL;
 
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-// macOS has no system Vulkan driver; the renderer runs on MoltenVK, a
-// Vulkan-on-Metal translation layer shipped inside the package. SDL's own
-// search list already starts at @executable_path/../Frameworks/libMoltenVK.dylib,
-// but loose (non-app-bundle) binaries may stage the library either beside the
-// executable or in a Frameworks child directory. The renderer module must end
-// up on the SAME image SDL creates the surface with. Pinning the resolved path
-// removes both hazards. A system Vulkan loader, when the user has the SDK
-// installed, still wins: the hint is only set when a bundled dylib is present.
-static void SDL3_PinBundledMoltenVKLibrary(void) {
-	if (SDL_GetHint(SDL_HINT_VULKAN_LIBRARY) != NULL) {
-		return;
-	}
-
-	idStr exeDir = Sys_EXEPath();
-	exeDir.StripFilename();
-
-	const char *relativeCandidates[] = {
-		"/../Frameworks/libMoltenVK.dylib",
-		"/Frameworks/libMoltenVK.dylib",
-		"/libMoltenVK.dylib",
-	};
-	for (int i = 0; i < (int)(sizeof(relativeCandidates) / sizeof(relativeCandidates[0])); i++) {
-		idStr candidate = exeDir + relativeCandidates[i];
-		FILE *probe = fopen(candidate.c_str(), "rb");
-		if (probe == NULL) {
-			continue;
-		}
-		fclose(probe);
-		if (!SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, candidate.c_str())) {
-			common->Warning("SDL3: failed to pin bundled MoltenVK (%s)", SDL_GetError());
-			return;
-		}
-		common->Printf("SDL3: bundled MoltenVK pinned at %s\n", candidate.c_str());
-		return;
-	}
-}
-#endif
 
 static bool SDL3_WindowServices_CreateWindowForFramebuffer(const renderFramebufferDesc_t *desc, const renderWindowParms_t *parms,
 														   renderModuleWindowInfo_t *outInfo, bool *outReusedPreservedWindow) {
 	const int requestedSurfaceKind = desc != NULL ? desc->surfaceKind : RENDER_SURFACE_GL;
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-	if (requestedSurfaceKind == RENDER_SURFACE_VULKAN) {
-		SDL3_PinBundledMoltenVKLibrary();
-	}
-#endif
 	if (requestedSurfaceKind == RENDER_SURFACE_GL) {
 		SDL3_ApplyFramebufferDesc(desc);
 	}
@@ -7034,15 +6689,6 @@ static bool SDL3_WindowServices_PreferCompatibilityFallbackFirst(const char **ou
 	if (SDL3_IsNativeWaylandVideoDriver()) {
 		if (outMessage != NULL) {
 			*outMessage = "SDL3: native Wayland r_glTier auto will try the unversioned compatibility fallback before explicit profile contexts.\n";
-		}
-		return true;
-	}
-	if (s_sdlVideoDriver == SDL3_VIDEO_DRIVER_COCOA) {
-		// Apple OpenGL only offers 2.1 compatibility or 3.2+/4.1 core, so
-		// every versioned compatibility candidate above 2.1 is guaranteed to
-		// fail; try the unversioned compatibility fallback first.
-		if (outMessage != NULL) {
-			*outMessage = "SDL3: macOS r_glTier auto will try the unversioned compatibility fallback before explicit profile contexts.\n";
 		}
 		return true;
 	}
@@ -7220,9 +6866,6 @@ bool Sys_BuildWindowPlacementCommit(uint64_t token, const sysWindowPlacementSnap
 		if (actual->positionValid && SDL3_UseAbsoluteWindowPlacement()) {
 			int top=0,left=0,bottom=0,right=0;
 			bool borders=SDL_GetWindowBordersSize(s_sdlWindow,&top,&left,&bottom,&right);
-#if defined(OPENQ4_SDL3_DARWIN_HOST)
-			if (!borders) borders=Sys_SDL_GetNativeWindowBorders(s_sdlWindow,&top,&left,&bottom,&right);
-#endif
 			if (!borders || top<0 || left<0 || bottom<0 || right<0 || top>16384 || left>16384 || bottom>16384 || right>16384)
 				return SDL3_PlacementError("Actual window frame offsets are unavailable",error,errorSize);
 			result.x=SDL3_SaturateWindowCoordinate(int64_t(actual->windowX)-left);

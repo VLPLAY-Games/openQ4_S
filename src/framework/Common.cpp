@@ -1031,7 +1031,7 @@ static bool Common_HasExplicitLowPowerHostSignal( void ) {
 }
 
 static bool Common_HostCpuIsArm64( void ) {
-#if defined( __aarch64__ ) || defined( _M_ARM64 ) || defined( __arm64__ )
+#if defined(__aarch64__) || defined(__arm64__)
 	return true;
 #else
 	return false;
@@ -6909,11 +6909,11 @@ static const char *openQ4_SelectGameModuleBaseName( void ) {
 #endif
 }
 
-#if defined( _M_X64 ) || defined( __x86_64__ )
+#if defined(__x86_64__)
 	#define OPENQ4_MODULE_ARCH_TAG "x64"
-#elif defined( _M_IX86 ) || defined( __i386__ )
+#elif defined(__i386__)
 	#define OPENQ4_MODULE_ARCH_TAG "x86"
-#elif defined( _M_ARM64 ) || defined( __aarch64__ )
+#elif defined(__aarch64__)
 	#define OPENQ4_MODULE_ARCH_TAG "arm64"
 #else
 	#define OPENQ4_MODULE_ARCH_TAG "unknown"

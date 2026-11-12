@@ -27,7 +27,7 @@
 // every build shape, including module-only clients that shed the static
 // renderer sources
 static const char *r_renderApiArgs[] = { "best", "gl", "vulkan", "gl-module", "gles", NULL };
-#if defined( __ANDROID__ ) || defined( __SWITCH__ )
+#if defined(__SWITCH__)
 // Android has no desktop GL at all; the ES module is the only renderer built.
 #define OPENQ4_DEFAULT_RENDER_API	"gles"
 static const rendererModuleApi_t rm_platformDefaultApi = RENDER_MODULE_API_GLES;
@@ -59,11 +59,11 @@ idRenderSystem *		renderSystem = NULL;
 idRenderModelManager *	renderModelManager = NULL;
 #endif
 
-#if defined( _M_X64 ) || defined( __x86_64__ )
+#if defined(__x86_64__)
 	#define RENDERER_MODULE_ARCH_TAG "x64"
-#elif defined( _M_IX86 ) || defined( __i386__ )
+#elif defined(__i386__)
 	#define RENDERER_MODULE_ARCH_TAG "x86"
-#elif defined( _M_ARM64 ) || defined( __aarch64__ )
+#elif defined(__aarch64__)
 	#define RENDERER_MODULE_ARCH_TAG "arm64"
 #else
 	#define RENDERER_MODULE_ARCH_TAG "unknown"
@@ -96,7 +96,7 @@ static idStr rm_bootDevicePreference;
 static bool rm_selectionReloadPending = false;
 
 static rendererModuleApi_t RM_AutomaticApi(bool vrRequested) {
-#if defined(OPENQ4_OPENXR) && !defined(__ANDROID__)
+#if defined(OPENQ4_OPENXR)
 	// Automatic keeps VR on OpenGL; Vulkan VR is an explicit r_renderApi choice.
 	if (vrRequested) return RENDER_MODULE_API_GL;
 #else
@@ -418,7 +418,7 @@ int R_RendererModule_BuildFallbackLadder( rendererModuleApi_t requested, rendere
 	if ( maxEntries <= 0 ) {
 		return 0;
 	}
-#if defined( __ANDROID__ ) || defined( __SWITCH__ )
+#if defined(__SWITCH__)
 	// No desktop GL module is built, so falling back onto it would only trade a
 	// clear "gles module failed" for a misleading "renderer-gl not found".
 	outLadder[ numEntries++ ] = RENDER_MODULE_API_GLES;

@@ -37,7 +37,7 @@
 #endif
 
 // jscott: uncomment this to use id's sqrt and trig approximations
-#if defined( __linux__ ) || defined( MACOS_X )
+#if defined(__linux__)
 	// TTimo - enabling for OSes I'm covering
 	// (14:34:20) mrelusive: in the general case we don't use those functions
 	// (14:34:28) mrelusive: they are only for specific cases where they are faster

@@ -101,11 +101,11 @@ const char *OpenQ4SaveGameWireABI( void ) {
 	#define OPENQ4_SAVEGAME_ABI_OS "unknownos"
 	#define OPENQ4_SAVEGAME_ABI_COMPILER "unknownabi"
 #endif
-#if defined( _M_X64 ) || defined( __x86_64__ )
+#if defined(__x86_64__)
 	#define OPENQ4_SAVEGAME_ABI_ARCH "x64"
-#elif defined( _M_ARM64 ) || defined( __aarch64__ )
+#elif defined(__aarch64__)
 	#define OPENQ4_SAVEGAME_ABI_ARCH "arm64"
-#elif defined( _M_IX86 ) || defined( __i386__ )
+#elif defined(__i386__)
 	#define OPENQ4_SAVEGAME_ABI_ARCH "x86"
 #elif defined( _M_ARM ) || defined( __arm__ )
 	#define OPENQ4_SAVEGAME_ABI_ARCH "arm32"

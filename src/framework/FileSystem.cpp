@@ -53,7 +53,7 @@ If you have questions concerning this license or the applicable additional terms
 	#include <SDL3/SDL_error.h>
 #endif
 
-	#if !defined( __MACH__ ) && defined( __MWERKS__ )
+	#if defined(__MWERKS__)
 		#include <types.h>
 		#include <stat.h>
 #else
@@ -1508,7 +1508,7 @@ idCVar idFileSystemLocal::fs_awakeningpath( "fs_awakeningpath", "", CVAR_SYSTEM 
 idCVar	idFileSystemLocal::fs_cdpath( "fs_cdpath", "", CVAR_SYSTEM | CVAR_INIT, "" );
 idCVar	idFileSystemLocal::fs_game( "fs_game", OPENQ4_GAMEDIR, CVAR_SYSTEM | CVAR_INIT | CVAR_SERVERINFO, "mod path" );
 idCVar  idFileSystemLocal::fs_game_base( "fs_game_base", "", CVAR_SYSTEM | CVAR_INIT | CVAR_SERVERINFO, "alternate mod path, searched after the main fs_game path, before the basedir" );
-#if defined( WIN32 ) || defined( __SWITCH__ )
+#if defined(__SWITCH__)
 // The Switch SD card is FAT/exFAT: case-insensitive, and a directory listing per failed open is far too slow.
 idCVar	idFileSystemLocal::fs_caseSensitiveOS( "fs_caseSensitiveOS", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
 #else

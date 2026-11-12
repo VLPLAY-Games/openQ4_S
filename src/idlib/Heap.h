@@ -282,7 +282,7 @@ inline void *Mem_StackAlloc16( const int size ) {
 
 // dluetscher: moved the inline new/delete operators to sys_local.cpp and Game_local.cpp so that
 //			   Tools.dll will link.
-#if defined(_XBOX) || defined(ID_REDIRECT_NEWDELETE) || defined(_RV_MEM_SYS_SUPPORT)
+#if defined(ID_REDIRECT_NEWDELETE) || defined(_RV_MEM_SYS_SUPPORT)
 
 void *operator new( size_t s );
 void operator delete( void *p );
@@ -314,7 +314,7 @@ inline void *Mem_StackAlloc16( const int size ) {
 
 // dluetscher: moved the inline new/delete operators to sys_local.cpp and Game_local.cpp so that
 //			   the Tools.dll will link.
-#if defined(_XBOX) || defined(ID_REDIRECT_NEWDELETE) || defined(_RV_MEM_SYS_SUPPORT)
+#if defined(ID_REDIRECT_NEWDELETE) || defined(_RV_MEM_SYS_SUPPORT)
 
 void *operator new( size_t s, int t1, int t2, char *fileName, int lineNumber );
 void operator delete( void *p, int t1, int t2, char *fileName, int lineNumber );
@@ -778,13 +778,13 @@ public:
 	idDynamicBlock<type> *			prev;					// previous memory block
 	idDynamicBlock<type> *			next;					// next memory block
 	idBTreeNode<idDynamicBlock<type>,int> *node;			// node in the B-Tree with free blocks
-#if defined( _WIN64 ) || defined( __LP64__ )
+#if defined(__LP64__)
 	byte						alignmentPadding[8];		// explicit tail padding required by alignas(16) on 64-bit targets
 #endif
 };
 
 static_assert( alignof( idDynamicBlock<byte> ) == 16, "idDynamicBlock alignment is part of the allocator contract" );
-#if defined( _WIN64 ) || defined( __LP64__ )
+#if defined(__LP64__)
 static_assert( sizeof( idDynamicBlock<byte> ) == 64, "64-bit idDynamicBlock layout changed" );
 #else
 static_assert( sizeof( idDynamicBlock<byte> ) == 32, "32-bit idDynamicBlock layout changed" );

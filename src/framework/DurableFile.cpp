@@ -23,7 +23,7 @@ extern "C" int switch_fsync(int fd);
 #define close(fd) switch_close(fd)
 #define fsync(fd) switch_fsync(fd)
 #endif
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__)
 #include <sys/syscall.h>
 #endif
 
@@ -364,7 +364,7 @@ bool Remove(const Path& path, std::string& error) {
 // there; filesystems without an exclusive rename fall back to renameat after
 // the caller's absence check.
 bool RenameNoReplace(Native parent, const std::string& from, const std::string& to, std::string& error) {
-#if defined(__linux__) && !defined(__ANDROID__) && defined(SYS_renameat2)
+#if defined(__linux__) && defined(SYS_renameat2)
     constexpr unsigned renameNoReplace = 1;
     if (syscall(SYS_renameat2,parent,from.c_str(),parent,to.c_str(),renameNoReplace) == 0) return true;
     if (errno == EEXIST) return Error(error,"Move destination is occupied");

@@ -20,7 +20,7 @@ Quake 4 SDK game module or another cryptographic implementation is used here.
 
 #include <cstring>
 
-#if defined( _M_X64 ) || defined( __x86_64__ )
+#if defined(__x86_64__)
 #define IDCRYPTO_SHA_X86 1
 #include <immintrin.h>
 #include <cpuid.h>

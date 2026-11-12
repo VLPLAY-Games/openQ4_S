@@ -145,7 +145,7 @@ void idSIMD::InitProcessor( const char *module, bool forceGeneric ) {
 		newProcessor = generic;
 	} else {
 		if ( processor == NULL ) {
-#if defined( ID_SIMD_SSE2_AVAILABLE ) && ( defined( _M_X64 ) || defined( __x86_64__ ) || defined( __aarch64__ ) )
+#if defined(ID_SIMD_SSE2_AVAILABLE) && (defined(__x86_64__) || defined(__aarch64__))
 			// SSE2 is architecturally guaranteed on x86-64, and NEON on AArch64
 			processor = new idSIMD_SSE2;
 #elif defined( ID_SIMD_SSE2_AVAILABLE )

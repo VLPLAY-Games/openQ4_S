@@ -84,7 +84,7 @@ void local_free(void *ptr)
 // The usable-size query local_msize needs lives in a different header on every
 // platform, and precompiled.h only pulls <malloc.h> in for the Windows build.
 #if !defined( RV_UNIFIED_ALLOCATOR )
-#if defined( __ANDROID__ ) || defined( __linux__ ) || defined( _WIN32 )
+#if defined(__linux__)
 		#include <malloc.h>
 	#endif
 #endif
@@ -111,7 +111,7 @@ inline size_t local_msize( void *ptr )
 	}
 #ifdef RV_UNIFIED_ALLOCATOR
 	return Memory::MSize( ptr );
-#elif defined( __ANDROID__ ) || defined( __linux__ )
+#elif defined(__linux__)
 	return malloc_usable_size( ptr );
 #else
 	// No portable way to recover the size: report zero so the running total
