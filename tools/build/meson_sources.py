@@ -192,15 +192,7 @@ GAME_SOURCE_GLOBS = [
     "game/weapon/*.cpp",
 ]
 
-LEGACY_WIN32_SOURCES = {
-    "src/sys/win32/win_glimp.cpp",
-    "src/sys/win32/win_input.cpp",
-    "src/sys/win32/win_wndproc.cpp",
-}
 
-SDL3_WIN32_SOURCES = {
-    "src/sys/win32/win_sdl3.cpp",
-}
 
 SDL3_LINUX_SOURCES = (
     "sys/posix/posix_main.cpp",
@@ -230,58 +222,9 @@ LINUX_X11_HELPER_SOURCES = (
     "sys/linux/libXNVCtrl/NVCtrl.c",
 )
 
-SDL3_DARWIN_SOURCES = (
-    "sys/posix/posix_main.cpp",
-    "sys/posix/posix_net.cpp",
-    "sys/posix/posix_signal.cpp",
-    "sys/posix/posix_syscon.cpp",
-    "sys/posix/posix_threads.cpp",
-    "sys/macos/macos_compat.mm",
-    "sys/macos/macos_misc.mm",
-    "sys/macos/macos_sdl3.cpp",
-    "sys/macos/macos_sdl3_main.cpp",
-)
 
-LINUX_PLATFORM_SOURCES = (
-    "sys/posix/posix_input.cpp",
-    "sys/posix/posix_main.cpp",
-    "sys/posix/posix_net.cpp",
-    "sys/posix/posix_signal.cpp",
-    "sys/posix/posix_syscon.cpp",
-    "sys/posix/posix_threads.cpp",
-    "sys/linux/glimp.cpp",
-    "sys/linux/input.cpp",
-    "sys/linux/main.cpp",
-    "sys/linux/stack.cpp",
-    "sys/linux/libXNVCtrl/NVCtrl.c",
-)
 
-# Android shares POSIX networking/threads but owns its app lifecycle and logging.
-SDL3_ANDROID_SOURCES = (
-    "sys/posix/posix_main.cpp",
-    "sys/posix/posix_net.cpp",
-    "sys/posix/posix_signal.cpp",
-    "sys/posix/posix_syscon.cpp",
-    "sys/posix/posix_threads.cpp",
-    "sys/android/android_log.cpp",
-    "sys/android/android_main.cpp",
-    "sys/android/android_sdl3.cpp",
-    "sys/android/android_touch_controls.cpp",
-)
 
-DARWIN_PLATFORM_SOURCES = (
-    "sys/posix/posix_input.cpp",
-    "sys/posix/posix_main.cpp",
-    "sys/posix/posix_net.cpp",
-    "sys/posix/posix_signal.cpp",
-    "sys/posix/posix_syscon.cpp",
-    "sys/posix/posix_threads.cpp",
-    "sys/macos/macos_compat.mm",
-    "sys/macos/macos_event.mm",
-    "sys/macos/macos_glimp.mm",
-    "sys/macos/macos_misc.mm",
-    "sys/macos/macos_sys.mm",
-)
 
 
 class SourceListError(RuntimeError):
@@ -345,15 +288,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--host-system",
-        choices=("windows", "linux", "darwin", "android"),
-        default="windows",
+        choices=("linux",),
+        default="linux",
         help="Meson host system for source selection.",
     )
     parser.add_argument(
         "--platform-backend",
-        choices=("sdl3", "legacy_win32", "native"),
+        choices=("sdl3",),
         default="sdl3",
-        help="Platform backend source selection (Windows: sdl3/legacy_win32, Linux/macOS: sdl3/native).",
+        help="Platform backend source selection (SDL3 only).",
     )
     parser.add_argument(
         "--include-game",
@@ -395,11 +338,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
 
-    if args.host_system == "android" and (
-        args.platform_backend != "sdl3" or args.target_kind != "client"
-    ):
-        print("Android requires the SDL3 client target.", file=sys.stderr)
-        return 1
 
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     source_root = repo_root / "src"
@@ -465,45 +403,11 @@ def main(argv: list[str]) -> int:
             for pattern in GAME_SOURCE_GLOBS:
                 add_globbed_sources(source_set, ordered_sources, source_root, pattern)
 
-        if args.host_system == "windows":
-            for match in sorted(source_root.glob("sys/win32/*.cpp")):
-                if match.is_symlink():
-                    raise SourceListError(f"Refusing symlinked source file: {match}")
-                if match.is_file():
-                    add_source(
-                        source_set,
-                        ordered_sources,
-                        pathlib.Path("src") / match.relative_to(source_root),
-                    )
-
-            if args.platform_backend == "sdl3":
-                for path in LEGACY_WIN32_SOURCES:
-                    remove_source(source_set, ordered_sources, path)
-                for path in SDL3_WIN32_SOURCES:
-                    add_required_source(
-                        source_set,
-                        ordered_sources,
-                        repo_root / "src",
-                        pathlib.Path(path).relative_to("src").as_posix(),
-                    )
-                if args.target_kind == "dedicated":
-                    # Phase B7: the Windows ded links no GL; win_qgl's loader
-                    # carries hard opengl32 imports and is replaced by the
-                    # GL 1.1 stub TU
-                    remove_source(source_set, ordered_sources, "src/sys/win32/win_qgl.cpp")
-                    add_required_source(
-                        source_set, ordered_sources, source_root, "sys/stub/stub_gl_win.cpp"
-                    )
-            else:
-                for path in SDL3_WIN32_SOURCES:
-                    remove_source(source_set, ordered_sources, path)
-        elif args.host_system == "linux":
+        if args.host_system == "linux":
             if args.target_kind == "dedicated":
                 platform_sources = LINUX_DEDICATED_SOURCES
             else:
-                platform_sources = (
-                    SDL3_LINUX_SOURCES if args.platform_backend == "sdl3" else LINUX_PLATFORM_SOURCES
-                )
+                platform_sources = SDL3_LINUX_SOURCES
             for rel_path in platform_sources:
                 add_required_source(source_set, ordered_sources, source_root, rel_path)
             if (
@@ -513,15 +417,6 @@ def main(argv: list[str]) -> int:
             ):
                 for rel_path in LINUX_X11_HELPER_SOURCES:
                     add_required_source(source_set, ordered_sources, source_root, rel_path)
-        elif args.host_system == "android":
-            for rel_path in SDL3_ANDROID_SOURCES:
-                add_required_source(source_set, ordered_sources, source_root, rel_path)
-        elif args.host_system == "darwin":
-            platform_sources = (
-                SDL3_DARWIN_SOURCES if args.platform_backend == "sdl3" else DARWIN_PLATFORM_SOURCES
-            )
-            for rel_path in platform_sources:
-                add_required_source(source_set, ordered_sources, source_root, rel_path)
         else:
             print(f"Unsupported host system: {args.host_system}", file=sys.stderr)
             return 1
@@ -545,7 +440,6 @@ def main(argv: list[str]) -> int:
         ordered_sources = filtered_sources
         # the QGL loader only serves the statically linked renderer; its
         # opengl32 imports have no place in a module-only client
-        remove_source(source_set, ordered_sources, "src/sys/win32/win_qgl.cpp")
 
     if not ordered_sources:
         print("No source files discovered.", file=sys.stderr)
