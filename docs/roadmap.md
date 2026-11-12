@@ -1,6 +1,6 @@
 # Roadmap
 
-What is planned after the 1.1.0 release of the Switch port. Items are not
+What is planned after the 1.1.1 release of the Switch port. Items are not
 promises or dates; they are listed roughly in the order they are expected to be
 tackled.
 
@@ -33,6 +33,56 @@ campaign are not available yet; joining is refused with a message.
 already drop well below 30 FPS), memory (the application has about 3 GB), and
 protocol compatibility with existing servers. A dedicated server cannot run on
 the Switch.
+
+## The Awakening and the move to openQ4 0.14.1
+
+The main developer released openQ4 **0.14.1** (11 November 2026) with support for
+**Quake 4: The Awakening**, the single-player expansion that Raven Software and
+Ritual Entertainment never released (its alpha was recovered and published by
+Justin Marshall; you supply its files, in a `q4xbase` folder, and openQ4 plays it
+on its own game code). It also has a new interface, shadow mapping, an official
+GLES renderer, smarter bots and many fixes.
+
+**Today:** our base is an upstream snapshot of 9 November, which already builds
+the Awakening game code into `game_sp` (the Pain Lord, Valkaryne, Tank and Retch,
+the goob, freeze and spike guns, the speeder bike) and has the campaign choice and
+`fs_awakeningpath`. None of it has been tried on a console, and 0.14.1 is 120
+commits and about 300 files ahead, many of them Awakening repairs.
+
+**Plan:**
+
+1. **Merge 0.14.1** into a separate branch and count the conflicts first. Expect
+   work in `meson.build` and `tools/switch/gen_ninja.py` (our trimmed build), the
+   settings pages (upstream rebuilt them as tabs; we cut rows a console cannot
+   use, so `tools/ui` must be re-applied), the content packs (0.14.1 splits them
+   into a core pack plus light-grid and loadscreen packs, and the NRO has the MD5
+   of `pak0.pk4` built in), and the GLES renderer (upstream now has its own; our
+   Forget functions and caches must be kept or replaced).
+2. **Try the campaign on a console** with `q4xbase` on the SD card: that it is
+   offered, all 13 maps load, saves load, DXT3 textures draw.
+3. **Choosing the campaign mounts the expansion and restarts the file system.**
+   Make sure that does not repeat the stale-state problems of the module swap
+   (black screen), and that it works with our relaunch for multiplayer.
+4. **Memory and speed:** the Valkaryne, Tank and the space battles on 4 GB, when
+   heavy fights are already below 30 FPS.
+
+## Online: what is not ready
+
+- **Joining a server is refused** (`Connect_f` answers that it is not available
+  on the Switch yet). Only a local game with bots works.
+- **No local addresses.** Horizon cannot list network interfaces
+  (`SIOCGIFCONF`), so there is no LAN discovery and no address to show a host.
+  Use `nifm` for the console's own address.
+- **No server browser, no address entry and no join screens** designed for a
+  gamepad.
+- **Pure servers are not possible:** pure mode is forced off, because the build
+  does not produce the game pak checksums.
+- **A dedicated server cannot run** on the console; update checks are disabled.
+- **Switching between the campaign and multiplayer restarts the application**
+  (about 20 seconds): modules cannot be swapped inside one process.
+- **Not tested:** two consoles, a console with a PC host, voice chat (there is no
+  microphone input) and several players for frame rate and memory. The Arena
+  campaign has not been tried either.
 
 ## Performance
 

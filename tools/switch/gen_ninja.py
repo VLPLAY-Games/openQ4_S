@@ -45,7 +45,7 @@ GL_WRAP = ["glDrawElements", "glDrawArrays", "glUseProgram", "glBindTexture", "g
 # Homebrew Menu entry: title, author, version and icon of the NRO.
 APP_NAME = "openQ4"
 APP_AUTHOR = "VLPLAY Games"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 ICON = Path(__file__).resolve().parents[2] / "assets/switch/icon.jpg"
 ARCH_FLAGS = ["-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-mtp=soft", "-fPIE", "-ftls-model=local-exec"]
 # Third-party trees the Switch build does not use (SDL3 and GLEW are replaced by

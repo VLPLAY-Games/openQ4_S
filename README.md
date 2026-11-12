@@ -3,7 +3,7 @@
 **Quake 4 on the Nintendo Switch.** A port of the [openQ4](https://github.com/themuffinator/openQ4) engine and single-player game libraries to the Switch homebrew platform (devkitA64 / libnx), built around your own retail Quake 4 data.
 
 [![Platform](https://img.shields.io/badge/platform-Nintendo%20Switch-e60012.svg)](#requirements)
-[![Status](https://img.shields.io/badge/status-1.1.0-d97a1f.svg)](#status)
+[![Status](https://img.shields.io/badge/status-1.1.1-d97a1f.svg)](#status)
 [![Licensing](https://img.shields.io/badge/Licensing-GPL%20engine%20%7C%20SDK%20game%20code-blue.svg)](LICENSING.md)
 
 > [!IMPORTANT]
@@ -24,9 +24,11 @@
 
 ## Status
 
-The single-player campaign is playable and saves and loads work. This is the 1.1.0 release line of the Switch port, on the `main` branch. The `switch` branch is used for testing, and `upstream-main` keeps the state of the repository before the port.
+The single-player campaign is playable and saves and loads work. This is the 1.1.1 release line of the Switch port, on the `main` branch. The `switch` branch is used for testing, and `upstream-main` keeps the state of the repository before the port.
 
-What is new in 1.1.0: **touch screen** support in the menus, a cleaned-up settings menu (options a console cannot use are gone), and **local multiplayer with bots**.
+What is new in 1.1.1: **controller vibration** (rumble) on hits and shots, through the HID vibration of the Switch controllers. Vibration works with the controller you play with; it has been tried with an 8BitDo Lite 2 on a Switch Lite, not yet with a Joy-Con pair or a Pro Controller. Strength and on/off are in **Game Options -> Controller**.
+
+What came in 1.1.0: **touch screen** support in the menus, a cleaned-up settings menu (options a console cannot use are gone), and **local multiplayer with bots**.
 
 **What was tested:** the first three levels, on a Switch Lite in handheld mode, with a CPU clock of **1785 MHz**, a GPU clock of **460 MHz** and a RAM clock of **1600 MHz**. Later levels have not been played through yet. **In heavy fights the frame rate drops a lot**, well below 30 FPS in the worst moments.
 
@@ -191,7 +193,9 @@ openQ4 contains components under different licences. The engine is covered by th
 
 **Что есть:** одиночная кампания, локальный мультиплеер с ботами, отрисовка на OpenGL ES, звук через `audren`, управление геймпадом, **гироскоп для прицеливания** (Настройки -> Game Options -> Controller), экранная клавиатура системы для ввода имён сохранений.
 
-**Новое в 1.1.0:** управление **сенсорным экраном** в меню, упрощённое меню настроек (убраны пункты, которых нет на консоли) и **локальный мультиплеер с ботами** (меню Multiplayer, боты в Advanced Options). Переход между кампанией и мультиплеером перезапускает приложение (около 20 секунд), игра запускается сама.
+**Новое в 1.1.1:** **вибрация геймпада** при попаданиях и выстрелах (проверена на 8BitDo Lite 2 на Switch Lite; Joy-Con и Pro Controller пока не пробовались). Сила и включение в Game Options -> Controller.
+
+**В 1.1.0:** управление **сенсорным экраном** в меню, упрощённое меню настроек (убраны пункты, которых нет на консоли) и **локальный мультиплеер с ботами** (меню Multiplayer, боты в Advanced Options). Переход между кампанией и мультиплеером перезапускает приложение (около 20 секунд), игра запускается сама.
 
 **Чего нет:** подключения к чужим серверам по сети и выделенного сервера.
 
