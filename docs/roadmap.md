@@ -102,4 +102,12 @@ commits and about 300 files ahead, many of them Awakening repairs.
 
 - Remove or rework the code kept for the multiplayer game tree if multiplayer is
   not pursued.
+- **Remove the code of other platforms, more carefully.** The merge of 0.14.1
+  deleted the Vulkan, Windows, Android and macOS files, but their traces remain in
+  shared files: `__ANDROID__` blocks in `sdl3_backend.cpp`, the Android setup in
+  `Session_menu.cpp`, `ApplicationResumed` in `AsyncClient`, VR/OpenXR code
+  (`VRVibrate` and `vrSystem` calls in the game), Linux X11 and Windows paths,
+  the `#ifdef` branches for them in the engine, and options in `meson.build`
+  and `meson_options.txt`. Go through them file by file after the merge builds
+  and runs, keeping the merge easy (small, separate commits).
 - Keep user documentation in `docs/` up to date with each release.
