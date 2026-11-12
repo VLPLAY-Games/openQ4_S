@@ -218,10 +218,6 @@ LINUX_DEDICATED_SOURCES = (
     "sys/stub/stub_openal.cpp",
 )
 
-LINUX_X11_HELPER_SOURCES = (
-    "sys/linux/libXNVCtrl/NVCtrl.c",
-)
-
 
 
 
@@ -303,12 +299,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=("true", "false"),
         default="true",
         help="Include src/game sources in output.",
-    )
-    parser.add_argument(
-        "--linux-x11-helpers",
-        choices=("true", "false"),
-        default="false",
-        help="Include optional X11 helper sources for Linux SDL3 builds.",
     )
     parser.add_argument(
         "--target-kind",
@@ -410,13 +400,6 @@ def main(argv: list[str]) -> int:
                 platform_sources = SDL3_LINUX_SOURCES
             for rel_path in platform_sources:
                 add_required_source(source_set, ordered_sources, source_root, rel_path)
-            if (
-                args.target_kind == "client"
-                and args.platform_backend == "sdl3"
-                and args.linux_x11_helpers == "true"
-            ):
-                for rel_path in LINUX_X11_HELPER_SOURCES:
-                    add_required_source(source_set, ordered_sources, source_root, rel_path)
         else:
             print(f"Unsupported host system: {args.host_system}", file=sys.stderr)
             return 1

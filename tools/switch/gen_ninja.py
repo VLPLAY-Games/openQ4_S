@@ -50,7 +50,7 @@ ICON = Path(__file__).resolve().parents[2] / "assets/switch/icon.jpg"
 ARCH_FLAGS = ["-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-mtp=soft", "-fPIE", "-ftls-model=local-exec"]
 # Third-party trees the Switch build does not use (SDL3 and GLEW are replaced by
 # src/sys/switch and the GLES loader).
-SKIP_SUBSTR = ["/subprojects/SDL3-", "/subprojects/glew", "/libXNVCtrl/"]
+SKIP_SUBSTR = ["/subprojects/SDL3-", "/subprojects/glew"]
 DEFINES = ["-D__SWITCH__", "-D__linux__", "-D_GNU_SOURCE", "-include", "alloca.h", "-include", str(Path(__file__).resolve().parents[2] / "src/sys/switch/compat/switch_prelude.h"), "-I" + str(Path(__file__).resolve().parents[2] / "src/sys/switch/compat")]
 
 
@@ -186,7 +186,7 @@ def convert(command: str, build_dir: Path, src: str):
             continue
         if not a.startswith("-") and a.endswith((".cpp", ".c", ".cc")):
             continue
-        if a.startswith(("-DOPENQ4_HAVE_X11_HELPERS", "-fdiagnostics-color")):
+        if a.startswith(("-fdiagnostics-color",)):
             continue
         if a == "precompiled.h":
             a = str(Path(src).parent.parent) if False else "@PRECOMPILED@"

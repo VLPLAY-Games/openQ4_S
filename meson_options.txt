@@ -37,14 +37,14 @@ option(
   'gles_root',
   type: 'string',
   value: '',
-  description: 'Optional desktop GLES/ANGLE SDK prefix containing lib/ (and bin/ on Windows). Runtime libraries must be supplied and licensed separately.',
+  description: 'Optional prefix of a desktop GLES SDK containing lib/. Runtime libraries must be supplied and licensed separately.',
 )
 
 option(
   'linux_x11',
   type: 'feature',
   value: 'auto',
-  description: 'Linux SDL3 X11/XWayland driver and optional engine X11 helpers. Disable for a native Wayland/EGL-only build.',
+  description: 'Linux SDL3 X11/XWayland driver. Disable for a native Wayland/EGL-only build.',
 )
 
 option(
@@ -66,13 +66,6 @@ option(
   type: 'string',
   value: '',
   description: 'Optional release version override used for generated build metadata without changing meson.build.',
-)
-
-option(
-  'openal_root_override',
-  type: 'string',
-  value: '',
-  description: 'Optional Windows OpenAL Soft root containing include/, lib/, and bin/ payloads. Useful for ARM64 builds that provide a custom OpenAL package.',
 )
 
 option(

@@ -48,7 +48,6 @@ fs_mod = import('fs')
 version_track = get_option('version_track').strip()
 version_iteration = get_option('version_iteration').strip()
 version_base_override = get_option('version_base_override').strip()
-openal_root_override = get_option('openal_root_override').strip()
 generated_version_header_path = meson.current_build_dir() / 'openq4_version_generated.h'
 version_metadata_command = [
     py,
@@ -360,11 +359,7 @@ endif
 cc = meson.get_compiler('c')
 cpp = meson.get_compiler('cpp')
 
-linux_x11_dep = disabler()
-linux_xext_dep = disabler()
-linux_xxf86vm_dep = disabler()
 linux_gl_dep = disabler()
-linux_x11_helpers_enabled = false
 linux_x11_option = get_option('linux_x11')
 if build_engine and true
     if linux_x11_option.disabled()
@@ -374,11 +369,6 @@ if build_engine and true
         if not linux_gl_dep.found()
             linux_gl_dep = cc.find_library('GL', required: true)
         endif
-    endif
-    if not linux_x11_option.disabled()
-        linux_x11_dep = dependency('x11', required: linux_x11_option)
-        linux_xext_dep = dependency('xext', required: linux_x11_option)
-        linux_x11_helpers_enabled = linux_x11_dep.found() and linux_xext_dep.found()
     endif
 endif
 
@@ -396,8 +386,6 @@ engine_source_discovery = run_command(
     host_system,
     '--platform-backend',
     platform_backend,
-    '--linux-x11-helpers',
-    linux_x11_helpers_enabled ? 'true' : 'false',
     '--include-game',
     'false',
     '--renderer',
@@ -576,12 +564,6 @@ if build_engine or build_games
     game_idlib_sources = files(game_idlib_paths)
 endif
 
-resource_compiler = find_program('rc', 'windres', required: false)
-openq4_version_resources = []
-
-is_msvc = cc.get_id() == 'msvc' and cpp.get_id() == 'msvc'
-msvc_2026_min = '19.46.0'
-
 fallback_opt = ['default_library=static']
 glew_default_options = fallback_opt
 sdl3_default_options = fallback_opt
@@ -646,9 +628,6 @@ if build_engine
         linux_gl_dep,
     ]
     deps += [sdl3_dep]
-    if linux_x11_helpers_enabled
-        deps += [linux_x11_dep, linux_xext_dep]
-    endif
 endif
 
 client_deps = deps
@@ -666,9 +645,6 @@ if renderer_module_only_client
         cc.find_library('dl', required: true),
         sdl3_dep,
     ]
-    if linux_x11_helpers_enabled
-        client_deps += [linux_x11_dep, linux_xext_dep]
-    endif
 endif
 
 if build_engine
@@ -677,13 +653,6 @@ if build_engine
     # where the optional OpenXR loader does not supply JsonCpp transitively.
     client_deps += jsoncpp_project.get_variable('jsoncpp_dep')
 endif
-
-# loader links statically into the SDL3 client on Windows and Linux, built from
-# the pinned SDK against the jsoncpp subproject above; nothing ships beside the
-# executable and dedicated servers never see it.
-build_openxr = false
-openxr_loader_dep = disabler()
-openxr_headers_dep = disabler()
 
 # Native-record translation is separate from the portable runtime and engine
 # PCH. A checked package capability, not SDL's version, enables the importer.
@@ -793,12 +762,6 @@ linux_executable_pie = cpp.has_argument('-fPIE') and cc.has_argument('-fPIE') an
 
 shared_cpp_args += ['-DUSE_SDL3=1']
 shared_c_args += ['-DUSE_SDL3=1']
-
-
-if use_sdl3_backend and linux_x11_helpers_enabled
-    shared_cpp_args += ['-DOPENQ4_HAVE_X11_HELPERS=1']
-    shared_c_args += ['-DOPENQ4_HAVE_X11_HELPERS=1']
-endif
 
 # Legacy idTech4-era code relies on implicit narrowing/pointer casts that
 # modern GCC/Clang reject as hard errors without permissive mode.
@@ -1020,31 +983,14 @@ if build_engine or build_games
     )
 endif
 
-# Built from the same renderer sources the engine still links statically; the
-# engine keeps its static renderer until the module soak completes. Requires
-# the SDL3 window-services seam (gl_ContextSDL3.cpp compiles standalone via
-# OPENQ4_SDL3_CONTEXT_IMPL and drives the engine window through
-# renderWindowServices_t).
-build_renderer_gl = false
-
-# Vulkan module availability needs the SDL3 window-services seam on every host.
-# macOS is admitted through MoltenVK, a Vulkan-on-Metal translation layer, per
-# stays opt-in behind r_renderApi vulkan with OpenGL as the default renderer.
-# MoltenVK is not a native Metal renderer and must never be described as one.
-build_renderer_vk = false
-renderer_vk_binary_name = 'renderer-vk_' + binary_arch
-
 renderer_gl_binary_name = 'renderer-gl_' + binary_arch
 
-# emileb's GLES renderer is required on Android and explicitly selectable on
-# desktop. Never silently ship an ANGLE copied from another installed product.
+# emileb's GLES renderer: the one renderer module this fork builds.
 renderer_gles_binary_name = 'renderer-gles_' + binary_arch
 build_renderer_gles = build_engine
 gles_root = get_option('gles_root').strip()
-angle_staged_dir = meson.project_source_root() / '.tmp' / 'angle-macos'
 angle_gles_lib = disabler()
 gles_deps = []
-gles_development_angle = false
 if build_renderer_gles
     gles_library_dirs = []
     if gles_root != ''
@@ -1060,11 +1006,7 @@ if build_renderer_gles
         cpp.find_library('EGL', dirs: gles_library_dirs, required: true),
     ]
 endif
-if build_engine and (
-    build_renderer_gl
-    or build_renderer_vk
-    or build_renderer_gles
-)
+if build_engine and build_renderer_gles
     # the modules' own idlib copy, compiled with engine flavor so codegen and
     # interface layout match the renderer sources
     renderer_idlib_library = static_library(
@@ -1089,7 +1031,6 @@ endif
 # keeps tr_backend.cpp, whose five references into the dropped legacy TUs are
 # supplied by renderer/GLES/gles_Backend.cpp.
 #
-# Never installed: the ANGLE it links is a local development aid.
 if build_renderer_gles
     renderer_gles_source_discovery = run_command(
         py,
@@ -1152,15 +1093,10 @@ if build_renderer_gles
         link_depends: renderer_gles_export_list,
         gnu_symbol_visibility: 'hidden',
         name_prefix: module_filename_prefix,
-        install: not gles_development_angle,
+        install: true,
         install_dir: install_engine_dir,
     )
 endif
-
-# Native Vulkan renderer module, full-module shape (Phase C,
-# with the GL backend replaced by the Vulkan backend. Mixed front-end TUs keep
-# their GL call sites satisfied by the hook-resolving GLEW flavor + the
-# module's GL stub TU; no GL and no SDL are linked.
 
 if build_engine or (build_games and (build_game_sp or build_game_mp))
     subdir('content/baseoq4')
@@ -1244,7 +1180,6 @@ summary(
         'Git commit count': openq4_commit_count,
         'C++ standard': get_option('cpp_std'),
         'Platform backend': platform_backend,
-        'OpenAL override root': openal_root_override == '' ? 'bundled/default' : openal_root_override,
         'Build engine': build_engine,
         'engine client binary': engine_client_binary_name,
         'Integrated BSE in client': build_engine,
@@ -1257,7 +1192,6 @@ summary(
         'game_mp binary': game_mp_binary_name,
         'Awakening SP campaign': awakening_summary,
         'SDL3': use_sdl3_backend and sdl3_dep.found(),
-        'Linux X11 helpers': linux_x11_helpers_enabled,
         'Linux executable PIE': linux_executable_pie,
         'GLEW': glew_dep.found(),
         'OpenAL': openal_dep.found(),

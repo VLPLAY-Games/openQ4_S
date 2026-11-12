@@ -35,19 +35,6 @@ along with Doom 3 Source Code.  If not, see <http://www.gnu.org/licenses/>.
 #define OPENQ4_SDL3_LINUX_HOST 1
 #include "../sdl3/sdl3_backend.cpp"
 
-// Xlib defines macros such as None, Bool and Status that break engine and UI
-// declarations (PaintType::None in ui/retained/Vector.h), so include it after
-// the shared SDL3 backend; only the X11 helpers below use it.
-#if defined(OPENQ4_HAVE_X11_HELPERS)
-#include <X11/Xlib.h>
-extern "C" {
-#include "libXNVCtrl/NVCtrlLib.h"
-}
-
-Display *dpy = NULL;
-Window win = 0;
-#endif
-bool dga_found = false;
 
 idCVar sys_videoRam(
 	"sys_videoRam",
@@ -216,39 +203,6 @@ int Sys_GetVideoRam(void) {
 	if (preferDrmBeforeX11 && Sys_TryDrmSysfsVideoRam(cachedVideoRam)) {
 		return cachedVideoRam;
 	}
-
-#if defined(OPENQ4_HAVE_X11_HELPERS)
-	if (!preferDrmBeforeX11) {
-		Display *queryDisplay = dpy;
-		const bool ownsDisplay = (queryDisplay == NULL);
-		if (queryDisplay == NULL && getenv("DISPLAY") != NULL) {
-			queryDisplay = XOpenDisplay(NULL);
-		}
-
-		if (queryDisplay != NULL) {
-			const int screen = DefaultScreen(queryDisplay);
-			int major = 0;
-			int minor = 0;
-			int value = 0;
-
-			if (XNVCTRLQueryVersion(queryDisplay, &major, &minor)) {
-				common->Printf("found XNVCtrl extension %d.%d\n", major, minor);
-				if (XNVCTRLIsNvScreen(queryDisplay, screen) &&
-					XNVCTRLQueryAttribute(queryDisplay, screen, 0, NV_CTRL_VIDEO_RAM, &value)) {
-					cachedVideoRam = value / 1024;
-				}
-			}
-
-			if (ownsDisplay) {
-				XCloseDisplay(queryDisplay);
-			}
-
-			if (cachedVideoRam > 0) {
-				return cachedVideoRam;
-			}
-		}
-	}
-#endif
 
 	if (!triedDrmSysfsVideoRam && Sys_TryDrmSysfsVideoRam(cachedVideoRam)) {
 		return cachedVideoRam;
