@@ -196,3 +196,7 @@ bool Sys_GetJoystickAxisState( int axis, int &value ) {
 bool Sys_SetJoystickRumble( float lowFrequency, float highFrequency, int durationMsec ) {
 	return false;
 }
+
+bool Sys_SetJoystickRumblePulse( float lowFrequency, float highFrequency, int durationMsec ) {
+	return false;
+}

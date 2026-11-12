@@ -67,6 +67,7 @@ void Sys_EndJoystickInputEvents( void ) { }
 bool Sys_GetJoystickAxisState( int axis, int &value ) { value = 0; return false; }
 
 bool Sys_SetJoystickRumble( float lowFrequency, float highFrequency, int durationMsec ) { return false; }
+bool Sys_SetJoystickRumblePulse( float lowFrequency, float highFrequency, int durationMsec ) { return false; }
 
 unsigned char Sys_MapCharForKey( int key ) { return (unsigned char)key; }
 

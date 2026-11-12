@@ -6477,7 +6477,63 @@ bool Sys_GetJoystickAxisState(int axis, int &value) {
 	return true;
 }
 
+
+// The sound system sets a continuous level every frame (zero when no shaking sound plays), while the
+// game adds short pulses for hits and shots. They must not cancel each other, so the motors get the
+// larger of the two and the pulse runs out on its own.
+static float s_soundRumbleLow = 0.0f;
+static float s_soundRumbleHigh = 0.0f;
+static int s_soundRumbleUntil = 0;
+static float s_pulseRumbleLow = 0.0f;
+static float s_pulseRumbleHigh = 0.0f;
+static int s_pulseRumbleUntil = 0;
+static const int SDL3_PULSE_MIN_MSEC = 80;
+
+static bool SDL3_ApplyRumble(float lowFrequency, float highFrequency, int durationMsec);
+
+static bool SDL3_UpdateCombinedRumble(int now) {
+	float low = (now < s_soundRumbleUntil) ? s_soundRumbleLow : 0.0f;
+	float high = (now < s_soundRumbleUntil) ? s_soundRumbleHigh : 0.0f;
+	int until = (now < s_soundRumbleUntil) ? s_soundRumbleUntil : now;
+	if (now < s_pulseRumbleUntil) {
+		low = Max(low, s_pulseRumbleLow);
+		high = Max(high, s_pulseRumbleHigh);
+		until = Max(until, s_pulseRumbleUntil);
+	}
+	return SDL3_ApplyRumble(low, high, (low > 0.0f || high > 0.0f) ? Max(until - now, 1) : 0);
+}
+
 bool Sys_SetJoystickRumble(float lowFrequency, float highFrequency, int durationMsec) {
+	const int now = Sys_Milliseconds();
+	if (durationMsec > 0) {
+		s_soundRumbleLow = lowFrequency;
+		s_soundRumbleHigh = highFrequency;
+		s_soundRumbleUntil = now + durationMsec;
+	} else {
+		s_soundRumbleLow = 0.0f;
+		s_soundRumbleHigh = 0.0f;
+		s_soundRumbleUntil = 0;
+	}
+	return SDL3_UpdateCombinedRumble(now);
+}
+
+// A short pulse from the game (a hit, a shot): at least a moment long, so the motors are felt.
+bool Sys_SetJoystickRumblePulse(float lowFrequency, float highFrequency, int durationMsec) {
+	const int now = Sys_Milliseconds();
+	const int msec = Max(durationMsec, SDL3_PULSE_MIN_MSEC);
+	if (now < s_pulseRumbleUntil) {
+		s_pulseRumbleLow = Max(s_pulseRumbleLow, lowFrequency);
+		s_pulseRumbleHigh = Max(s_pulseRumbleHigh, highFrequency);
+		s_pulseRumbleUntil = Max(s_pulseRumbleUntil, now + msec);
+	} else {
+		s_pulseRumbleLow = lowFrequency;
+		s_pulseRumbleHigh = highFrequency;
+		s_pulseRumbleUntil = now + msec;
+	}
+	return SDL3_UpdateCombinedRumble(now);
+}
+
+static bool SDL3_ApplyRumble(float lowFrequency, float highFrequency, int durationMsec) {
 	const int now = Sys_Milliseconds();
 
 	if (!in_joystick.GetBool() || !in_joystickRumble.GetBool() || durationMsec <= 0) {

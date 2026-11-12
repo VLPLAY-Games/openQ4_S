@@ -12438,7 +12438,16 @@ multiplayer client's frames, so only a new frame pulses.
 ===============
 */
 void idPlayer::VRVibrate( bool weaponHand, bool otherHand, float amplitude, int durationMsec ) const {
-	if ( vrSystem == NULL || !vrSystem->IsActive() || gameLocal.GetLocalPlayer() != this || !gameLocal.isNewFrame ) {
+	if ( vrSystem == NULL || !vrSystem->IsActive() ) {
+		// no VR: the same events pulse a gamepad (the Switch's controllers); a shot from the weapon hand
+		// alone is lighter than a hit, which shakes both hands
+		if ( gameLocal.GetLocalPlayer() == this && gameLocal.isNewFrame && ( weaponHand || otherHand ) ) {
+			const float strength = idMath::ClampFloat( 0.0f, 1.0f, ( otherHand ? 1.0f : 0.6f ) * amplitude );
+			Sys_SetJoystickRumblePulse( strength, strength * 0.7f, durationMsec );
+		}
+		return;
+	}
+	if ( gameLocal.GetLocalPlayer() != this || !gameLocal.isNewFrame ) {
 		return;
 	}
 	vrFrameState_t frame;

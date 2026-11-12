@@ -401,6 +401,8 @@ int				Sys_ReturnJoystickInputEvent( const int n, int &axis, int &value );
 void			Sys_EndJoystickInputEvents( void );
 bool			Sys_GetJoystickAxisState( int axis, int &value );
 bool			Sys_SetJoystickRumble( float lowFrequency, float highFrequency, int durationMsec );
+// a short pulse from the game (a hit, a shot) that the sound system's level does not cancel
+bool			Sys_SetJoystickRumblePulse( float lowFrequency, float highFrequency, int durationMsec );
 // openQ4 VR: delivers a tracked-controller button exactly like a gamepad
 // button, to the event queue (menus, console) and the key poll queue (usercmd
 // bindings); mouse buttons are the menu pointer's clicks and take the mouse's

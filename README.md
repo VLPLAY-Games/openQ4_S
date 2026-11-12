@@ -36,7 +36,7 @@ What is new in 1.1.0: **touch screen** support in the menus, a cleaned-up settin
 | Rendering | OpenGL ES 3.0 renderer (Mesa/nouveau), render thread overlapping game logic, NEON-accelerated skeletal model and culling code |
 | Frame rate | Around 45 FPS median on the first levels at the clocks above; **heavy fights have strong frame-rate drops** |
 | Audio | OpenAL Soft on top of the audio renderer (`audren`), 48 kHz stereo |
-| Input | Handheld, Joy-Con and Pro Controller; **gyro aiming**; **touch screen in the menus**; system on-screen keyboard for text fields (save names, player name) |
+| Input | Handheld, Joy-Con and Pro Controller; **gyro aiming**; **vibration** on hits and shots (new); **touch screen in the menus**; system on-screen keyboard for text fields (save names, player name) |
 | Multiplayer | Local games with bots (create a server from the Multiplayer menu); joining other servers is not available yet (see [Known limitations](#known-limitations)) |
 
 ---

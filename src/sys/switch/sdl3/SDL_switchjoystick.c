@@ -31,10 +31,116 @@ static PadState s_pad;
 static u64 s_previousButtons;
 static HidAnalogStickState s_previousSticks[2];
 
+/* Vibration. The console's controllers have two vibration motors each (left and right), reached
+   through handles made for a controller id and style: the handheld Joy-Cons, a Joy-Con pair or a Pro
+   Controller as player 1, and a single Joy-Con. A command to a handle whose controller is not
+   connected is harmless, so every handle is driven and the one that is there answers. SDL's "low
+   frequency" (large) motor drives the low band of the HD rumble and its "high frequency" (small)
+   motor the high band, both of the left and the right. */
+#define SW_MAX_VIB_HANDLES 20
+#define SW_VIB_FREQ_LOW 160.0f
+#define SW_VIB_FREQ_HIGH 320.0f
+static HidVibrationDeviceHandle s_vibHandles[SW_MAX_VIB_HANDLES];
+static int s_vibCount;
+static bool s_vibActive;
+
+/* The handles of the controllers that are really there, made from the pad's own idea of its style
+   (a third-party controller can show up as an unusual style) whenever it changes. */
+#define SW_MAX_DYN_VIB 24
+static HidVibrationDeviceHandle s_dynHandles[SW_MAX_DYN_VIB];
+static int s_dynCount;
+static u32 s_dynStyle = 0xffffffffu;
+static u32 s_dynActive = 0xffffffffu;
+static bool s_dynHandheld;
+
+static void SWITCH_AddVibrationHandles(int total, HidNpadIdType id, HidNpadStyleTag style)
+{
+    if (s_vibCount + total > SW_MAX_VIB_HANDLES) {
+        return;
+    }
+    if (R_SUCCEEDED(hidInitializeVibrationDevices(&s_vibHandles[s_vibCount], total, id, style))) {
+        s_vibCount += total;
+    }
+}
+
+static void SWITCH_InitVibration(void)
+{
+    s_vibCount = 0;
+    hidPermitVibration(true);
+    SWITCH_AddVibrationHandles(2, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
+    for (int n = 0; n < 4; ++n) {
+        const HidNpadIdType id = (HidNpadIdType)(HidNpadIdType_No1 + n);
+        SWITCH_AddVibrationHandles(2, id, HidNpadStyleTag_NpadJoyDual);
+        SWITCH_AddVibrationHandles(2, id, HidNpadStyleTag_NpadFullKey);
+        SWITCH_AddVibrationHandles(1, id, HidNpadStyleTag_NpadJoyLeft);
+        SWITCH_AddVibrationHandles(1, id, HidNpadStyleTag_NpadJoyRight);
+    }
+}
+
+static void SWITCH_AddDynamicHandles(HidNpadIdType id, u32 styleSet)
+{
+    static const u32 tags[] = {
+        HidNpadStyleTag_NpadFullKey, HidNpadStyleTag_NpadHandheld, HidNpadStyleTag_NpadJoyDual,
+        HidNpadStyleTag_NpadJoyLeft, HidNpadStyleTag_NpadJoyRight, HidNpadStyleTag_NpadSystemExt,
+        HidNpadStyleTag_NpadSystem,
+    };
+    for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); ++i) {
+        if (!(styleSet & tags[i])) {
+            continue;
+        }
+        const int total = (tags[i] == HidNpadStyleTag_NpadJoyLeft || tags[i] == HidNpadStyleTag_NpadJoyRight) ? 1 : 2;
+        if (s_dynCount + total > SW_MAX_DYN_VIB) {
+            return;
+        }
+        if (R_SUCCEEDED(hidInitializeVibrationDevices(&s_dynHandles[s_dynCount], total, id, (HidNpadStyleTag)tags[i]))) {
+            s_dynCount += total;
+        }
+    }
+}
+
+static void SWITCH_RefreshVibration(void)
+{
+    const u32 style = padGetStyleSet(&s_pad);
+    const u32 active = s_pad.active_id_mask;
+    const bool handheld = padIsHandheld(&s_pad);
+    if (style == s_dynStyle && active == s_dynActive && handheld == s_dynHandheld) {
+        return;
+    }
+    s_dynStyle = style;
+    s_dynActive = active;
+    s_dynHandheld = handheld;
+    s_dynCount = 0;
+    if (handheld) {
+        SWITCH_AddDynamicHandles(HidNpadIdType_Handheld, style);
+    }
+    for (int n = 0; n < 8; ++n) {
+        if (active & (1u << n)) {
+            SWITCH_AddDynamicHandles((HidNpadIdType)(HidNpadIdType_No1 + n), style);
+        }
+    }
+}
+
+static void SWITCH_SendVibration(float ampLow, float ampHigh)
+{
+    HidVibrationValue value;
+    value.amp_low = ampLow;
+    value.freq_low = SW_VIB_FREQ_LOW;
+    value.amp_high = ampHigh;
+    value.freq_high = SW_VIB_FREQ_HIGH;
+    for (int i = 0; i < s_vibCount; ++i) {
+        hidSendVibrationValue(s_vibHandles[i], &value);
+    }
+    for (int i = 0; i < s_dynCount; ++i) {
+        hidSendVibrationValue(s_dynHandles[i], &value);
+    }
+    s_vibActive = (ampLow > 0.0f || ampHigh > 0.0f);
+}
+
 static bool SWITCH_JoystickInit(void)
 {
     padConfigureInput(8, HidNpadStyleSet_NpadStandard);
     padInitializeAny(&s_pad);
+    SWITCH_InitVibration();
     SDL_PrivateJoystickAdded(1);
     return true;
 }
@@ -153,6 +259,9 @@ static bool SWITCH_JoystickOpen(SDL_Joystick *joystick, int device_index)
     joystick->naxes = 4;
     joystick->nhats = 0;
     SDL_PrivateJoystickAddSensor(joystick, SDL_SENSOR_GYRO, 200.0f);
+    padUpdate(&s_pad);
+    SWITCH_RefreshVibration();
+    SDL_SetBooleanProperty(SDL_GetJoystickProperties(joystick), SDL_PROP_JOYSTICK_CAP_RUMBLE_BOOLEAN, true);
     return true;
 }
 
@@ -171,6 +280,7 @@ static void SWITCH_JoystickUpdate(SDL_Joystick *joystick)
 {
     const Uint64 timestamp = SDL_GetTicksNS();
     padUpdate(&s_pad);
+    SWITCH_RefreshVibration();
 
     const u64 held = padGetButtons(&s_pad);
     switch_audio_diag_pad((held & HidNpadButton_ZL) && (held & HidNpadButton_ZR) && (held & HidNpadButton_Minus));
@@ -198,10 +308,28 @@ static void SWITCH_JoystickUpdate(SDL_Joystick *joystick)
     }
 }
 
-static void SWITCH_JoystickClose(SDL_Joystick *joystick) {}
-static void SWITCH_JoystickQuit(void) {}
+static void SWITCH_JoystickClose(SDL_Joystick *joystick)
+{
+    if (s_vibActive) {
+        SWITCH_SendVibration(0.0f, 0.0f);
+    }
+}
 
-static bool SWITCH_JoystickRumble(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble) { return SDL_Unsupported(); }
+static void SWITCH_JoystickQuit(void)
+{
+    if (s_vibActive) {
+        SWITCH_SendVibration(0.0f, 0.0f);
+    }
+}
+
+static bool SWITCH_JoystickRumble(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble)
+{
+    if (s_vibCount + s_dynCount == 0) {
+        return SDL_Unsupported();
+    }
+    SWITCH_SendVibration((float)low_frequency_rumble / 65535.0f, (float)high_frequency_rumble / 65535.0f);
+    return true;
+}
 static bool SWITCH_JoystickRumbleTriggers(SDL_Joystick *joystick, Uint16 left_rumble, Uint16 right_rumble) { return SDL_Unsupported(); }
 static bool SWITCH_JoystickSetLED(SDL_Joystick *joystick, Uint8 red, Uint8 green, Uint8 blue) { return SDL_Unsupported(); }
 static bool SWITCH_JoystickSendEffect(SDL_Joystick *joystick, const void *data, int size) { return SDL_Unsupported(); }
