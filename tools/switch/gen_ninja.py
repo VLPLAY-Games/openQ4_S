@@ -204,6 +204,7 @@ def main():
     ap.add_argument("--skip", type=Path, help="file listing source paths (relative to src/) to exclude")
     ap.add_argument("--extra", nargs="*", default=[], help="extra sources as group:path")
     ap.add_argument("--diag", action="store_true", help="build with OPENQ4_SWITCH_DIAG: on-device profiler, audio tests and per-frame timing lines")
+    ap.add_argument("--profile", action="store_true", help="enable only CPU sampling through profile.txt")
     a = ap.parse_args()
     if a.diag:
         DEFINES.append("-DOPENQ4_SWITCH_DIAG")
@@ -340,6 +341,8 @@ def main():
     for name, extra in (("switch_libc_shims.c", []), ("switch_audio_diag.c", []), ("sdl2_audio_compat.c", sdl_flags)):
         obj = f"obj/support/{name}.o"
         flags = (extra or (["-D__SWITCH__", "-D_GNU_SOURCE", "-O2", "-w"] + ARCH_FLAGS + [f"-I{DKP}/libnx/include"])) + ["-std=gnu11"]
+        if (a.profile or a.diag) and name == "switch_libc_shims.c":
+            flags.append("-DOPENQ4_SWITCH_PROFILE")
         lines += [f"build {obj}: cc {sw / name}", f"  flags = {' '.join(shlex.quote(x) for x in flags)}"]
         support.append(obj)
     lines += ["build support.part.o: partial " + " ".join(support), "build libopenal_sdl3.a: openal_sdl3", ""]

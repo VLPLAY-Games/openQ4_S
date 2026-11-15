@@ -363,8 +363,8 @@ static void *switch_prof_thread( void *arg ) {
 }
 
 static void switch_prof_start( void ) {
-#ifndef OPENQ4_SWITCH_DIAG
-	return;		// the sampling profiler is a development tool; build with OPENQ4_SWITCH_DIAG to use it
+#if !defined( OPENQ4_SWITCH_DIAG ) && !defined( OPENQ4_SWITCH_PROFILE )
+	return;
 #else
 	FILE *f = fopen( SWITCH_DATA_DIR "/profile.txt", "r" );
 	pthread_t thread;

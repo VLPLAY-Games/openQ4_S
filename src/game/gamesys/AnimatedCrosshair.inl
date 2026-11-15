@@ -1295,11 +1295,15 @@ rvAnimatedCrosshair::Enabled
 ================
 */
 bool rvAnimatedCrosshair::Enabled( void ) {
+#ifdef __SWITCH__
+	return false;
+#else
 	static idCVar *retained = NULL;
 	if ( retained == NULL ) {
 		retained = cvarSystem->Find( "ui_retained" );
 	}
 	return hud_crosshairAnimated.GetBool() && retained != NULL && retained->GetBool();
+#endif
 }
 
 /*
