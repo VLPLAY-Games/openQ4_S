@@ -7480,6 +7480,13 @@ void idSessionLocal::BeginRetainedSubpage( idUserInterface *gui, bool deeper, re
 	const bool demos = subpage == RETAINED_SUBPAGE_DEMOS;
 	const bool arena = subpage == RETAINED_SUBPAGE_ARENA;
 	const retainedSettingsSubpage_t *settings = Session_RetainedSettingsSubpage( subpage );
+#ifdef __SWITCH__
+	// The settings screens have their own arrival animation.
+	if ( settings != NULL ) {
+		PresentRetainedSubpage( deeper, subpage );
+		return;
+	}
+#endif
 	const char *other = settings != NULL ? ( deeper ? settings->gui : RETAINED_SETTINGSPAGE_GUI ) :
 		create || join || demos ? ( !deeper ? RETAINED_MPPAGE_GUI : create ? RETAINED_CREATE_SERVER_GUI :
 			join ? RETAINED_JOIN_GAME_GUI : RETAINED_DEMOS_GUI ) :
@@ -8060,11 +8067,18 @@ bool idSessionLocal::BeginRetainedPage( const char *request ) {
 	} else {
 		PublishRetainedLoadPage( page, 0, NULL );
 	}
-	retainedHandoffUntil = common->GetPresentationTime() + RETAINED_PAGE_HANDOFF_MSEC;
+#ifdef __SWITCH__
+	const bool animateDeparture = !settings;
+#else
+	const bool animateDeparture = true;
+#endif
+	retainedHandoffUntil = common->GetPresentationTime() + ( animateDeparture ? RETAINED_PAGE_HANDOFF_MSEC : 0 );
 	retainedPagePending = page;
 	retainedPageAt = retainedHandoffUntil;
-	guiRetainedHome->HandleNamedEvent( va( "carry_%s", request ) );
-	guiRetainedHome->HandleNamedEvent( "depart" );
+	if ( animateDeparture ) {
+		guiRetainedHome->HandleNamedEvent( va( "carry_%s", request ) );
+		guiRetainedHome->HandleNamedEvent( "depart" );
+	}
 	HandleMainMenuCommands( "play main_menu_selection" );
 	return true;
 #else
@@ -8176,6 +8190,12 @@ title.
 */
 void idSessionLocal::DrawRetainedPageHome( int presentationTime ) {
 #ifndef ID_DEDICATED
+#ifdef __SWITCH__
+	// Settings has an opaque full-screen background of its own.
+	if ( guiActive == guiRetainedSettingsPage ) {
+		return;
+	}
+#endif
 	if ( mapSpawned && !com_skipGameDraw.GetBool() && GetLocalClientNum() >= 0 ) {
 		if ( !game->Draw( GetLocalClientNum() ) ) {
 			renderSystem->SetColor( colorBlack );
