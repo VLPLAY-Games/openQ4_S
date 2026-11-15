@@ -81,7 +81,7 @@ sdmc:/switch/openQ4/
 
 1. Copy `openQ4.nro` to `sdmc:/switch/openQ4/`.
 2. Copy the `q4base` folder from your Quake 4 installation next to it.
-3. Copy the openQ4 content packs into `baseoq4/`. When upgrading to 1.2.0, replace `pak0.pk4` with the one attached to the release and keep your existing `pak1.pk4` and `pak2.pk4`. For a fresh install, see [Building from source](#building-from-source) for the other packs.
+3. Copy the openQ4 content packs into `baseoq4/`. When upgrading to 1.2.0, replace `pak0.pk4` with the one built from the `v1.2.0` sources and keep your existing `pak1.pk4` and `pak2.pk4`. For a fresh install, see [Building from source](#building-from-source) for the other packs.
 4. Copy `openQ4Config.cfg` from the release into `baseoq4/` (recommended).
 5. Start `hbmenu` in title takeover mode and launch **openQ4**.
 
@@ -197,7 +197,7 @@ openQ4 contains components under different licences. The engine is covered by th
 
 **Что есть:** одиночная кампания, локальный мультиплеер с ботами, отрисовка на OpenGL ES, звук через `audren`, управление геймпадом, **гироскоп для прицеливания** (Настройки -> Game Options -> Controller), экранная клавиатура системы для ввода имён сохранений.
 
-**Новое в 1.2.0:** обновление до openQ4 0.14.1, поиск серверов по LAN и прямое подключение, более быстрые переходы в настройках, облегчённое колесо оружия и обычный прицел. При обновлении замените `openQ4.nro` и `baseoq4/pak0.pk4` файлами из релиза.
+**Новое в 1.2.0:** обновление до openQ4 0.14.1, поиск серверов по LAN и прямое подключение, более быстрые переходы в настройках, облегчённое колесо оружия и обычный прицел. При обновлении замените `openQ4.nro` файлом из релиза, а `baseoq4/pak0.pk4` соберите из исходников `v1.2.0`.
 
 **The Awakening запускается, но пока неиграбельно на Switch.** Во вступлении есть проблемы с анимацией, а после передачи управления сильно падает FPS. Для запуска нужна своя папка `q4xbase` рядом с `q4base`.
 
