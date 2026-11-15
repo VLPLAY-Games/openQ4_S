@@ -3,7 +3,7 @@
 **Quake 4 on the Nintendo Switch.** A port of the [openQ4](https://github.com/themuffinator/openQ4) engine and single-player game libraries to the Switch homebrew platform (devkitA64 / libnx), built around your own retail Quake 4 data.
 
 [![Platform](https://img.shields.io/badge/platform-Nintendo%20Switch-e60012.svg)](#requirements)
-[![Status](https://img.shields.io/badge/status-1.1.1-d97a1f.svg)](#status)
+[![Status](https://img.shields.io/badge/status-1.2.0-d97a1f.svg)](#status)
 [![Licensing](https://img.shields.io/badge/Licensing-GPL%20engine%20%7C%20SDK%20game%20code-blue.svg)](LICENSING.md)
 
 > [!IMPORTANT]
@@ -24,9 +24,13 @@
 
 ## Status
 
-The single-player campaign is playable and saves and loads work. This is the 1.1.1 release line of the Switch port, on the `main` branch. The `switch` branch is used for testing, and `upstream-main` keeps the state of the repository before the port.
+The single-player campaign is playable and saves and loads work. This is the 1.2.0 release line of the Switch port, on the `main` branch. The `switch` branch is used for testing, and `upstream-main` keeps the state of the repository before the port.
 
-What is new in 1.1.1: **controller vibration** (rumble) on hits and shots, through the HID vibration of the Switch controllers. Vibration works with the controller you play with; it has been tried with an 8BitDo Lite 2 on a Switch Lite, not yet with a Joy-Con pair or a Pro Controller. Strength and on/off are in **Game Options -> Controller**.
+**New in 1.2.0:** updated to openQ4 0.14.1, with LAN and direct server connections, faster settings transitions, a lighter weapon wheel and the classic crosshair on Switch. Heavy fights can still slow down.
+
+**The Awakening launches but is currently unplayable on Switch.** The opening has animation defects and severe frame-rate drops after control passes to the player. To try it, place your own `q4xbase` content next to `q4base`.
+
+What came in 1.1.1: **controller vibration** (rumble) on hits and shots, through the HID vibration of the Switch controllers. Vibration works with the controller you play with; it has been tried with an 8BitDo Lite 2 on a Switch Lite, not yet with a Joy-Con pair or a Pro Controller. Strength and on/off are in **Game Options -> Controller**.
 
 What came in 1.1.0: **touch screen** support in the menus, a cleaned-up settings menu (options a console cannot use are gone), and **local multiplayer with bots**.
 
@@ -39,7 +43,7 @@ What came in 1.1.0: **touch screen** support in the menus, a cleaned-up settings
 | Frame rate | Around 45 FPS median on the first levels at the clocks above; **heavy fights have strong frame-rate drops** |
 | Audio | OpenAL Soft on top of the audio renderer (`audren`), 48 kHz stereo |
 | Input | Handheld, Joy-Con and Pro Controller; **gyro aiming**; **vibration** on hits and shots (new); **touch screen in the menus**; system on-screen keyboard for text fields (save names, player name) |
-| Multiplayer | Local games with bots (create a server from the Multiplayer menu); joining other servers is not available yet (see [Known limitations](#known-limitations)) |
+| Multiplayer | Local games with bots, LAN discovery and direct connections to compatible servers |
 
 ---
 
@@ -77,7 +81,7 @@ sdmc:/switch/openQ4/
 
 1. Copy `openQ4.nro` to `sdmc:/switch/openQ4/`.
 2. Copy the `q4base` folder from your Quake 4 installation next to it.
-3. Copy the openQ4 content packs into `baseoq4/` (they are built from `content/baseoq4`, see [Building from source](#building-from-source)).
+3. Copy the openQ4 content packs into `baseoq4/`. When upgrading to 1.2.0, replace `pak0.pk4` with the one attached to the release and keep your existing `pak1.pk4` and `pak2.pk4`. For a fresh install, see [Building from source](#building-from-source) for the other packs.
 4. Copy `openQ4Config.cfg` from the release into `baseoq4/` (recommended).
 5. Start `hbmenu` in title takeover mode and launch **openQ4**.
 
@@ -130,7 +134,7 @@ When a text field needs input (for example the name of a save game) the system s
 
 ## Known limitations
 
-- **Multiplayer is local only.** Create a server from the Multiplayer menu and add bots in the advanced options. Joining servers on the network or the internet, and the Arena campaign, are not available yet. Switching between single player and multiplayer restarts the application (about 20 seconds); the game starts again by itself. See the [roadmap](docs/roadmap.md).
+- **Multiplayer compatibility.** Use a compatible server with pure mode disabled. Switching between single player and multiplayer restarts the application. See the [roadmap](docs/roadmap.md) for pending network and Arena testing.
 - **Closing the game takes a while.** Shutdown is complete and safe, just not instant.
 - **Heavy fights drop the frame rate a lot.** Large fights with many enemies and effects can fall well below 30 FPS; exploring is usually well above that. Higher CPU clocks help.
 - **Overclocking is up to you.** The application never requests clock changes. A CPU clock of 1785 MHz or more is needed.
@@ -193,11 +197,15 @@ openQ4 contains components under different licences. The engine is covered by th
 
 **Что есть:** одиночная кампания, локальный мультиплеер с ботами, отрисовка на OpenGL ES, звук через `audren`, управление геймпадом, **гироскоп для прицеливания** (Настройки -> Game Options -> Controller), экранная клавиатура системы для ввода имён сохранений.
 
-**Новое в 1.1.1:** **вибрация геймпада** при попаданиях и выстрелах (проверена на 8BitDo Lite 2 на Switch Lite; Joy-Con и Pro Controller пока не пробовались). Сила и включение в Game Options -> Controller.
+**Новое в 1.2.0:** обновление до openQ4 0.14.1, поиск серверов по LAN и прямое подключение, более быстрые переходы в настройках, облегчённое колесо оружия и обычный прицел. При обновлении замените `openQ4.nro` и `baseoq4/pak0.pk4` файлами из релиза.
+
+**The Awakening запускается, но пока неиграбельно на Switch.** Во вступлении есть проблемы с анимацией, а после передачи управления сильно падает FPS. Для запуска нужна своя папка `q4xbase` рядом с `q4base`.
+
+**В 1.1.1:** **вибрация геймпада** при попаданиях и выстрелах (проверена на 8BitDo Lite 2 на Switch Lite; Joy-Con и Pro Controller пока не пробовались). Сила и включение в Game Options -> Controller.
 
 **В 1.1.0:** управление **сенсорным экраном** в меню, упрощённое меню настроек (убраны пункты, которых нет на консоли) и **локальный мультиплеер с ботами** (меню Multiplayer, боты в Advanced Options). Переход между кампанией и мультиплеером перезапускает приложение (около 20 секунд), игра запускается сама.
 
-**Чего нет:** подключения к чужим серверам по сети и выделенного сервера.
+**Сетевая игра:** подключение к совместимым серверам без pure-режима. Запуск выделенного сервера на Switch не поддерживается.
 
 **Требования к разгону:** нужен разгон процессора до **1785 МГц и выше**; видеокарту и память разгонять необязательно. **Тестировалось:** первые 3 уровня на частотах 1785 / 460 / 1600 МГц (CPU / GPU / RAM). **В тяжёлых боях сильные просадки FPS.**
 
