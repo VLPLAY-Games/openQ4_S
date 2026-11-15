@@ -158,6 +158,8 @@ def document(strogg=False, awakening=False, chat=False):
     roster=ROSTER[:10]+['corecannon','napalmgun','freezegun'] if awakening else ROSTER
     colors=COLORS[:10]+['#FF5AC8','#FFBF40','#9EEBFF'] if awakening else COLORS
     if chat: roster=roster[:len(PHRASES)]
+    # Weapon wheels use the player's fade and keep the geometry settled.
+    animated = chat
     n=len(roster); span=math.tau/n; opening=[]; closing=[]; selection=[]; loops=[]
     for key,kind,initial in [('blend','number',0),('offset','number',0),('fit','number',1),('selected','number',0),
         ('previous','number',0),('mp','boolean',False),('team','number',-1),('weaponName','string',''),('ammo','string','')]:
@@ -185,13 +187,13 @@ def document(strogg=False, awakening=False, chat=False):
             **ui.typeface(face,size,size*1.3,ui.rgb(tint)),'text-align':ui.keyword('center'),'white-space':ui.keyword('normal'),
             'display':ui.keyword('block'),'opacity':ui.number(1),'transform':ui.transform()})
         doc.bind(ident+'.text',ident,'text',value);return node
-    def strogg_label(ident,value,x,y,size,tint,translation,delay,duration,width=76,height=None,white=False):
+    def strogg_label(ident,value,x,y,size,tint,width=76,height=None):
         height=height or size*1.5
         parts=ui.strogg_text(ident,'#str_230007',ui.absolute(left=0,top=0,width=width,height=height),size,size*1.3,ui.rgb(tint),
             **{'text-align':ui.keyword('center'),'white-space':ui.keyword('normal')})
-        for node in parts: doc.bind(node['id']+'.text',node['id'],'text',value)
-        translation.add(ident,delay,duration,rest=ui.rgb(tint),white=white)
-        return shear_group(ident+'-slant',x-width/2,y-size*.6,width,height,math.tan(math.radians(11.4)),parts,opacity=ui.number(1))
+        label=parts[-1]
+        doc.bind(label['id']+'.text',label['id'],'text',value)
+        return shear_group(ident+'-slant',x-width/2,y-size*.6,width,height,math.tan(math.radians(11.4)),[label],opacity=ui.number(1))
     def round_plate(ident,i,outer):
         # Filled fillets keep one translucent surface. Fill plus an
         # overlapping round stroke would make its corners too opaque.
@@ -219,9 +221,7 @@ def document(strogg=False, awakening=False, chat=False):
             return art(ident,ticks)
         wheel.append(themes('bezel',bezel))
 
-    translate=ui.Translation(); translate_select=ui.Translation()
-    order=[i for i in [5,0,8,3,10,1,6,9,2,7,4,11,12] if i<n]
-    flash_nodes=[]; circuits=[]; circuit_tracks=[]
+    flash_nodes=[]; circuits=[]
     for i,name in enumerate(roster):
         key=f'slot{i}'; a=i*span; owned=S(key+'.owned'); sel=op('==',S('selected'),i)
         empty=op('==',S(key+'.count'),0); finite=op('>=',S(key+'.count'),0)
@@ -247,25 +247,6 @@ def document(strogg=False, awakening=False, chat=False):
         nodes.append(selected);show(selected['id'],op('&&',owned,sel))
 
         if strogg:
-            # Every plate owns a masked grain field; its source is authored
-            # deterministic vector noise, independent of retail textures.
-            silhouette=sector(i,n,outer=240,strogg=True);xs,ys=zip(*silhouette)
-            dots=[]
-            for k in range(135):
-                gx=min(xs)-30+((k*73+i*19)%997)/997*(max(xs)-min(xs)+60)
-                gy=min(ys)-120+((k*127+i*43)%991)/991*(max(ys)-min(ys)+240)
-                dots.append(shape('g'+str(k),[(gx,gy),(gx+.8,gy),(gx+.8,gy+.8),(gx,gy+.8)],ui.rgb('#FFC066',.3+(k%4)*.12),blend='additive'))
-            grain=art(key+'-grain',dots,transform=ui.transform())
-            grain_mask=masked(key+'-grain-mask',[grain],[shape('mask',silhouette,[1,1,1,1])],opacity=ui.number(.2))
-            nodes.append(grain_mask);show(grain_mask['id'],owned)
-            loop(key+'-grain-run',2000,[ui.track(grain['id'],'transform',[(0,ui.transform()),(2000,ui.transform(tx=-30,ty=120))])])
-            opening.append(held(grain_mask['id'],'opacity',[(0,ui.number(.6)),(250,ui.number(.2))]))
-            fl=art(key+'-boot-flash',[shape('flash',silhouette,ui.rgb('#FFD06F'),blend='additive')],opacity=ui.number(0))
-            wrap=full(key+'-boot-flash-safe',[fl]);show(wrap['id'],op('&&',owned,op('!',S('flashing'))));nodes.append(wrap)
-            delay=order.index(i)*12; close_delay=list(reversed(order)).index(i)*8
-            opening.append(held(fl['id'],'opacity',[(0,ui.number(0))]+([(delay,ui.number(0))] if delay else [])+[(delay+1,ui.number(.9)),(delay+150,ui.number(0))]))
-            closing.append(held(fl['id'],'opacity',[(0,ui.number(0))]+([(close_delay,ui.number(0))] if close_delay else [])+[(close_delay+1,ui.number(.8)),(close_delay+60,ui.number(0))]))
-            # Circuits reveal from the core outward, each leg independently.
             points=[at(88,a),at(95,a),at(99,a+.1),at(99,a+.1)]
             leaves=[]
             for k,(p,q) in enumerate(zip(points,points[1:])):
@@ -273,10 +254,9 @@ def document(strogg=False, awakening=False, chat=False):
                 leaves.append(art(ident,[shape('idle',[p,q],ui.rgb('#F59512',.32),1,closed=False)],opacity=ui.number(1)))
                 bright=art(ident+'-lit',[shape('lit',[p,q],ui.rgb('#FFCC00',.95),1.6,closed=False)]);show(bright['id'],sel)
                 leaves[-1]=full(ident+'-part',[leaves[-1],bright],opacity=ui.number(1))
-                circuit_tracks.append(held(ident+'-part','opacity',[(0,ui.number(0)),(40+k*50,ui.number(0)),(90+k*50,ui.number(1))]))
             x,y=points[-1];leaves.append(art(key+'-circuit-end',[shape('node',[(x-2.2,y-2.2),(x+2.2,y-2.2),(x+2.2,y+2.2),(x-2.2,y+2.2)],ui.rgb('#F59512',.4),1)]))
             circuit=full(key+'-circuit',leaves);show(circuit['id'],owned);circuits.append(circuit)
-        else:
+        elif animated:
             def ring_flash(ident,line,edge,light,sp):
                 # Team games flash in the team's own text colour.
                 col='#FFFFFF' if ident.endswith('olive') else edge
@@ -286,7 +266,7 @@ def document(strogg=False, awakening=False, chat=False):
         content=[]; label_angle=a-.035 if strogg else a
         if strogg:
             x,y=at(121,a+.14)
-            node=strogg_label(key+'-index',S(key+'.index'),x,y,11,'#FCFFC8',translate,140+i*18,90)
+            node=strogg_label(key+'-index',S(key+'.index'),x,y,11,'#FCFFC8')
             doc.bind(key+'.index.alpha',node['id'],'opacity',choose(owned,.5,.2));nodes.append(node)
         else:
             x,y=at(118,a);node=plain_text(key+'-index',S(key+'.index'),x,y,12,'#FFFFFF','lowpixel');nodes.append(node)
@@ -306,7 +286,7 @@ def document(strogg=False, awakening=False, chat=False):
             doc.bind(ident,ident,'opacity',choose(S('mp'),choose(active,1,.6) if suffix=='mp' else 0,normal))
         x,y=at(142 if strogg else 193,label_angle)
         if strogg:
-            ammo=strogg_label(key+'-reserve',S(key+'.reserve'),x,y,17,'#FCFFC8',translate,140+i*18,90,white=True)
+            ammo=strogg_label(key+'-reserve',S(key+'.reserve'),x,y,17,'#FCFFC8')
             # The transient colour track belongs to the label; an empty
             # readout has its own red copy after the translation settles.
             red=plain_text(key+'-reserve-empty',S(key+'.reserve'),x,y,17,'#C72C1B','r_strogg')
@@ -355,57 +335,41 @@ def document(strogg=False, awakening=False, chat=False):
         notch=art(key+'-previous',[shape('notch',[at(101,a),at(91,a-.05),at(91,a+.05)],ui.rgb('#FCFFC8' if strogg else '#DDEBC3',.7))]);nodes.append(notch)
         show(notch['id'],False if chat else op('&&',owned,op('==',S('previous'),i)))
         entry=full(key+'-entry',nodes,opacity=ui.number(1),transform=ui.transform());wheel.append(entry)
-        delay=order.index(i)*12 if strogg else i*8
-        opening.append(held(entry['id'],'opacity',[(0,ui.number(0))]+([(delay,ui.number(0))] if delay else [])+[(delay+(1 if strogg else 90),ui.number(1))]))
-        close_delay=list(reversed(order)).index(i)*8 if strogg else 0
-        closing.append(held(entry['id'],'opacity',[(0,ui.number(1))]+([(close_delay,ui.number(1))] if close_delay else [])+[(close_delay+60,ui.number(0))]))
-        if not strogg:
+        if animated:
+            delay=i*8
+            opening.append(held(entry['id'],'opacity',[(0,ui.number(0))]+([(delay,ui.number(0))] if delay else [])+[(delay+90,ui.number(1))]))
+            closing.append(held(entry['id'],'opacity',[(0,ui.number(1)),(60,ui.number(0))]))
             opening.append(held(entry['id'],'transform',[(0,ui.transform(sx=.9,sy=.9))]+([(delay,ui.transform(sx=.9,sy=.9))] if delay else [])+[(delay+90,ui.transform())]))
 
     if strogg:
-        opening+=circuit_tracks
         wheel.append(full('circuits',circuits))
         rings=[]
-        for radius,duration,tint,alpha,pattern,turn in [(93,5000,'#F59512',.38,(14,6,3,6),360),(99,2000,'#FFCC00',.24,(2,10),-360)]:
+        for radius,tint,alpha,pattern in [(93,'#F59512',.38,(14,6,3,6)),(99,'#FFCC00',.24,(2,10))]:
             ident='orbit'+str(radius)
             rings.append(art(ident,dashed('dash',[at(radius,j*math.tau/360) for j in range(360)],ui.rgb(tint,alpha),pattern,1.3),transform=ui.transform()))
-            loop(ident+'-run',duration,[ui.track(ident,'transform',[(0,ui.rotation(0)),(duration,ui.rotation(turn))])])
         wheel.append(full('orbits',rings,transform=ui.transform(),opacity=ui.number(1)))
-        opening += [held('orbits','transform',[(0,ui.rotation(-120)),(300,ui.rotation(0),ui.EASE_OUT)]),held('orbits','opacity',[(0,ui.number(0)),(120,ui.number(1))])]
-        closing.append(held('orbits','opacity',[(0,ui.number(1)),(40,ui.number(1)),(160,ui.number(0))]))
         octagon=[at(84,j*math.tau/8+math.pi/8) for j in range(8)]
         paths=[]
         for ident,pts in [('core',octagon),('tab',[(260,358),(300,358),(293,372),(267,372)])]:
             path=shape(ident,pts,[0,0,0,.68]);path['stroke']=ui.stroke(ui.solid(ui.rgb('#F59512',.5)),1.2);paths.append(path)
         hub=full('hub',[art('hub-art',paths)],transform=ui.transform(),opacity=ui.number(1));wheel.append(hub)
-        # The bar follows the available name slot; its bright head rests
-        # twelve dp beyond the text box without leaking outside the core.
-        bar=ui.scan_bar('hub-scan',26,ui.absolute(left=0,top=0,height=26))
-        bar_slot=ui.group('hub-scan-slot',ui.absolute(left=196,top=251,width=165,height=26),[bar])
-        hub['children'].append(masked('hub-scan-mask',[bar_slot],[shape('mask',octagon,[1,1,1,1])]))
-        translate.bar('hub-scan',160,90);translate_select.bar('hub-scan',40,90)
-        for ident,value,y,size,col,delay,duration in [('name',S('weaponName'),258,12.5,'#FFCC00',160,300),('ammo',S('ammo'),300,21,'#FCFFC8',175,150)]:
-            node=strogg_label('hub-'+ident,value,280,y,size,col,translate,delay,duration,width=138,height=34,white=ident=='ammo');hub['children'].append(node)
-            translate_select.add('hub-'+ident,40 if ident=='name' else 55,duration,rest=ui.rgb(col),white=ident=='ammo')
-        opening.append(held('hub','opacity',[(0,ui.number(0)),(120,ui.number(1))]))
-        closing.append(held('hub','opacity',[(0,ui.number(1)),(40,ui.number(1)),(160,ui.number(0))]))
-        t,end=translate.tracks(0);opening+=t
-        t,select_end=translate_select.tracks(0);selection+=t
+        for ident,value,y,size,col in [('name',S('weaponName'),258,12.5,'#FFCC00'),('ammo',S('ammo'),300,21,'#FCFFC8')]:
+            node=strogg_label('hub-'+ident,value,280,y,size,col,width=138,height=34);hub['children'].append(node)
         pointer=art('pointer',[shape('arrow',[at(100,0),at(90,-.07),at(93,0),at(90,.07)],ui.rgb('#FFCC00'))],transform=ui.transform());wheel.append(pointer)
         doc.bind('pointer.rotation',pointer['id'],'transform',[0,0,1,1,op('*',S('selected'),360/n)])
-        open_end=max(end,300);close_end=max(160,(n-1)*8+60)
     else:
         hub=full('hub',[art('hub-art',[circle('disc',86,[0,0,0,.55])])],transform=ui.transform());wheel.append(hub)
-        bands=[]
-        for k in range(28):
-            y=60+k*18;shift=(k*37)%59-30
-            bands.append(shape('band'+str(k),[(180+shift,y),(365,y+2),(375-shift,y+5),(198,y+4)],[1,1,1,.45+(k%3)*.2]))
-        torn=art('hub-torn-art',bands,transform=ui.transform())
-        torn_wrap=full('hub-torn',[torn],opacity=ui.number(.06))
-        lines=art('hub-lines',[shape('line'+str(k),[(180,180+k*2),(380,180+k*2)],ui.rgb('#FFFFFF',.11),.65,blend='additive',closed=False) for k in range(102)],transform=ui.transform())
-        hub['children'].append(masked('hub-screen',[torn_wrap,lines],[circle('mask',79,[1,1,1,1])]))
-        loop('hub-torn-run',1000,[ui.track(torn['id'],'transform',[(0,ui.transform()),(1000,ui.transform(ty=180))])])
-        loop('hub-lines-run',3600,[ui.track(lines['id'],'transform',[(0,ui.transform()),(3600,ui.transform(ty=2))])])
+        if animated:
+            bands=[]
+            for k in range(28):
+                y=60+k*18;shift=(k*37)%59-30
+                bands.append(shape('band'+str(k),[(180+shift,y),(365,y+2),(375-shift,y+5),(198,y+4)],[1,1,1,.45+(k%3)*.2]))
+            torn=art('hub-torn-art',bands,transform=ui.transform())
+            torn_wrap=full('hub-torn',[torn],opacity=ui.number(.06))
+            lines=art('hub-lines',[shape('line'+str(k),[(180,180+k*2),(380,180+k*2)],ui.rgb('#FFFFFF',.11),.65,blend='additive',closed=False) for k in range(102)],transform=ui.transform())
+            hub['children'].append(masked('hub-screen',[torn_wrap,lines],[circle('mask',79,[1,1,1,1])]))
+            loop('hub-torn-run',1000,[ui.track(torn['id'],'transform',[(0,ui.transform()),(1000,ui.transform(ty=180))])])
+            loop('hub-lines-run',3600,[ui.track(lines['id'],'transform',[(0,ui.transform()),(3600,ui.transform(ty=2))])])
         def rings(ident,line,edge,light,sp): return art(ident,[circle('ring'+str(r),r,ui.rgb(line,.35),1.1) for r in (80,86)])
         hub['children'].append(themes('hub-rings',rings))
         def compass(ident,line,edge,light,sp):
@@ -453,22 +417,23 @@ def document(strogg=False, awakening=False, chat=False):
         name_clip=ui.group('hub-name-clip',{**ui.absolute(left=0,top=247,width=560,height=36),'overflow':ui.keyword('hidden')},[
             ui.group('hub-name-unclip',ui.absolute(left=0,top=-247,width=560,height=560),[name])])
         hub['children'] += [name_clip,plain_text('hub-ammo',S('ammo'),280,300,21,'#DDEBC3',width=138,height=34)]
-        flashes=full('selection-flash',flash_nodes,opacity=ui.number(0));safe_flash=full('selection-flash-safe',[flashes]);show(safe_flash['id'],op('!',S('flashing')));wheel.append(safe_flash)
-        ring_flash=themes('hub-ring-flash',lambda ident,line,edge,light,sp: art(ident,[circle('ring'+str(r),r,ui.rgb('#FFFFFF' if ident.endswith('olive') else edge,.9),1.1) for r in (80,86)]))
-        ring_flash['properties']['opacity']=ui.number(0);hub['children'].append(ring_flash);show(ring_flash['id'],op('!',S('flashing')))
-        def tune(delay,duration):
-            def keys(start,end): return [(0,ui.length(start))]+([(delay,ui.length(start))] if delay else [])+[(delay+duration,ui.length(end))]
-            return [held('hub-name-clip','top',keys(264,247)),held('hub-name-clip','height',keys(2,36)),held('hub-name-unclip','top',keys(-264,-247)),
-                held('hub-name','opacity',[(0,ui.number(0))]+([(delay,ui.number(0))] if delay else [])+[(delay+duration,ui.number(1))]),
-                held('hub-name','color',[(0,ui.colour([1,1,1,1])),(delay+duration+100,ui.colour([1,1,1,1])),(delay+duration+200,ui.colour(ui.rgb('#B0C891')))])]
-        opening += [held('hub','transform',[(0,ui.transform(sx=.55,sy=.06)),(150,ui.transform()),(250,ui.transform()),(300,ui.transform(sx=.9,sy=.9)),(350,ui.transform())]),
-            held('hub-ring-flash','opacity',[(0,ui.number(0)),(149,ui.number(0)),(150,ui.number(.9)),(200,ui.number(0))]),
-            held('hub-torn','opacity',[(0,ui.number(.06)),(100,ui.number(.06)),(150,ui.number(.4)),(650,ui.number(.06))])]+tune(200,200)
-        closing += [held('hub','transform',[(0,ui.transform()),(150,ui.transform(sx=.55,sy=.06))]),
-            held('hub-torn','opacity',[(0,ui.number(.8)),(150,ui.number(.06))])]
-        selection += [held('hub-torn','opacity',[(0,ui.number(.06)),(50,ui.number(.4)),(350,ui.number(.06))]),
-            held('selection-flash','opacity',[(0,ui.number(1)),(150,ui.number(0))])]+tune(0,120)
-        open_end=650;close_end=150;select_end=350
+        if animated:
+            flashes=full('selection-flash',flash_nodes,opacity=ui.number(0));safe_flash=full('selection-flash-safe',[flashes]);show(safe_flash['id'],op('!',S('flashing')));wheel.append(safe_flash)
+            ring_flash=themes('hub-ring-flash',lambda ident,line,edge,light,sp: art(ident,[circle('ring'+str(r),r,ui.rgb('#FFFFFF' if ident.endswith('olive') else edge,.9),1.1) for r in (80,86)]))
+            ring_flash['properties']['opacity']=ui.number(0);hub['children'].append(ring_flash);show(ring_flash['id'],op('!',S('flashing')))
+            def tune(delay,duration):
+                def keys(start,end): return [(0,ui.length(start))]+([(delay,ui.length(start))] if delay else [])+[(delay+duration,ui.length(end))]
+                return [held('hub-name-clip','top',keys(264,247)),held('hub-name-clip','height',keys(2,36)),held('hub-name-unclip','top',keys(-264,-247)),
+                    held('hub-name','opacity',[(0,ui.number(0))]+([(delay,ui.number(0))] if delay else [])+[(delay+duration,ui.number(1))]),
+                    held('hub-name','color',[(0,ui.colour([1,1,1,1])),(delay+duration+100,ui.colour([1,1,1,1])),(delay+duration+200,ui.colour(ui.rgb('#B0C891')))])]
+            opening += [held('hub','transform',[(0,ui.transform(sx=.55,sy=.06)),(150,ui.transform()),(250,ui.transform()),(300,ui.transform(sx=.9,sy=.9)),(350,ui.transform())]),
+                held('hub-ring-flash','opacity',[(0,ui.number(0)),(149,ui.number(0)),(150,ui.number(.9)),(200,ui.number(0))]),
+                held('hub-torn','opacity',[(0,ui.number(.06)),(100,ui.number(.06)),(150,ui.number(.4)),(650,ui.number(.06))])]+tune(200,200)
+            closing += [held('hub','transform',[(0,ui.transform()),(150,ui.transform(sx=.55,sy=.06))]),
+                held('hub-torn','opacity',[(0,ui.number(.8)),(150,ui.number(.06))])]
+            selection += [held('hub-torn','opacity',[(0,ui.number(.06)),(50,ui.number(.4)),(350,ui.number(.06))]),
+                held('selection-flash','opacity',[(0,ui.number(1)),(150,ui.number(0))])]+tune(0,120)
+            open_end=650;close_end=150;select_end=350
 
     # Infinite-ammunition symbols are geometry because Chain has no infinity
     # glyph. Keep the same state/readout contract for both HUD families.
@@ -478,10 +443,11 @@ def document(strogg=False, awakening=False, chat=False):
         {'id':'right','op':'cubic','points':[[302,278],[302,322],[280,300]]}]
     hub['children'].append(art('hub-infinity',[infinity]));show('hub-infinity',op('==',S('ammo'),'∞'))
     show('hub-ammo-slant' if strogg else 'hub-ammo',op('!=',S('ammo'),'∞'))
-    doc.timelines.add('open',open_end,opening);doc.timelines.add('close',close_end,closing);doc.timelines.add('selection',select_end,selection)
-    for event in ('open','close','selection'): doc.events[event]=[{'op':'playTimeline','timeline':event}]
-    if chat: doc.events['channel']=[{'op':'playTimeline','timeline':'selection'}]
-    doc.events['onInit']=loops
+    if animated:
+        doc.timelines.add('open',open_end,opening);doc.timelines.add('close',close_end,closing);doc.timelines.add('selection',select_end,selection)
+        for event in ('open','close','selection'): doc.events[event]=[{'op':'playTimeline','timeline':event}]
+        if chat: doc.events['channel']=[{'op':'playTimeline','timeline':'selection'}]
+        doc.events['onInit']=loops
     props={**ui.absolute(width=560,height=560),'left':ui.length(50,'%'),'top':ui.length(50,'%'),'margin-left':ui.length(-280),'margin-top':ui.length(-280),'transform':ui.transform()}
     root=full('wheel-root',[ui.group('wheel-center',props,wheel)],opacity=ui.number(0))
     doc.bind('root.blend','wheel-root','opacity',S('blend'));doc.bind('wheel.placement','wheel-center','transform',[S('offset'),0,S('fit'),S('fit'),0])

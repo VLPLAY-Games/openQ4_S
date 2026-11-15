@@ -71,6 +71,18 @@ void idPlayerView::DrawRetainedViewEffects( bool wheelOnly ) {
 	if ( wheelOnly ) {
 		wheel = idMath::ClampFloat( 0, 1, player->GetWeaponWheelBlend() );
 		wheel = wheel * wheel * ( 3 - 2 * wheel );
+#ifdef __SWITCH__
+		// Draw the radial backdrop directly, without a retained composition layer.
+		if ( wheel > 0 ) {
+			const bool previousViewport = renderSystem->GetUseUIViewportFor2D();
+			renderSystem->SetUseUIViewportFor2D( false );
+			renderSystem->SetColor4( 0, 0, 0, 0.35f * wheel );
+			renderSystem->DrawStretchPic( 0, 0, 640, 480, 0, 0, 1, 1, declManager->FindMaterial( "_white" ) );
+			renderSystem->SetColor( colorWhite );
+			renderSystem->SetUseUIViewportFor2D( previousViewport );
+		}
+		return;
+#endif
 	} else {
 		const int now = gameLocal.time;
 		const bool dead = player->health <= 0;
